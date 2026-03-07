@@ -368,6 +368,44 @@ function toggleTheme() {
   applySettings({ ...state.settings, theme_mode: nextTheme });
 }
 
+function isNetworkLikeError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('networkerror')
+    || message.includes('failed to fetch')
+    || message.includes('fetch resource')
+    || message.includes('network request failed')
+  );
+}
+
+function wait(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+async function fetchWithRetry(url, options = {}, config = {}) {
+  const retries = Number.isFinite(Number(config.retries)) ? Number(config.retries) : 2;
+  const baseDelay = Number.isFinite(Number(config.baseDelayMs)) ? Number(config.baseDelayMs) : 450;
+  let attempt = 0;
+  let lastError = null;
+
+  while (attempt <= retries) {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      lastError = error;
+      if (!isNetworkLikeError(error) || attempt >= retries) {
+        throw error;
+      }
+      await wait(baseDelay * (attempt + 1));
+      attempt += 1;
+    }
+  }
+
+  throw lastError || new Error('Network request failed');
+}
+
 async function api(path, options = {}) {
   const requestUrl = /^https?:\/\//i.test(path)
     ? path
@@ -383,9 +421,12 @@ async function api(path, options = {}) {
     headers.set('Authorization', `Bearer ${state.token}`);
   }
 
-  const response = await fetch(requestUrl, {
+  const response = await fetchWithRetry(requestUrl, {
     ...options,
     headers,
+  }, {
+    retries: 2,
+    baseDelayMs: 550,
   });
 
   if (response.status === 204) {
@@ -2080,7 +2121,7 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
     headers.set('Authorization', `Bearer ${state.token}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
+  const response = await fetchWithRetry(`${API_BASE_URL}/api/chat/stream`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -2089,6 +2130,9 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
       dashboard_id: state.currentDashboard?.id || null,
       client_preferences: state.settings,
     }),
+  }, {
+    retries: 1,
+    baseDelayMs: 450,
   });
 
   if (!response.ok) {
@@ -2222,9 +2266,12 @@ async function sendChatMessage(userText) {
   } catch (error) {
     hideTyping();
     finalizeTimeline(state.timelineRunId);
+    const text = isNetworkLikeError(error)
+      ? 'Koneksi ke server terputus sementara. Coba kirim ulang dalam 2-3 detik.'
+      : `Gagal memproses pertanyaan: ${error.message}`;
     appendMessage({
       role: 'assistant',
-      content: `Gagal memproses pertanyaan: ${error.message}`,
+      content: text,
       mode: 'chat',
       artifacts: [],
     });
