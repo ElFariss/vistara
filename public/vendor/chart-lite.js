@@ -25,11 +25,13 @@ function createTitle(text) {
   return title;
 }
 
-function renderMetric(element, artifact) {
+function renderMetric(element, artifact, options = {}) {
   const card = document.createElement('div');
   card.className = 'artifact-metric';
 
-  card.append(createTitle(artifact.title || 'Metrik'));
+  if (!options.hideTitle) {
+    card.append(createTitle(artifact.title || 'Metrik'));
+  }
 
   const value = document.createElement('div');
   value.className = 'artifact-value';
@@ -46,10 +48,12 @@ function renderMetric(element, artifact) {
   element.append(card);
 }
 
-function renderTable(element, artifact) {
+function renderTable(element, artifact, options = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'artifact-table-wrap';
-  wrap.append(createTitle(artifact.title || 'Tabel'));
+  if (!options.hideTitle) {
+    wrap.append(createTitle(artifact.title || 'Tabel'));
+  }
 
   const table = document.createElement('table');
   table.className = 'artifact-table';
@@ -218,10 +222,12 @@ function renderChartFallback(element, artifact) {
   element.append(wrap);
 }
 
-function renderText(element, artifact) {
+function renderText(element, artifact, options = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'artifact-text';
-  wrap.append(createTitle(artifact.title || 'Catatan'));
+  if (!options.hideTitle) {
+    wrap.append(createTitle(artifact.title || 'Catatan'));
+  }
 
   const pre = document.createElement('pre');
   pre.textContent = artifact.content || '';
@@ -230,7 +236,7 @@ function renderText(element, artifact) {
   element.append(wrap);
 }
 
-export function renderArtifact(element, artifact) {
+export function renderArtifact(element, artifact, options = {}) {
   clearElement(element);
 
   if (!artifact || typeof artifact !== 'object') {
@@ -238,12 +244,12 @@ export function renderArtifact(element, artifact) {
   }
 
   if (artifact.kind === 'metric') {
-    renderMetric(element, artifact);
+    renderMetric(element, artifact, options);
     return;
   }
 
   if (artifact.kind === 'table') {
-    renderTable(element, artifact);
+    renderTable(element, artifact, options);
     return;
   }
 
@@ -275,12 +281,12 @@ export function renderArtifact(element, artifact) {
   }
 
   if (artifact.kind === 'text') {
-    renderText(element, artifact);
+    renderText(element, artifact, options);
     return;
   }
 
   renderText(element, {
     title: artifact.title || 'Artifact',
     content: JSON.stringify(artifact, null, 2),
-  });
+  }, options);
 }

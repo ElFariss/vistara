@@ -110,7 +110,7 @@ function createGridStackLibrary(container, options = {}) {
       }
       const stale = container.querySelector(`[gs-id="${CSS.escape(id)}"]`);
       if (stale) {
-        grid.removeWidget(stale, false);
+        grid.removeWidget(stale, true);
       }
       items.delete(id);
     }
@@ -148,6 +148,15 @@ function createGridStackLibrary(container, options = {}) {
             h: layout.h,
           });
         }
+
+        if (typeof grid.movable === 'function') {
+          grid.movable(existingElement, editingEnabled);
+        }
+        if (typeof grid.resizable === 'function') {
+          grid.resizable(existingElement, editingEnabled);
+        }
+        existingElement.classList.toggle('ui-draggable-disabled', !editingEnabled);
+        existingElement.classList.toggle('ui-resizable-disabled', !editingEnabled);
 
         items.set(prepared.id, prepared);
         continue;
@@ -210,7 +219,7 @@ function createGridStackLibrary(container, options = {}) {
   function removeItem(id) {
     const element = container.querySelector(`[gs-id="${CSS.escape(id)}"]`);
     if (element) {
-      grid.removeWidget(element, false);
+      grid.removeWidget(element, true);
     }
     items.delete(id);
     emitChange();
@@ -270,14 +279,14 @@ function createGridStackLibrary(container, options = {}) {
 
   function setEditing(editing) {
     editingEnabled = Boolean(editing);
+    if (typeof grid.setStatic === 'function') {
+      grid.setStatic(!editingEnabled);
+    }
     if (typeof grid.enableMove === 'function') {
       grid.enableMove(editingEnabled);
     }
     if (typeof grid.enableResize === 'function') {
       grid.enableResize(editingEnabled);
-    }
-    if (typeof grid.setStatic === 'function') {
-      grid.setStatic(!editingEnabled);
     }
     if (typeof grid.movable === 'function' || typeof grid.resizable === 'function') {
       for (const [id] of items.entries()) {
@@ -288,6 +297,15 @@ function createGridStackLibrary(container, options = {}) {
         }
         if (typeof grid.resizable === 'function') {
           grid.resizable(element, editingEnabled);
+        }
+        if (element.gridstackNode) {
+          if (editingEnabled) {
+            delete element.gridstackNode.noMove;
+            delete element.gridstackNode.noResize;
+          } else {
+            element.gridstackNode.noMove = true;
+            element.gridstackNode.noResize = true;
+          }
         }
         element.classList.toggle('ui-draggable-disabled', !editingEnabled);
         element.classList.toggle('ui-resizable-disabled', !editingEnabled);

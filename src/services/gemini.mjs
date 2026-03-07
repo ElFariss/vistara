@@ -72,6 +72,24 @@ function extractTextResponse(data) {
   return textPart?.text ?? null;
 }
 
+function extractThoughtSummaries(data) {
+  const candidates = data?.candidates;
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return [];
+  }
+
+  const first = candidates[0];
+  const parts = first?.content?.parts;
+  if (!Array.isArray(parts) || parts.length === 0) {
+    return [];
+  }
+
+  return parts
+    .filter((part) => Boolean(part?.thought) && typeof part?.text === 'string' && part.text.trim())
+    .map((part) => String(part.text).trim())
+    .filter(Boolean);
+}
+
 function normalizeFunctionArgs(rawArgs) {
   if (!rawArgs) {
     return {};
@@ -222,6 +240,8 @@ export async function generateWithGeminiTools({
   temperature = 0.1,
   maxOutputTokens = 800,
   thinkingLevel = null,
+  thinkingBudget = null,
+  includeThoughts = false,
   maxRetries = 1,
 }) {
   if (!config.geminiApiKey) {
@@ -229,6 +249,7 @@ export async function generateWithGeminiTools({
       ok: false,
       reason: 'missing_api_key',
       text: null,
+      thoughts: [],
       functionCalls: [],
       raw: null,
     };
@@ -239,6 +260,7 @@ export async function generateWithGeminiTools({
       ok: false,
       reason: quotaCooldownReason || 'quota_exhausted',
       text: null,
+      thoughts: [],
       functionCalls: [],
       raw: null,
     };
@@ -250,6 +272,14 @@ export async function generateWithGeminiTools({
   const prompt = buildPrompt(systemPrompt, userPrompt);
 
   const attempt = async () => {
+    const parsedBudget = Number(thinkingBudget);
+    const hasThinkingBudget = Number.isFinite(parsedBudget);
+    const thinkingConfig = {
+      ...(hasThinkingBudget ? { thinkingBudget: parsedBudget } : {}),
+      ...(!hasThinkingBudget && thinkingLevel ? { thinkingLevel } : {}),
+      ...(includeThoughts ? { includeThoughts: true } : {}),
+    };
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -265,13 +295,7 @@ export async function generateWithGeminiTools({
         generationConfig: {
           temperature,
           maxOutputTokens,
-          ...(thinkingLevel
-            ? {
-                thinkingConfig: {
-                  thinkingLevel,
-                },
-              }
-            : {}),
+          ...(Object.keys(thinkingConfig).length > 0 ? { thinkingConfig } : {}),
         },
       }),
       signal: controller.signal,
@@ -287,6 +311,7 @@ export async function generateWithGeminiTools({
         ok: false,
         reason: `http_${response.status}`,
         text: null,
+        thoughts: [],
         functionCalls: [],
         raw: body,
       };
@@ -298,6 +323,7 @@ export async function generateWithGeminiTools({
       ok: true,
       reason: null,
       text: extractTextResponse(payload),
+      thoughts: extractThoughtSummaries(payload),
       functionCalls: extractFunctionCalls(payload),
       raw: payload,
     };
@@ -315,6 +341,8 @@ export async function generateWithGeminiTools({
         temperature,
         maxOutputTokens,
         thinkingLevel,
+        thinkingBudget,
+        includeThoughts,
         maxRetries: maxRetries - 1,
       });
     }
@@ -324,6 +352,7 @@ export async function generateWithGeminiTools({
       ok: false,
       reason: error.name === 'AbortError' ? 'timeout' : 'network_error',
       text: null,
+      thoughts: [],
       functionCalls: [],
       raw: null,
     };

@@ -1,5 +1,5 @@
-import { renderArtifact } from './vendor/chart-lite.js';
-import { createGridStackLite } from './vendor/gridstack-lite.js';
+import { renderArtifact } from './vendor/chart-lite.js?v=20260307c';
+import { createGridStackLite } from './vendor/gridstack-lite.js?v=20260307c';
 
 const GRID_COLS = 16;
 const GRID_ROWS = 9;
@@ -84,6 +84,7 @@ const state = {
   preChatTickerKey: '',
   isProgrammaticGridUpdate: false,
   isRenderingCanvas: false,
+  landingRevealObserver: null,
 };
 
 const refs = {
@@ -114,6 +115,7 @@ const refs = {
   landingCta: document.getElementById('landingCta'),
   landingCtaBottom: document.getElementById('landingCtaBottom'),
   landingDemo: document.getElementById('landingDemo'),
+  landingTryNowBtn: document.getElementById('landingTryNowBtn'),
 
   authTabs: document.getElementById('authTabs'),
   loginForm: document.getElementById('loginForm'),
@@ -599,6 +601,43 @@ function isContextComplete(profile) {
   return Boolean(profile?.name && profile?.industry && profile?.city);
 }
 
+function initLandingReveal() {
+  const nodes = Array.from(document.querySelectorAll('.landing-page .reveal-on-scroll'));
+  if (nodes.length === 0) {
+    return;
+  }
+
+  if (state.landingRevealObserver) {
+    state.landingRevealObserver.disconnect();
+    state.landingRevealObserver = null;
+  }
+
+  if (typeof window.IntersectionObserver !== 'function') {
+    nodes.forEach((node) => node.classList.add('is-visible'));
+    return;
+  }
+
+  const observer = new IntersectionObserver((entries, currentObserver) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) {
+        return;
+      }
+      entry.target.classList.add('is-visible');
+      currentObserver.unobserve(entry.target);
+    });
+  }, {
+    root: null,
+    threshold: 0.16,
+    rootMargin: '0px 0px -10% 0px',
+  });
+
+  nodes.forEach((node, index) => {
+    node.style.transitionDelay = `${Math.min(index * 55, 240)}ms`;
+    observer.observe(node);
+  });
+  state.landingRevealObserver = observer;
+}
+
 function showPage(page) {
   refs.landingPage.classList.add('hidden');
   refs.authPage.classList.add('hidden');
@@ -611,6 +650,7 @@ function showPage(page) {
 
   if (page === 'landing') {
     refs.landingPage.classList.remove('hidden');
+    initLandingReveal();
     return;
   }
 
@@ -947,6 +987,7 @@ function setEditMode(editing) {
       element.classList.toggle('hidden-actions', !state.editMode);
     });
   }
+  renderCanvas();
 }
 
 function setDatasetGateVisible(visible) {
@@ -1245,7 +1286,7 @@ function scheduleCanvasSave() {
 
 function renderCanvasItem(item) {
   const widget = item.data;
-  const widgetId = widget.id || item.id;
+  const widgetId = String(widget.id || item.id || generateWidgetId());
   const shell = document.createElement('div');
   shell.className = 'widget-shell';
   if (state.selectedWidgetId === widgetId) {
@@ -1308,7 +1349,7 @@ function renderCanvasItem(item) {
     `;
     body.append(placeholder);
   } else {
-    renderArtifact(body, widget.artifact);
+    renderArtifact(body, widget.artifact, { hideTitle: true });
   }
 
   const resizeHandle = document.createElement('div');
@@ -1334,9 +1375,10 @@ function ensureGrid() {
       if (state.isProgrammaticGridUpdate) {
         return;
       }
-      const map = new Map(items.map((item) => [item.id, item.layout]));
+      const map = new Map(items.map((item) => [String(item.id), item.layout]));
       state.canvasWidgets = state.canvasWidgets.map((widget) => {
         const currentLayout = normalizeLayout(widget.layout || {}, 1);
+        const widgetId = String(widget.id || '');
         if ((currentLayout.page || 1) !== state.canvasPage) {
           return {
             ...widget,
@@ -1345,7 +1387,7 @@ function ensureGrid() {
         }
         return {
           ...widget,
-          layout: normalizeLayout(map.get(widget.id) || currentLayout, state.canvasPage),
+          layout: normalizeLayout(map.get(widgetId) || currentLayout, state.canvasPage),
         };
       });
       scheduleCanvasSave();
@@ -1443,10 +1485,19 @@ function updateCanvasPagination() {
 function pageWidgets() {
   return state.canvasWidgets
     .filter((widget) => Number(widget.layout?.page || 1) === state.canvasPage)
-    .map((widget) => ({
-      ...widget,
-      layout: normalizeLayout(widget.layout || {}, state.canvasPage),
-    }));
+    .map((widget) => {
+      if (!widget.id) {
+        widget.id = generateWidgetId();
+      }
+      if (typeof widget.id !== 'string') {
+        widget.id = String(widget.id);
+      }
+      return {
+        ...widget,
+        id: widget.id,
+        layout: normalizeLayout(widget.layout || {}, state.canvasPage),
+      };
+    });
 }
 
 function nextWidgetLayout(kind = 'chart') {
@@ -1673,14 +1724,8 @@ function removeWidgetById(widgetId) {
     }
     return true;
   });
-
   if (!removed) {
-    const fallbackIndex = nextWidgets.findIndex((entry) => Number(entry.layout?.page || 1) === activePage);
-    if (fallbackIndex >= 0) {
-      nextWidgets = [...nextWidgets];
-      nextWidgets.splice(fallbackIndex, 1);
-      removed = true;
-    }
+    return;
   }
 
   state.canvasWidgets = nextWidgets;
@@ -1710,6 +1755,9 @@ function renderCanvas() {
       state.canvasPage = allPages();
     }
     updateCanvasPagination();
+    if (state.grid && typeof state.grid.setEditing === 'function') {
+      state.grid.setEditing(state.editMode);
+    }
     state.isProgrammaticGridUpdate = true;
     state.grid.setItems(pageWidgets(), renderCanvasItem);
     syncGridBounds();
@@ -2613,6 +2661,12 @@ async function startDemoSession() {
 
 if (refs.landingDemo) {
   refs.landingDemo.addEventListener('click', () => {
+    startDemoSession();
+  });
+}
+
+if (refs.landingTryNowBtn) {
+  refs.landingTryNowBtn.addEventListener('click', () => {
     startDemoSession();
   });
 }

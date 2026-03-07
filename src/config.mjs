@@ -44,7 +44,7 @@ export const config = {
   maxUploadSizeBytes: toInt(process.env.MAX_UPLOAD_SIZE_MB, 20) * 1024 * 1024,
   allowedOrigins: toList(process.env.ALLOWED_ORIGINS),
   geminiApiKey: process.env.GEMINI_API_KEY || process.env.GEMINI_API || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.1-pro-preview',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-pro',
   pythonAgentUrl: process.env.PYTHON_AGENT_URL || '',
   pythonAgentToken: process.env.PYTHON_AGENT_TOKEN || '',
   pythonAgentTimeoutMs: toInt(process.env.PYTHON_AGENT_TIMEOUT_MS, 3500),

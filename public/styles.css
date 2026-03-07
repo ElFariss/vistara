@@ -283,6 +283,18 @@ label {
   gap: 1.4rem;
 }
 
+.reveal-on-scroll {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 520ms ease, transform 520ms ease;
+  will-change: opacity, transform;
+}
+
+.reveal-on-scroll.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .hero-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
@@ -505,6 +517,23 @@ label {
   margin: 0 0 0.55rem;
   color: var(--ink-secondary);
   font-size: 0.9rem;
+}
+
+.landing-final-cta {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  padding: 1.35rem 1rem;
+  text-align: center;
+  display: grid;
+  place-items: center;
+  gap: 0.65rem;
+}
+
+.landing-final-cta p {
+  margin: 0;
+  color: var(--ink-secondary);
 }
 
 .pain-strip {
@@ -807,7 +836,7 @@ label {
 
 .msg {
   display: flex;
-  width: min(100%, 1020px);
+  width: min(100%, 980px);
   margin: 0 auto;
 }
 
@@ -831,14 +860,14 @@ label {
 .msg.user .msg-bubble {
   background: linear-gradient(135deg, #f59e42, #e8622a);
   color: #fff;
-  margin-left: clamp(1.2rem, 8%, 6.2rem);
+  margin-left: clamp(2.2rem, 14%, 9.6rem);
   border-bottom-right-radius: 8px;
 }
 
 .msg.assistant .msg-bubble {
   border: 1px solid var(--line);
   background: var(--surface);
-  margin-right: clamp(1.2rem, 8%, 6.2rem);
+  margin-right: clamp(2.2rem, 14%, 9.6rem);
   border-bottom-left-radius: 8px;
 }
 
@@ -1959,7 +1988,7 @@ label {
   .prechat-ticker {
     width: calc(100% - 1.2rem);
     top: 40%;
-    padding: 0.75rem 0.8rem;
+    padding: 0;
     font-size: 0.9rem;
   }
 
@@ -2018,5 +2047,14 @@ label {
 
   .settings-panel {
     width: 100vw;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-on-scroll,
+  .prechat-ticker {
+    transition: none !important;
+    transform: none !important;
+    opacity: 1 !important;
   }
 }
