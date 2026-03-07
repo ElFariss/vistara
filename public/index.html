@@ -13,7 +13,7 @@
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
     rel="stylesheet" />
   <link rel="stylesheet" href="/vendor/gridstack.min.css" />
-  <link rel="stylesheet" href="/styles.css?v=20260307j" />
+  <link rel="stylesheet" href="/styles.css?v=20260307k" />
 </head>
 
 <body>
@@ -41,9 +41,13 @@
           <p class="hero-eyebrow">Selamat Datang di Vistara</p>
           <h2 class="landing-welcome-title">Ngobrol dengan data bisnis tanpa ribet teknis.</h2>
         </div>
+        <button id="landingScrollCue" type="button" class="landing-scroll-cue" aria-label="Scroll ke bawah">
+          <span>Scroll ke bawah</span>
+          <span class="landing-scroll-arrow" aria-hidden="true">↓</span>
+        </button>
       </section>
 
-      <div class="hero-grid">
+      <div id="landingHeroStart" class="hero-grid">
         <div class="hero-copy">
           <p class="hero-eyebrow reveal-on-scroll">Analisis Data Instan untuk Bisnis Anda</p>
           <h2 class="reveal-on-scroll">Dari file ke dashboard dalam 60 detik, tanpa SQL dan tanpa setup rumit.</h2>
@@ -59,10 +63,6 @@
           <div class="hero-cta-notes">
             <p><strong>Coba Demo:</strong> langsung pakai sample dataset tanpa akun.</p>
             <p><strong>Daftar Gratis:</strong> simpan dashboard, histori chat, dan personalisasi workspace.</p>
-          </div>
-          <div class="hero-proof-inline">
-            <span>Dipakai tim bisnis UMKM tahap beta</span>
-            <span>Dibangun oleh tim data engineer & AI researcher</span>
           </div>
         </div>
         <div class="hero-panel">
@@ -478,7 +478,7 @@
   <script src="/vendor/gridstack-all.js"></script>
   <script src="/vendor/chart.umd.min.js"></script>
   <script src="/runtime-env.js"></script>
-  <script type="module" src="/app.js?v=20260307s"></script>
+  <script type="module" src="/app.js?v=20260307t"></script>
 </body>
 
 </html>

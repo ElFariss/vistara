@@ -76,8 +76,8 @@ const state = {
   stageZoom: 1,
   settings: { ...DEFAULT_SETTINGS },
   settingsOpen: false,
-  dataPaneCollapsed: false,
-  configPaneCollapsed: false,
+  dataPaneCollapsed: true,
+  configPaneCollapsed: true,
   preChatTickerIndex: 0,
   preChatTickerInterval: null,
   preChatTickerSwapTimer: null,
@@ -116,6 +116,8 @@ const refs = {
   landingCtaBottom: document.getElementById('landingCtaBottom'),
   landingDemo: document.getElementById('landingDemo'),
   landingTryNowBtn: document.getElementById('landingTryNowBtn'),
+  landingScrollCue: document.getElementById('landingScrollCue'),
+  landingHeroStart: document.getElementById('landingHeroStart'),
 
   authTabs: document.getElementById('authTabs'),
   loginForm: document.getElementById('loginForm'),
@@ -2692,6 +2694,15 @@ if (refs.landingTryNowBtn) {
   });
 }
 
+if (refs.landingScrollCue) {
+  refs.landingScrollCue.addEventListener('click', () => {
+    refs.landingHeroStart?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  });
+}
+
 if (refs.themeToggle) {
   refs.themeToggle.addEventListener('click', toggleTheme);
 }
@@ -2869,8 +2880,8 @@ refs.logoutBtn.addEventListener('click', () => {
   state.canvasWidgets = [];
   state.canvasPage = 1;
   state.datasetReady = false;
-  state.dataPaneCollapsed = false;
-  state.configPaneCollapsed = false;
+  state.dataPaneCollapsed = true;
+  state.configPaneCollapsed = true;
   state.timelineRunId = null;
   state.timelineMessageId = null;
 
