@@ -3,6 +3,42 @@ import { createLogger } from '../utils/logger.mjs';
 import { parseJsonObjectFromText } from '../utils/text.mjs';
 
 const logger = createLogger('gemini');
+let quotaCooldownUntil = 0;
+let quotaCooldownReason = null;
+
+function parseQuotaRetryMs(text) {
+  const source = String(text || '');
+  const match = source.match(/retry in\s*([0-9hms.\s]+)/i);
+  if (!match) {
+    return null;
+  }
+
+  const chunk = match[1];
+  const hours = Number((chunk.match(/(\d+)\s*h/i) || [])[1] || 0);
+  const minutes = Number((chunk.match(/(\d+)\s*m/i) || [])[1] || 0);
+  const seconds = Number((chunk.match(/([\d.]+)\s*s/i) || [])[1] || 0);
+  const totalMs = Math.round(((hours * 60 * 60) + (minutes * 60) + seconds) * 1000);
+  return Number.isFinite(totalMs) && totalMs > 0 ? totalMs : null;
+}
+
+function activateQuotaCooldown(body, fallbackMs = 15 * 60 * 1000) {
+  const durationMs = parseQuotaRetryMs(body) || fallbackMs;
+  quotaCooldownUntil = Date.now() + durationMs;
+  quotaCooldownReason = 'quota_exhausted';
+  logger.warn('gemini quota cooldown active', {
+    duration_ms: durationMs,
+    until_iso: new Date(quotaCooldownUntil).toISOString(),
+  });
+}
+
+function isQuotaCooldownActive() {
+  return quotaCooldownUntil > Date.now();
+}
+
+function clearQuotaCooldown() {
+  quotaCooldownUntil = 0;
+  quotaCooldownReason = null;
+}
 
 function buildPrompt(systemPrompt, userPrompt) {
   if (!systemPrompt) {
@@ -91,6 +127,15 @@ export async function generateJsonWithGemini({ systemPrompt = '', userPrompt, te
     };
   }
 
+  if (isQuotaCooldownActive()) {
+    return {
+      ok: false,
+      reason: quotaCooldownReason || 'quota_exhausted',
+      data: null,
+      rawText: null,
+    };
+  }
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent?key=${config.geminiApiKey}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
@@ -117,6 +162,9 @@ export async function generateJsonWithGemini({ systemPrompt = '', userPrompt, te
     if (!response.ok) {
       const body = await response.text();
       logger.warn('gemini request failed', { status: response.status, body: body.slice(0, 500) });
+      if (response.status === 429) {
+        activateQuotaCooldown(body);
+      }
       return {
         ok: false,
         reason: `http_${response.status}`,
@@ -125,6 +173,7 @@ export async function generateJsonWithGemini({ systemPrompt = '', userPrompt, te
       };
     }
 
+    clearQuotaCooldown();
     const json = await response.json();
     const text = extractTextResponse(json);
     const parsed = parseJsonObjectFromText(text);
@@ -176,6 +225,16 @@ export async function generateWithGeminiTools({
     };
   }
 
+  if (isQuotaCooldownActive()) {
+    return {
+      ok: false,
+      reason: quotaCooldownReason || 'quota_exhausted',
+      text: null,
+      functionCalls: [],
+      raw: null,
+    };
+  }
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent?key=${config.geminiApiKey}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
@@ -212,6 +271,9 @@ export async function generateWithGeminiTools({
     if (!response.ok) {
       const body = await response.text();
       logger.warn('gemini tool request failed', { status: response.status, body: body.slice(0, 500) });
+      if (response.status === 429) {
+        activateQuotaCooldown(body);
+      }
       return {
         ok: false,
         reason: `http_${response.status}`,
@@ -221,6 +283,7 @@ export async function generateWithGeminiTools({
       };
     }
 
+    clearQuotaCooldown();
     const payload = await response.json();
     return {
       ok: true,

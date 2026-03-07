@@ -276,6 +276,24 @@ function deterministicDashboardFallback({ tenantId, userId, intent }) {
   };
 }
 
+function buildSmalltalkAnswer(message, datasetReady) {
+  const lower = String(message || '').toLowerCase();
+
+  if (/\b(thanks|thank you|makasih|terima kasih)\b/i.test(lower)) {
+    return 'Sama-sama. Kalau mau, saya bisa lanjutkan dengan ringkasan omzet, untung, atau tren terbaru.';
+  }
+
+  if (/\b(test|tes)\b/i.test(lower)) {
+    return 'Saya aktif dan siap bantu analisis data Anda.';
+  }
+
+  if (datasetReady) {
+    return 'Halo. Saya siap bantu analisis data Anda. Coba tanya: "Omzet 7 hari terakhir" atau "Buat dashboard performa bulan ini".';
+  }
+
+  return 'Halo. Upload dataset dulu (CSV/JSON/XLSX/XLS), lalu saya bantu analisis secara instan.';
+}
+
 export async function processChatMessage({
   tenantId,
   userId,
@@ -301,7 +319,7 @@ export async function processChatMessage({
   const intent = await parseIntent(message, history);
   const datasetReady = hasDataset(tenantId);
 
-  if (!datasetReady && intent.intent !== 'data_management') {
+  if (!datasetReady && intent.intent !== 'data_management' && intent.intent !== 'smalltalk') {
     const responsePayload = {
       answer:
         'Dataset belum tersedia. Upload file data dulu (CSV/JSON/XLSX/XLS) atau gunakan Demo Dataset, lalu coba pertanyaan ini lagi.',
@@ -335,7 +353,15 @@ export async function processChatMessage({
     presentation_mode: 'chat',
   };
 
-  if (intent.intent === 'modify_dashboard') {
+  if (intent.intent === 'smalltalk') {
+    responsePayload = {
+      answer: buildSmalltalkAnswer(message, datasetReady),
+      widgets: [],
+      artifacts: [],
+      intent,
+      presentation_mode: 'chat',
+    };
+  } else if (intent.intent === 'modify_dashboard') {
     const dashboard = dashboardId
       ? getDashboard(tenantId, userId, dashboardId)
       : ensureDefaultDashboard(tenantId, userId);

@@ -8,6 +8,7 @@ const INTENTS = [
   'rank',
   'explain',
   'filter',
+  'smalltalk',
   'modify_dashboard',
   'set_goal',
   'generate_report',
@@ -51,20 +52,28 @@ function extractMetric(text) {
 function fallbackIntent(message) {
   const lower = toLowerAlnum(message);
   let intent = 'show_metric';
+  const isGreeting =
+    /^(hi|halo|hello|hai|pagi|siang|sore|malam|permisi|test|tes)\b/i.test(lower)
+    || /\b(apa kabar|gimana kabar|selamat pagi|selamat siang|selamat sore|selamat malam)\b/i.test(lower);
+  const isThanks = /\b(thanks|thank you|makasih|terima kasih|mantap|sip)\b/i.test(lower);
 
-  if (/(banding|vs|dibanding|compare)/i.test(lower)) {
+  if (isGreeting || isThanks) {
+    intent = 'smalltalk';
+  }
+
+  if (intent !== 'smalltalk' && /(banding|vs|dibanding|compare)/i.test(lower)) {
     intent = 'compare';
-  } else if (/(top|terlaris|paling|rank|ranking)/i.test(lower)) {
+  } else if (intent !== 'smalltalk' && /(top|terlaris|paling|rank|ranking)/i.test(lower)) {
     intent = 'rank';
-  } else if (/(kenapa|mengapa|penyebab|explain)/i.test(lower)) {
+  } else if (intent !== 'smalltalk' && /(kenapa|mengapa|penyebab|explain)/i.test(lower)) {
     intent = 'explain';
-  } else if (/(tambah|tambahkan|hilangkan|hapus|ganti|fokus|simpan dashboard|template)/i.test(lower)) {
+  } else if (intent !== 'smalltalk' && /(tambah|tambahkan|hilangkan|hapus|ganti|fokus|simpan dashboard|template)/i.test(lower)) {
     intent = 'modify_dashboard';
-  } else if (/(target|goal)/i.test(lower)) {
+  } else if (intent !== 'smalltalk' && /(target|goal)/i.test(lower)) {
     intent = 'set_goal';
-  } else if (/(laporan|report)/i.test(lower)) {
+  } else if (intent !== 'smalltalk' && /(laporan|report)/i.test(lower)) {
     intent = 'generate_report';
-  } else if (/(upload|gabung|hapus data|update hpp|mapping)/i.test(lower)) {
+  } else if (intent !== 'smalltalk' && /(upload|gabung|hapus data|update hpp|mapping)/i.test(lower)) {
     intent = 'data_management';
   }
 
@@ -83,8 +92,8 @@ function fallbackIntent(message) {
 
   return {
     intent,
-    metric: extractMetric(message),
-    time_period: extractTimePeriod(message),
+    metric: intent === 'smalltalk' ? null : extractMetric(message),
+    time_period: intent === 'smalltalk' ? null : extractTimePeriod(message),
     branch: extractBranch(message),
     channel: /tokopedia/i.test(lower)
       ? 'tokopedia'
@@ -94,7 +103,7 @@ function fallbackIntent(message) {
           ? 'offline'
           : null,
     template_id: null,
-    limit: /top\s*10/i.test(lower) ? 10 : 5,
+    limit: intent === 'smalltalk' ? null : /top\s*10/i.test(lower) ? 10 : 5,
     dashboard_action: dashboardAction,
   };
 }
