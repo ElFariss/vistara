@@ -9,5 +9,9 @@ coverage
 .env.local
 .env.production
 data/*.db
+data/*.db-wal
+data/*.db-shm
 data/uploads/*
 !data/uploads/.gitkeep
+__pycache__/
+*.pyc
