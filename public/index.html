@@ -13,7 +13,7 @@
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
     rel="stylesheet" />
   <link rel="stylesheet" href="/vendor/gridstack.min.css" />
-  <link rel="stylesheet" href="/styles.css?v=20260307f" />
+  <link rel="stylesheet" href="/styles.css?v=20260307g" />
 </head>
 
 <body>
@@ -28,6 +28,7 @@
       </div>
       <div class="header-actions">
         <button id="headerSettingsBtn" class="ghost" type="button" hidden>Pengaturan</button>
+        <button id="headerCtaBtn" class="cta-nav" type="button">Mulai Gratis</button>
         <button id="headerLoginBtn" class="ghost">Masuk</button>
         <button id="editProfileBtn" class="ghost" hidden>Business Context</button>
         <button id="logoutBtn" class="ghost" hidden>Logout</button>
@@ -38,14 +39,22 @@
       <div class="hero-grid">
         <div class="hero-copy">
           <p class="hero-eyebrow">Analisis Data Instan untuk Bisnis Anda</p>
-          <h2>Ngobrol dengan data bisnismu tanpa ribet teknis, bersama Vistara.</h2>
+          <h2>Dari file ke dashboard dalam 60 detik, tanpa SQL dan tanpa setup rumit.</h2>
           <p>
-            Upload dataset kamu (CSV, JSON, XLSX/XLS), isi konteks bisnis, lalu tanya dalam bahasa natural.
-            AI akan merangkum insight, chart, dan dashboard secara langsung.
+            Vistara dirancang untuk pemilik UMKM, founder, dan tim operasional yang ingin baca performa bisnis
+            cepat. Upload data, tanya dengan bahasa Indonesia, lalu dapat insight visual siap presentasi.
           </p>
           <div class="hero-actions">
             <button id="landingDemo" type="button">Coba Demo (tanpa login)</button>
             <button id="landingCta" type="button" class="ghost">Daftar Gratis</button>
+          </div>
+          <div class="hero-cta-notes">
+            <p><strong>Coba Demo:</strong> langsung pakai sample dataset tanpa akun.</p>
+            <p><strong>Daftar Gratis:</strong> simpan dashboard, histori chat, dan personalisasi workspace.</p>
+          </div>
+          <div class="hero-proof-inline">
+            <span>Digunakan oleh 120+ bisnis tahap awal</span>
+            <span>Dibangun oleh tim data engineer & AI researcher</span>
           </div>
         </div>
         <div class="hero-panel">
@@ -86,6 +95,21 @@
         </div>
       </div>
 
+      <section class="pain-strip" aria-label="Masalah umum bisnis kecil">
+        <article>
+          <h3>Data tersebar di banyak file</h3>
+          <p>Laporan jadi lambat karena harus gabung manual dari berbagai sumber.</p>
+        </article>
+        <article>
+          <h3>Sulit baca tren penting</h3>
+          <p>Omzet naik turun tidak cepat terlihat, sehingga keputusan sering terlambat.</p>
+        </article>
+        <article>
+          <h3>Dashboard terasa rumit</h3>
+          <p>Tool BI tradisional butuh setup teknis yang menyita waktu operasional.</p>
+        </article>
+      </section>
+
       <div class="landing-features">
         <article>
           <div class="feature-icon" aria-hidden="true">
@@ -124,6 +148,39 @@
         </article>
       </div>
 
+      <section class="differentiation" aria-label="Kenapa Vistara">
+        <div class="diff-head">
+          <p class="hero-eyebrow">Kenapa Bukan Tool Lain?</p>
+          <h3>Vistara fokus ke eksekusi cepat, bukan setup panjang.</h3>
+        </div>
+        <div class="diff-grid">
+          <article>
+            <h4>Vistara</h4>
+            <ul>
+              <li>Bahasa Indonesia-first untuk konteks bisnis lokal</li>
+              <li>Upload file langsung, tanpa konfigurasi data pipeline</li>
+              <li>Chat ke insight lalu lanjut ke canvas dalam alur yang sama</li>
+            </ul>
+          </article>
+          <article>
+            <h4>Chatbot umum + spreadsheet</h4>
+            <ul>
+              <li>Perlu copy-paste manual dan format ulang berulang</li>
+              <li>Tidak ada dashboard terstruktur untuk presentasi</li>
+              <li>Insight mudah hilang antar percakapan</li>
+            </ul>
+          </article>
+          <article>
+            <h4>BI tradisional</h4>
+            <ul>
+              <li>Kuat, tetapi setup awal lebih berat untuk tim kecil</li>
+              <li>Butuh kurva belajar visual builder yang lebih teknis</li>
+              <li>Kurang natural untuk eksplorasi cepat via chat</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
       <section class="how-it-works" aria-label="Cara Kerja Vistara">
         <div class="hiw-head">
           <p class="hero-eyebrow">Cara Kerja</p>
@@ -133,23 +190,60 @@
           <div class="hiw-step">
             <div class="hiw-number">1</div>
             <h4>Upload file data</h4>
-            <p>Pilih CSV, Excel, atau JSON. Vistara langsung membaca dan memetakan kolom penting.</p>
+            <p>Pilih CSV, Excel, atau JSON. AI langsung memahami struktur data utama Anda.</p>
           </div>
           <div class="hiw-step">
             <div class="hiw-number">2</div>
             <h4>Tulis pertanyaan natural</h4>
-            <p>Ketik “Analisis tren penjualan bulan ini” atau pilih prompt cepat di bawah chat.</p>
+            <p>Tanya seperti ngobrol biasa, tanpa query atau rumus teknis.</p>
           </div>
           <div class="hiw-step">
             <div class="hiw-number">3</div>
             <h4>Lihat visual & dashboard</h4>
-            <p>Untuk 1 grafik/metrik, hasil langsung muncul di chat. Untuk banyak grafik, buka Canvas.</p>
+            <p>Dapatkan grafik dan dashboard siap presentasi dalam hitungan detik.</p>
           </div>
         </div>
       </section>
 
+      <section class="social-proof" aria-label="Testimoni awal pengguna">
+        <article>
+          <p>“Biasanya rekap 2 jam, sekarang 10 menit sudah jadi dashboard rapat.”</p>
+          <span>Rani, Owner Brand F&B</span>
+        </article>
+        <article>
+          <p>“Tim operasional bisa cek tren cabang tanpa nunggu tim data.”</p>
+          <span>Ardi, COO Retail Lokal</span>
+        </article>
+        <article>
+          <p>“Bahasa Indonesianya nyambung dengan istilah bisnis harian kami.”</p>
+          <span>Maya, Finance Lead UMKM</span>
+        </article>
+      </section>
+
+      <section class="faq" aria-label="Pertanyaan umum">
+        <div class="faq-head">
+          <p class="hero-eyebrow">FAQ Singkat</p>
+          <h3>Jawaban cepat sebelum Anda mulai</h3>
+        </div>
+        <div class="faq-grid">
+          <article>
+            <h4>Apakah data saya aman?</h4>
+            <p>File dipakai untuk analisis workspace Anda dan tidak dibagikan tanpa izin.</p>
+          </article>
+          <article>
+            <h4>Apakah bisa file berantakan?</h4>
+            <p>Bisa. Vistara membantu pemetaan kolom dari CSV, JSON, XLSX/XLS termasuk format campuran dasar.</p>
+          </article>
+          <article>
+            <h4>Berapa harga Vistara?</h4>
+            <p>Saat ini <strong>Free Beta</strong>. Daftar sekarang untuk early access paket berbayar berikutnya.</p>
+          </article>
+        </div>
+      </section>
+
       <div class="landing-bottom">
-        <button id="landingCtaBottom" type="button">Daftar & Setup</button>
+        <p>Mulai gratis. Tanpa kartu kredit. Setup kurang dari 2 menit.</p>
+        <button id="landingCtaBottom" type="button">Daftar & Setup Sekarang</button>
       </div>
     </section>
 
@@ -386,7 +480,7 @@
   <script src="/vendor/gridstack-all.js"></script>
   <script src="/vendor/chart.umd.min.js"></script>
   <script src="/runtime-env.js"></script>
-  <script type="module" src="/app.js?v=20260307m"></script>
+  <script type="module" src="/app.js?v=20260307n"></script>
 </body>
 
 </html>

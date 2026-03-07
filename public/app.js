@@ -89,6 +89,7 @@ const state = {
 const refs = {
   appShell: document.querySelector('.app-shell'),
   headerLoginBtn: document.getElementById('headerLoginBtn'),
+  headerCtaBtn: document.getElementById('headerCtaBtn'),
   headerSettingsBtn: document.getElementById('headerSettingsBtn'),
   editProfileBtn: document.getElementById('editProfileBtn'),
   logoutBtn: document.getElementById('logoutBtn'),
@@ -419,12 +420,14 @@ function setAuth(token, user = null, options = {}) {
     if (refs.editProfileBtn) refs.editProfileBtn.hidden = false;
     if (refs.headerSettingsBtn) refs.headerSettingsBtn.hidden = false;
     if (refs.headerLoginBtn) refs.headerLoginBtn.hidden = true;
+    if (refs.headerCtaBtn) refs.headerCtaBtn.hidden = true;
   } else {
     localStorage.removeItem('umkm_token');
     if (refs.logoutBtn) refs.logoutBtn.hidden = true;
     if (refs.editProfileBtn) refs.editProfileBtn.hidden = true;
     if (refs.headerSettingsBtn) refs.headerSettingsBtn.hidden = true;
     if (refs.headerLoginBtn) refs.headerLoginBtn.hidden = false;
+    if (refs.headerCtaBtn) refs.headerCtaBtn.hidden = false;
   }
 }
 
@@ -945,13 +948,14 @@ function renderDashboardSummary(message) {
 
   const title = document.createElement('p');
   title.className = 'summary-title';
-  title.textContent = message.content || 'Dashboard siap.';
+  const count = message.widgets?.length || 0;
+  title.textContent = count > 0 ? `Dashboard siap (${count} widget).` : 'Dashboard siap.';
   card.append(title);
 
   const meta = document.createElement('span');
   meta.className = 'summary-meta';
-  const count = message.widgets?.length || 0;
-  meta.textContent = count > 0 ? `Dashboard berisi ${count} widget.` : 'Buka untuk melihat dashboard.';
+  const detail = String(message.content || '').trim();
+  meta.textContent = detail || 'Klik untuk membuka Canvas dan melihat detail visual.';
   card.append(meta);
 
   const openBtn = document.createElement('button');
@@ -1028,9 +1032,11 @@ function renderThread() {
       continue;
     }
 
-    const text = document.createElement('div');
-    text.innerHTML = escapeHtml(message.content).replace(/\n/g, '<br/>');
-    bubble.append(text);
+    if (message.mode !== 'canvas') {
+      const text = document.createElement('div');
+      text.innerHTML = escapeHtml(message.content).replace(/\n/g, '<br/>');
+      bubble.append(text);
+    }
 
     if (message.fileName) {
       const fileChip = document.createElement('div');
@@ -2466,6 +2472,12 @@ if (refs.headerLoginBtn) {
   refs.headerLoginBtn.addEventListener('click', () => {
     showPage('auth');
     switchAuthTab('login');
+  });
+}
+if (refs.headerCtaBtn) {
+  refs.headerCtaBtn.addEventListener('click', () => {
+    showPage('auth');
+    switchAuthTab('register');
   });
 }
 if (refs.landingCtaBottom) {

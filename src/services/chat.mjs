@@ -110,26 +110,31 @@ function normalizeReportPeriod(intent) {
 }
 
 function isComplexDashboardRequest(message, intent) {
-  const text = String(message || '').toLowerCase();
-  const complexKeywords = [
-    'dashboard',
-    'canvas',
-    'kompleks',
-    'lengkap',
-    'gabung',
-    'multi',
-    'semua',
-    'overview',
-    'ringkasan penuh',
-    'per cabang',
-  ];
+  const text = String(message || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  if (!text) {
+    return false;
+  }
 
-  if (complexKeywords.some((keyword) => text.includes(keyword))) {
+  const hasCanvas = /\b(canvas|kanvas)\b/.test(text);
+  const hasDashboard = /\bdashboard\b/.test(text);
+  const hasBuildVerb = /\b(buat|buatkan|bikin|generate|susun|siapkan|bangun|create)\b/.test(text);
+  const hasComplexQualifier = /\b(lengkap|komplet|full|penuh|multi|beberapa|overview|ringkasan)\b/.test(text);
+  const hasVisualTerms = (text.match(/\b(grafik|chart|tabel|widget|visual)\b/g) || []).length;
+
+  if (hasCanvas) {
+    return true;
+  }
+
+  if (hasDashboard && (hasBuildVerb || hasComplexQualifier || hasVisualTerms >= 1)) {
+    return true;
+  }
+
+  if (hasVisualTerms >= 2 && hasBuildVerb) {
     return true;
   }
 
   if (intent.intent === 'modify_dashboard') {
-    return true;
+    return hasDashboard || hasCanvas || /\b(widget|layout|komponen|panel)\b/.test(text);
   }
 
   return false;
@@ -206,6 +211,69 @@ function widgetsToArtifacts(widgets = []) {
       return null;
     })
     .filter(Boolean);
+}
+
+function deterministicDashboardFallback({ tenantId, userId, intent }) {
+  const basePeriod = intent?.time_period || '30 hari terakhir';
+  const templateIds = [
+    'total_revenue',
+    'total_profit',
+    'margin_percentage',
+    'revenue_trend',
+    'top_products',
+    'branch_performance',
+  ];
+
+  const widgets = [];
+  const artifacts = [];
+
+  for (const templateId of templateIds) {
+    const isRank = templateId === 'top_products' || templateId === 'branch_performance';
+    const fallbackIntent = {
+      intent: isRank ? 'rank' : 'show_metric',
+      metric: templateId,
+      template_id: templateId,
+      time_period: basePeriod,
+      branch: intent?.branch || null,
+      channel: intent?.channel || null,
+      limit: isRank ? Math.max(5, Number(intent?.limit || 5)) : 1,
+      dimension: templateId === 'branch_performance' ? 'branch' : null,
+    };
+
+    const analytics = executeAnalyticsIntent({
+      tenantId,
+      userId,
+      intent: fallbackIntent,
+    });
+
+    if (Array.isArray(analytics?.widgets)) {
+      widgets.push(...analytics.widgets);
+    }
+    if (Array.isArray(analytics?.artifacts) && analytics.artifacts.length > 0) {
+      artifacts.push(...analytics.artifacts);
+    } else if (Array.isArray(analytics?.widgets) && analytics.widgets.length > 0) {
+      artifacts.push(...widgetsToArtifacts(analytics.widgets));
+    }
+  }
+
+  const uniqueArtifacts = [];
+  const seen = new Set();
+  for (const item of artifacts) {
+    const key = `${item.kind}:${item.title}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    uniqueArtifacts.push(item);
+  }
+
+  return {
+    answer: `Saya siapkan dashboard cepat dari template default. Dashboard berisi ${Math.min(widgets.length, 6)} widget.`,
+    widgets: widgets.slice(0, 6),
+    artifacts: uniqueArtifacts.slice(0, 6),
+    presentation_mode: 'canvas',
+    fallback: true,
+  };
 }
 
 export async function processChatMessage({
@@ -371,38 +439,65 @@ export async function processChatMessage({
           title: 'Agentic Thinking',
         });
       }
+      try {
+        const complexTimeoutMs = 12000;
+        const complex = await Promise.race([
+          runDashboardAgent({
+            tenantId,
+            userId,
+            dashboardId,
+            goal: message,
+            intent,
+            hooks: {
+              onTimelineEvent: (event) => {
+                if (stream && typeof stream.onTimelineStep === 'function') {
+                  stream.onTimelineStep({
+                    timeline_id: timelineId,
+                    ...event,
+                  });
+                }
+              },
+            },
+          }),
+          new Promise((_, reject) => {
+            setTimeout(() => {
+              reject(new Error('dashboard_agent_timeout'));
+            }, complexTimeoutMs);
+          }),
+        ]);
 
-      const complex = await runDashboardAgent({
-        tenantId,
-        userId,
-        dashboardId,
-        goal: message,
-        intent,
-        hooks: {
-          onTimelineEvent: (event) => {
-            if (stream && typeof stream.onTimelineStep === 'function') {
-              stream.onTimelineStep({
-                timeline_id: timelineId,
-                ...event,
-              });
-            }
+        responsePayload = {
+          ...complex,
+          answer: complex.answer,
+          widgets: complex.widgets,
+          artifacts: complex.artifacts,
+          intent,
+          presentation_mode: 'canvas',
+        };
+      } catch (error) {
+        if (stream && typeof stream.onTimelineStep === 'function') {
+          stream.onTimelineStep({
+            timeline_id: timelineId,
+            id: `dashboard_fallback_${Date.now()}`,
+            agent: 'system',
+            status: 'error',
+            title: 'Mode agentic sibuk, gunakan fallback dashboard cepat',
+          });
+        }
+        responsePayload = {
+          ...deterministicDashboardFallback({ tenantId, userId, intent }),
+          intent,
+          agent: {
+            mode: 'deterministic_fallback',
+            reason: error?.message || 'dashboard_agent_failed',
           },
-        },
-      });
-
-      responsePayload = {
-        ...complex,
-        answer: complex.answer,
-        widgets: complex.widgets,
-        artifacts: complex.artifacts,
-        intent,
-        presentation_mode: 'canvas',
-      };
-
-      if (stream && typeof stream.onTimelineDone === 'function') {
-        stream.onTimelineDone({
-          timeline_id: timelineId,
-        });
+        };
+      } finally {
+        if (stream && typeof stream.onTimelineDone === 'function') {
+          stream.onTimelineDone({
+            timeline_id: timelineId,
+          });
+        }
       }
     } else {
       const analytics = executeAnalyticsIntent({ tenantId, userId, intent });
