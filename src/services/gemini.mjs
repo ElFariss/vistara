@@ -243,6 +243,8 @@ export async function generateWithGeminiTools({
   thinkingBudget = null,
   includeThoughts = false,
   maxRetries = 1,
+  functionCallingMode = 'AUTO',
+  allowedFunctionNames = [],
 }) {
   if (!config.geminiApiKey) {
     return {
@@ -279,6 +281,18 @@ export async function generateWithGeminiTools({
       ...(!hasThinkingBudget && thinkingLevel ? { thinkingLevel } : {}),
       ...(includeThoughts ? { includeThoughts: true } : {}),
     };
+    const sanitizedMode = typeof functionCallingMode === 'string'
+      ? functionCallingMode.toUpperCase()
+      : 'AUTO';
+    const mode = ['AUTO', 'ANY', 'NONE'].includes(sanitizedMode) ? sanitizedMode : 'AUTO';
+    const names = Array.isArray(allowedFunctionNames)
+      ? allowedFunctionNames.map((name) => String(name || '').trim()).filter(Boolean)
+      : [];
+    const functionCallingConfig = {
+      mode,
+      ...(names.length > 0 ? { allowedFunctionNames: names } : {}),
+    };
+    const hasTools = Array.isArray(tools) && tools.length > 0;
 
     const response = await fetch(url, {
       method: 'POST',
@@ -287,11 +301,18 @@ export async function generateWithGeminiTools({
       },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        tools: [
-          {
-            functionDeclarations: tools,
-          },
-        ],
+        ...(hasTools
+          ? {
+              tools: [
+                {
+                  functionDeclarations: tools,
+                },
+              ],
+              toolConfig: {
+                functionCallingConfig,
+              },
+            }
+          : {}),
         generationConfig: {
           temperature,
           maxOutputTokens,
@@ -330,32 +351,28 @@ export async function generateWithGeminiTools({
   };
 
   try {
-    return await attempt();
-  } catch (error) {
-    if (error.name === 'AbortError' && maxRetries > 0) {
-      logger.warn('gemini tool request retry', { reason: 'timeout' });
-      return generateWithGeminiTools({
-        systemPrompt,
-        userPrompt,
-        tools,
-        temperature,
-        maxOutputTokens,
-        thinkingLevel,
-        thinkingBudget,
-        includeThoughts,
-        maxRetries: maxRetries - 1,
-      });
-    }
+    let retriesLeft = Number.isFinite(Number(maxRetries)) ? Math.max(0, Number(maxRetries)) : 0;
+    while (true) {
+      try {
+        return await attempt();
+      } catch (error) {
+        if (error.name === 'AbortError' && retriesLeft > 0) {
+          retriesLeft -= 1;
+          logger.warn('gemini tool request retry', { reason: 'timeout', retries_left: retriesLeft });
+          continue;
+        }
 
-    logger.warn('gemini tool request error', { error: error.message });
-    return {
-      ok: false,
-      reason: error.name === 'AbortError' ? 'timeout' : 'network_error',
-      text: null,
-      thoughts: [],
-      functionCalls: [],
-      raw: null,
-    };
+        logger.warn('gemini tool request error', { error: error.message });
+        return {
+          ok: false,
+          reason: error.name === 'AbortError' ? 'timeout' : 'network_error',
+          text: null,
+          thoughts: [],
+          functionCalls: [],
+          raw: null,
+        };
+      }
+    }
   } finally {
     clearTimeout(timeout);
   }

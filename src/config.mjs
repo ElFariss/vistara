@@ -48,6 +48,7 @@ export const config = {
   pythonAgentUrl: process.env.PYTHON_AGENT_URL || '',
   pythonAgentToken: process.env.PYTHON_AGENT_TOKEN || '',
   pythonAgentTimeoutMs: toInt(process.env.PYTHON_AGENT_TIMEOUT_MS, 3500),
+  dashboardAgentTimeoutMs: toInt(process.env.DASHBOARD_AGENT_TIMEOUT_MS, 180000),
 };
 
 if (config.isProduction && !process.env.JWT_SECRET) {

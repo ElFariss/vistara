@@ -13,7 +13,7 @@
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
     rel="stylesheet" />
   <link rel="stylesheet" href="/vendor/gridstack.min.css" />
-  <link rel="stylesheet" href="/styles.css?v=20260307h" />
+  <link rel="stylesheet" href="/styles.css?v=20260307j" />
 </head>
 
 <body>
@@ -36,14 +36,22 @@
     </header>
 
     <section id="landingPage" class="page-view landing-page">
-      <div class="hero-grid reveal-on-scroll">
+      <section class="landing-welcome reveal-on-scroll" aria-label="Welcome">
+        <div>
+          <p class="hero-eyebrow">Selamat Datang di Vistara</p>
+          <h2 class="landing-welcome-title">Ngobrol dengan data bisnis tanpa ribet teknis.</h2>
+        </div>
+      </section>
+
+      <div class="hero-grid">
         <div class="hero-copy">
-          <p class="hero-eyebrow">Analisis Data Instan untuk Bisnis Anda</p>
-          <h2>Dari file ke dashboard dalam 60 detik, tanpa SQL dan tanpa setup rumit.</h2>
-          <p>
-            Vistara dirancang untuk pemilik UMKM, founder, dan tim operasional yang ingin baca performa bisnis
-            cepat. Upload data, tanya dengan bahasa Indonesia, lalu dapat insight visual siap presentasi.
-          </p>
+          <p class="hero-eyebrow reveal-on-scroll">Analisis Data Instan untuk Bisnis Anda</p>
+          <h2 class="reveal-on-scroll">Dari file ke dashboard dalam 60 detik, tanpa SQL dan tanpa setup rumit.</h2>
+          <div class="hero-sentences">
+            <p class="reveal-on-scroll">Vistara dirancang untuk pemilik UMKM, founder, dan tim operasional.</p>
+            <p class="reveal-on-scroll">Upload data Anda sekali, lalu tanya insight dengan Bahasa Indonesia natural.</p>
+            <p class="reveal-on-scroll">Dapatkan visual siap presentasi dalam alur chat yang tetap simpel.</p>
+          </div>
           <div class="hero-actions">
             <button id="landingDemo" type="button">Coba Demo (tanpa login)</button>
             <button id="landingCta" type="button" class="ghost">Daftar Gratis</button>
@@ -53,7 +61,7 @@
             <p><strong>Daftar Gratis:</strong> simpan dashboard, histori chat, dan personalisasi workspace.</p>
           </div>
           <div class="hero-proof-inline">
-            <span>Digunakan oleh 120+ bisnis tahap awal</span>
+            <span>Dipakai tim bisnis UMKM tahap beta</span>
             <span>Dibangun oleh tim data engineer & AI researcher</span>
           </div>
         </div>
@@ -95,23 +103,23 @@
         </div>
       </div>
 
-      <section class="pain-strip reveal-on-scroll" aria-label="Masalah umum bisnis kecil">
-        <article>
+      <section class="pain-strip" aria-label="Masalah umum bisnis kecil">
+        <article class="reveal-on-scroll">
           <h3>Data tersebar di banyak file</h3>
           <p>Laporan jadi lambat karena harus gabung manual dari berbagai sumber.</p>
         </article>
-        <article>
+        <article class="reveal-on-scroll">
           <h3>Sulit baca tren penting</h3>
           <p>Omzet naik turun tidak cepat terlihat, sehingga keputusan sering terlambat.</p>
         </article>
-        <article>
+        <article class="reveal-on-scroll">
           <h3>Dashboard terasa rumit</h3>
           <p>Tool BI tradisional butuh setup teknis yang menyita waktu operasional.</p>
         </article>
       </section>
 
-      <div class="landing-features reveal-on-scroll">
-        <article>
+      <div class="landing-features">
+        <article class="reveal-on-scroll">
           <div class="feature-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F97316" stroke-width="1.8"
               stroke-linecap="round" stroke-linejoin="round">
@@ -123,7 +131,7 @@
           <h3>Upload Data Sekali Klik</h3>
           <p>Tidak ada integrasi live stream. Semua analisis berbasis file dataset yang kamu berikan.</p>
         </article>
-        <article>
+        <article class="reveal-on-scroll">
           <div class="feature-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F97316" stroke-width="1.8"
               stroke-linecap="round" stroke-linejoin="round">
@@ -133,7 +141,7 @@
           <h3>Chat + Laporan Inline</h3>
           <p>Jawaban AI menampilkan metrik, tabel, dan chart langsung di thread chat.</p>
         </article>
-        <article>
+        <article class="reveal-on-scroll">
           <div class="feature-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F97316" stroke-width="1.8"
               stroke-linecap="round" stroke-linejoin="round">
@@ -148,13 +156,13 @@
         </article>
       </div>
 
-      <section class="differentiation reveal-on-scroll" aria-label="Kenapa Vistara">
-        <div class="diff-head">
+      <section class="differentiation" aria-label="Kenapa Vistara">
+        <div class="diff-head reveal-on-scroll">
           <p class="hero-eyebrow">Kenapa Bukan Tool Lain?</p>
           <h3>Vistara fokus ke eksekusi cepat, bukan setup panjang.</h3>
         </div>
         <div class="diff-grid">
-          <article>
+          <article class="reveal-on-scroll">
             <h4>Vistara</h4>
             <ul>
               <li>Bahasa Indonesia-first untuk konteks bisnis lokal</li>
@@ -162,7 +170,7 @@
               <li>Chat ke insight lalu lanjut ke canvas dalam alur yang sama</li>
             </ul>
           </article>
-          <article>
+          <article class="reveal-on-scroll">
             <h4>Chatbot umum + spreadsheet</h4>
             <ul>
               <li>Perlu copy-paste manual dan format ulang berulang</li>
@@ -170,7 +178,7 @@
               <li>Insight mudah hilang antar percakapan</li>
             </ul>
           </article>
-          <article>
+          <article class="reveal-on-scroll">
             <h4>BI tradisional</h4>
             <ul>
               <li>Kuat, tetapi setup awal lebih berat untuk tim kecil</li>
@@ -181,43 +189,28 @@
         </div>
       </section>
 
-      <section class="how-it-works reveal-on-scroll" aria-label="Cara Kerja Vistara">
-        <div class="hiw-head">
+      <section class="how-it-works" aria-label="Cara Kerja Vistara">
+        <div class="hiw-head reveal-on-scroll">
           <p class="hero-eyebrow">Cara Kerja</p>
           <h3>3 langkah instan dari file ke dashboard</h3>
         </div>
         <div class="hiw-steps">
-          <div class="hiw-step">
+          <div class="hiw-step reveal-on-scroll">
             <div class="hiw-number">1</div>
             <h4>Upload file data</h4>
             <p>Pilih CSV, Excel, atau JSON. AI langsung memahami struktur data utama Anda.</p>
           </div>
-          <div class="hiw-step">
+          <div class="hiw-step reveal-on-scroll">
             <div class="hiw-number">2</div>
             <h4>Tulis pertanyaan natural</h4>
             <p>Tanya seperti ngobrol biasa, tanpa query atau rumus teknis.</p>
           </div>
-          <div class="hiw-step">
+          <div class="hiw-step reveal-on-scroll">
             <div class="hiw-number">3</div>
             <h4>Lihat visual & dashboard</h4>
             <p>Dapatkan grafik dan dashboard siap presentasi dalam hitungan detik.</p>
           </div>
         </div>
-      </section>
-
-      <section class="social-proof reveal-on-scroll" aria-label="Testimoni awal pengguna">
-        <article>
-          <p>“Biasanya rekap 2 jam, sekarang 10 menit sudah jadi dashboard rapat.”</p>
-          <span>Rani, Owner Brand F&B</span>
-        </article>
-        <article>
-          <p>“Tim operasional bisa cek tren cabang tanpa nunggu tim data.”</p>
-          <span>Ardi, COO Retail Lokal</span>
-        </article>
-        <article>
-          <p>“Bahasa Indonesianya nyambung dengan istilah bisnis harian kami.”</p>
-          <span>Maya, Finance Lead UMKM</span>
-        </article>
       </section>
 
       <section class="faq reveal-on-scroll" aria-label="Pertanyaan umum">
@@ -485,7 +478,7 @@
   <script src="/vendor/gridstack-all.js"></script>
   <script src="/vendor/chart.umd.min.js"></script>
   <script src="/runtime-env.js"></script>
-  <script type="module" src="/app.js?v=20260307q"></script>
+  <script type="module" src="/app.js?v=20260307s"></script>
 </body>
 
 </html>

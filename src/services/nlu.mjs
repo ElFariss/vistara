@@ -150,6 +150,21 @@ function sanitizeIntent(raw, fallback) {
 
 export async function parseIntent(message, history = []) {
   const fallback = fallbackIntent(message);
+  const hasExplicitSmalltalk = looksSmalltalkMessage(message);
+  const hasAnalyticsSignal = looksAnalyticsMessage(message);
+
+  // Fast-path untuk sapaan/smalltalk agar tidak salah klasifikasi oleh model.
+  // Ini juga menghemat kuota karena tidak perlu memanggil LLM.
+  if (hasExplicitSmalltalk && !hasAnalyticsSignal) {
+    return {
+      ...fallback,
+      intent: 'smalltalk',
+      metric: null,
+      time_period: null,
+      limit: null,
+      nlu_source: 'rule_smalltalk',
+    };
+  }
 
   const result = await generateJsonWithGemini({
     systemPrompt: [

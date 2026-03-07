@@ -280,13 +280,30 @@ label {
 
 .landing-page {
   display: grid;
-  gap: 1.4rem;
+  gap: clamp(2rem, 5vw, 4rem);
+  padding-bottom: 1.25rem;
+}
+
+.landing-welcome {
+  min-height: min(68vh, 560px);
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: clamp(2.5rem, 8vh, 7rem) 1rem 0.5rem;
+}
+
+.landing-welcome-title {
+  margin: 0;
+  max-width: 920px;
+  font-size: clamp(2.15rem, 4.6vw, 3.9rem);
+  line-height: 1.04;
+  letter-spacing: -0.02em;
 }
 
 .reveal-on-scroll {
   opacity: 0;
   transform: translateY(24px);
-  transition: opacity 520ms ease, transform 520ms ease;
+  transition: opacity 560ms ease, transform 560ms ease;
   will-change: opacity, transform;
 }
 
@@ -298,7 +315,7 @@ label {
 .hero-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
-  gap: 1.4rem;
+  gap: clamp(1.4rem, 3.2vw, 2.8rem);
   align-items: center;
 }
 
@@ -311,6 +328,17 @@ label {
 .hero-copy p {
   color: var(--ink-secondary);
   line-height: 1.65;
+}
+
+.hero-sentences {
+  display: grid;
+  gap: 0.42rem;
+  margin-top: 0.65rem;
+}
+
+.hero-sentences p {
+  margin: 0;
+  font-size: 0.98rem;
 }
 
 .hero-eyebrow {
@@ -460,7 +488,7 @@ label {
 
 .landing-features {
   display: grid;
-  gap: 0.9rem;
+  gap: 1rem;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
@@ -522,13 +550,16 @@ label {
 .landing-final-cta {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 84%, var(--accent-light));
   box-shadow: var(--shadow-sm);
-  padding: 1.35rem 1rem;
+  padding: 1.55rem 1rem;
   text-align: center;
   display: grid;
   place-items: center;
   gap: 0.65rem;
+  position: sticky;
+  bottom: 0.8rem;
+  z-index: 7;
 }
 
 .landing-final-cta p {
@@ -536,9 +567,17 @@ label {
   color: var(--ink-secondary);
 }
 
+.landing-final-cta button {
+  border-radius: var(--radius-pill);
+  padding: 0.9rem 1.5rem;
+  font-size: 1.03rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
 .pain-strip {
   display: grid;
-  gap: 0.85rem;
+  gap: 1rem;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
@@ -547,7 +586,7 @@ label {
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
-  padding: 1rem;
+  padding: 1.22rem;
 }
 
 .pain-strip h3 {
@@ -567,9 +606,9 @@ label {
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
-  padding: 1.4rem;
+  padding: 1.7rem;
   display: grid;
-  gap: 1rem;
+  gap: 1.15rem;
 }
 
 .hiw-head h3 {
@@ -579,13 +618,13 @@ label {
 .hiw-steps {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0.9rem;
+  gap: 1rem;
 }
 
 .hiw-step {
   border: 1px dashed var(--line);
   border-radius: var(--radius);
-  padding: 0.9rem;
+  padding: 1rem;
   background: var(--surface-hover);
 }
 
@@ -602,13 +641,12 @@ label {
 }
 
 .differentiation,
-.social-proof,
 .faq {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
-  padding: 1.3rem;
+  padding: 1.6rem;
 }
 
 .diff-head h3,
@@ -618,9 +656,9 @@ label {
 
 .diff-grid,
 .faq-grid {
-  margin-top: 0.95rem;
+  margin-top: 1.05rem;
   display: grid;
-  gap: 0.85rem;
+  gap: 1rem;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
@@ -628,7 +666,7 @@ label {
 .faq-grid article {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 0.85rem;
+  padding: 1rem;
   background: var(--surface-hover);
 }
 
@@ -652,31 +690,6 @@ label {
   color: var(--ink-secondary);
   font-size: 0.85rem;
   line-height: 1.5;
-}
-
-.social-proof {
-  display: grid;
-  gap: 0.8rem;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.social-proof article {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--surface-hover);
-  padding: 0.9rem;
-}
-
-.social-proof p {
-  margin: 0;
-  line-height: 1.55;
-}
-
-.social-proof span {
-  display: block;
-  margin-top: 0.55rem;
-  color: var(--ink-muted);
-  font-size: 0.8rem;
 }
 
 .auth-page,
@@ -1891,7 +1904,6 @@ label {
   }
 
   .diff-grid,
-  .social-proof,
   .faq-grid {
     grid-template-columns: 1fr;
   }

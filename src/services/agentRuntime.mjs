@@ -21,6 +21,9 @@ const MAX_REVIEWER_STEPS = 4;
 const GRID_COLS = 16;
 const GRID_ROWS = 9;
 const GEMINI_THINKING_BUDGET_MAX = 32768;
+const PLANNER_MAX_OUTPUT_TOKENS = 1800;
+const WORKER_MAX_OUTPUT_TOKENS = 2200;
+const REVIEWER_MAX_OUTPUT_TOKENS = 1400;
 
 const COMPLEX_TEMPLATE_COMPONENTS = [
   { type: 'MetricCard', title: 'Omzet', metric: 'revenue' },
@@ -237,6 +240,12 @@ function summarizeThoughtForTimeline(thoughts = [], fallback = '') {
   if (/^my\b.*\bplan\b/.test(lower) || /(execution plan|here'?s the plan|action plan|planning process|plan for building|build(ing)?.*dashboard)/.test(lower)) {
     return 'Menyusun rencana dashboard berbasis dataset';
   }
+  if (/(dashboard review|review.*dashboard|menilai|audit)/.test(lower)) {
+    return 'Meninjau kualitas dashboard dan kelengkapan visual';
+  }
+  if (/dashboard creation|phase\s*\d+|next step/.test(lower)) {
+    return 'Menentukan langkah berikutnya untuk melengkapi dashboard';
+  }
   if (/(identify|date column|time column|numeric|measure|schema)/.test(lower)) {
     return 'Mengidentifikasi kolom tanggal dan metrik numerik';
   }
@@ -368,6 +377,23 @@ function buildEdaProfile({ components = [], scope = {} }) {
       ...edaSuggestionForComponent(component),
     })),
   };
+}
+
+function summarizeEdaForTimeline(edaProfile = {}) {
+  const datasets = Array.isArray(edaProfile.datasets) ? edaProfile.datasets : [];
+  if (datasets.length === 0) {
+    return 'Menganalisis skema dataset aktif';
+  }
+
+  const parts = datasets.map((dataset) => {
+    const dates = Array.isArray(dataset.date_columns) ? dataset.date_columns.filter(Boolean) : [];
+    const nums = Array.isArray(dataset.numeric_measures) ? dataset.numeric_measures.filter(Boolean) : [];
+    const dateLabel = dates.length > 0 ? dates.join('/') : 'tanpa kolom tanggal';
+    const measureLabel = nums.length > 0 ? nums.slice(0, 3).join('/') : 'tanpa measure numerik';
+    return `${dataset.id}: tanggal ${dateLabel}, numerik ${measureLabel}`;
+  });
+
+  return safeText(`Menganalisis skema dataset (${parts.join(' | ')})`, 'Menganalisis skema dataset aktif', 170);
 }
 
 function componentMetricKey(component = {}) {
@@ -893,11 +919,21 @@ function timelineTitleForCall(call, fallbackTitle = 'Widget') {
   }
 
   if (call.tool === 'query_template') {
-    return `Membuat visual untuk ${templateLabel(call.args?.template_id || call.args?.metric)}`;
+    const label = templateLabel(call.args?.template_id || call.args?.metric);
+    const period = safeText(call.args?.time_period || '', '', 36);
+    return period ? `Membuat visual ${label} (${period})` : `Membuat visual untuk ${label}`;
   }
 
   if (call.tool === 'query_builder') {
     const title = safeText(call.args?.title || fallbackTitle, fallbackTitle, 72);
+    const measure = safeText(call.args?.measure || '', '', 28);
+    const groupBy = safeText(call.args?.group_by || '', '', 28);
+    if (measure && groupBy && groupBy !== 'none') {
+      return `Membuat ${vizLabel(call.args?.visualization)} untuk ${title} (${measure} per ${groupBy})`;
+    }
+    if (measure) {
+      return `Membuat ${vizLabel(call.args?.visualization)} untuk ${title} (${measure})`;
+    }
     return `Membuat ${vizLabel(call.args?.visualization)} untuk ${title}`;
   }
 
@@ -909,11 +945,18 @@ async function runPlannerAgent({ goal, scope, components, trace, memory, hooks =
   const catalog = componentCatalog(components);
   const edaProfile = buildEdaProfile({ components, scope });
   const timelineId = `planner_${Date.now()}`;
+  const edaStepId = `planner_eda_${Date.now()}`;
 
   emitTimelineEvent(hooks, {
     id: timelineId,
     status: 'pending',
     title: 'Menyusun rencana dashboard',
+    agent: 'planner',
+  });
+  emitTimelineEvent(hooks, {
+    id: edaStepId,
+    status: 'done',
+    title: summarizeEdaForTimeline(edaProfile),
     agent: 'planner',
   });
 
@@ -940,9 +983,11 @@ async function runPlannerAgent({ goal, scope, components, trace, memory, hooks =
     }),
     tools: PLANNER_TOOL_DECLARATIONS,
     temperature: 0.1,
-    maxOutputTokens: 400,
+    maxOutputTokens: PLANNER_MAX_OUTPUT_TOKENS,
     thinkingBudget: GEMINI_THINKING_BUDGET_MAX,
-    includeThoughts: true,
+    includeThoughts: false,
+    functionCallingMode: 'ANY',
+    allowedFunctionNames: ['submit_plan'],
   });
 
   const plannerThought = summarizeThoughtForTimeline(response.thoughts, '');
@@ -1096,6 +1141,7 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
   let adjustedPeriodCount = 0;
   let finalSummary = null;
   let producedWidgets = 0;
+  let noToolCallStreak = 0;
 
   for (let stepIndex = 0; stepIndex < MAX_WORKER_STEPS; stepIndex += 1) {
     const promptPayload = {
@@ -1128,9 +1174,11 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
       userPrompt: JSON.stringify(promptPayload),
       tools: WORKER_TOOL_DECLARATIONS,
       temperature: 0.1,
-      maxOutputTokens: 650,
+      maxOutputTokens: WORKER_MAX_OUTPUT_TOKENS,
       thinkingBudget: GEMINI_THINKING_BUDGET_MAX,
-      includeThoughts: true,
+      includeThoughts: false,
+      functionCallingMode: 'ANY',
+      allowedFunctionNames: WORKER_TOOL_DECLARATIONS.map((tool) => tool.name),
     });
 
     if (!response.ok) {
@@ -1170,6 +1218,7 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
 
     const call = (response.functionCalls || [])[0];
     if (!call) {
+      noToolCallStreak += 1;
       const text = safeText(response.text || '', '', 220);
       if (text.toLowerCase().startsWith('final:')) {
         finalSummary = text.slice(6).trim();
@@ -1179,12 +1228,14 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
       pushTrace(trace, {
         step: 'worker_no_tool_call',
         iteration: stepIndex + 1,
+        streak: noToolCallStreak,
       });
-      if (producedWidgets >= 4) {
+      if (noToolCallStreak >= 3 || (producedWidgets > 0 && noToolCallStreak >= 2) || producedWidgets >= 4) {
         break;
       }
       continue; // give the model another chance within max steps
     }
+    noToolCallStreak = 0;
 
     if (call.name === 'finalize_dashboard') {
       finalSummary = safeText(call.args?.summary || response.text || '', 'Dashboard selesai dibuat.', 260);
@@ -1405,9 +1456,11 @@ async function runReviewerAgent({ goal, scope, artifacts, trace, memory, hooks =
       }),
       tools: REVIEWER_TOOL_DECLARATIONS,
       temperature: 0.1,
-      maxOutputTokens: 450,
+      maxOutputTokens: REVIEWER_MAX_OUTPUT_TOKENS,
       thinkingBudget: GEMINI_THINKING_BUDGET_MAX,
-      includeThoughts: true,
+      includeThoughts: false,
+      functionCallingMode: 'ANY',
+      allowedFunctionNames: REVIEWER_TOOL_DECLARATIONS.map((tool) => tool.name),
     });
 
     if (!response.ok) {

@@ -5,6 +5,7 @@ import { executeAnalyticsIntent } from './queryEngine.mjs';
 import { ensureDefaultDashboard, applyDashboardModification, getDashboard } from './dashboards.mjs';
 import { runDashboardAgent } from './agentRuntime.mjs';
 import { getGeminiQuotaCooldownInfo } from './gemini.mjs';
+import { config } from '../config.mjs';
 import { generateReport } from './reports.mjs';
 import { createGoal } from './goals.mjs';
 import { logAudit } from './audit.mjs';
@@ -522,7 +523,8 @@ export async function processChatMessage({
         }
       } else {
       try {
-        const complexTimeoutMs = 12000;
+        const configuredTimeout = Number(config.dashboardAgentTimeoutMs || 180000);
+        const complexTimeoutMs = Math.min(300000, Math.max(30000, configuredTimeout));
         const complex = await Promise.race([
           runDashboardAgent({
             tenantId,

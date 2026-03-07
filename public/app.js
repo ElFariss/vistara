@@ -1610,9 +1610,13 @@ function upsertTimelineStep(runId, step = {}) {
 
   const stepId = timelineStepId(step);
   const existingIndex = timeline.timeline.findIndex((item) => item.id === stepId);
+  const cleanLabel = String(step.title || step.label || 'Langkah agent')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180);
   const normalizedStep = {
     id: stepId,
-    label: step.title || step.label || 'Langkah agent',
+    label: cleanLabel || 'Langkah agent',
     status: step.status || 'pending',
   };
 
@@ -1622,6 +1626,23 @@ function upsertTimelineStep(runId, step = {}) {
       ...normalizedStep,
     };
   } else {
+    const duplicateIndex = timeline.timeline.findIndex((item) => (
+      item.label === normalizedStep.label && item.status === normalizedStep.status
+    ));
+    if (duplicateIndex >= 0) {
+      timeline.timeline[duplicateIndex] = {
+        ...timeline.timeline[duplicateIndex],
+        ...normalizedStep,
+      };
+      renderThread();
+      return;
+    }
+
+    const lastStep = timeline.timeline[timeline.timeline.length - 1];
+    if (lastStep && lastStep.label === normalizedStep.label && lastStep.status === normalizedStep.status) {
+      return;
+    }
+
     timeline.timeline.push(normalizedStep);
   }
 
