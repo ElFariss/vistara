@@ -32,6 +32,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-replace-me}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-${GEMINI_API:-}}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-pro}
+      API_BASE_URL: ${API_BASE_URL:-}
       PYTHON_AGENT_URL: http://python-agent:8091
       PYTHON_AGENT_TOKEN: ${PYTHON_AGENT_TOKEN:-replace-python-token}
       PYTHON_AGENT_TIMEOUT_MS: 3500

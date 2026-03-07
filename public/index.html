@@ -241,6 +241,8 @@
           </form>
         </section>
 
+        <div id="panelDivider" class="panel-divider" role="separator" aria-orientation="vertical" aria-label="Ubah ukuran panel" tabindex="0"></div>
+
         <section id="canvasPane" class="workspace-pane canvas-pane">
           <div class="canvas-shell">
             <aside class="data-pane" id="dataPane">
@@ -259,6 +261,12 @@
                 <div class="canvas-bar-actions">
                   <button id="toggleDataPaneBtn" type="button" class="ghost" aria-controls="dataPane" aria-expanded="true">Sembunyikan Field</button>
                   <button id="toggleConfigPaneBtn" type="button" class="ghost" aria-controls="configPane" aria-expanded="true">Sembunyikan Panel</button>
+                  <div class="canvas-zoom-controls" aria-label="Kontrol zoom canvas">
+                    <button id="zoomOutBtn" type="button" class="ghost" aria-label="Zoom keluar">−</button>
+                    <span id="zoomLevelLabel">100%</span>
+                    <button id="zoomInBtn" type="button" class="ghost" aria-label="Zoom masuk">+</button>
+                    <button id="zoomResetBtn" type="button" class="ghost" aria-label="Reset zoom">Reset</button>
+                  </div>
                   <div class="canvas-page-controls" aria-label="Navigasi slide dashboard">
                     <button id="canvasPrevPage" type="button" class="ghost" aria-label="Halaman sebelumnya">◀</button>
                     <span id="canvasPageIndicator">Hal 1 / 1</span>
@@ -275,9 +283,11 @@
               </div>
 
               <div id="canvasViewport" class="canvas-viewport">
-                <div id="canvasStage" class="canvas-stage">
-                  <div id="canvasGrid" class="canvas-grid"></div>
-                  <button id="floatingAddBtn" type="button" class="floating-add">Tambah Widget</button>
+                <div id="canvasWorld" class="canvas-world">
+                  <div id="canvasStage" class="canvas-stage">
+                    <div id="canvasGrid" class="canvas-grid"></div>
+                    <button id="floatingAddBtn" type="button" class="floating-add">Tambah Widget</button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -375,6 +385,7 @@
 
   <script src="/vendor/gridstack-all.js"></script>
   <script src="/vendor/chart.umd.min.js"></script>
+  <script src="/runtime-env.js"></script>
   <script type="module" src="/app.js?v=20260307m"></script>
 </body>
 

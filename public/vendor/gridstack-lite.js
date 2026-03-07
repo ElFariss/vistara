@@ -289,6 +289,8 @@ function createGridStackLibrary(container, options = {}) {
         if (typeof grid.resizable === 'function') {
           grid.resizable(element, editingEnabled);
         }
+        element.classList.toggle('ui-draggable-disabled', !editingEnabled);
+        element.classList.toggle('ui-resizable-disabled', !editingEnabled);
       }
     }
     container.classList.toggle('editing', editingEnabled);

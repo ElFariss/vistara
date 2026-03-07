@@ -6,9 +6,20 @@ const GRID_ROWS = 9;
 const GRID_GAP = 10;
 const MOBILE_BREAKPOINT = 768;
 const MAX_LAYOUT_ROWS = 240;
+const MIN_CANVAS_PCT = 28;
+const MAX_CANVAS_PCT = 92;
+const DEFAULT_CANVAS_PCT = 58;
+const STAGE_BASE_WIDTH = 1280;
+const STAGE_BASE_HEIGHT = 720;
+const MIN_STAGE_ZOOM = 0.5;
+const MAX_STAGE_ZOOM = 1.75;
+const ZOOM_STEP = 0.1;
 const SETTINGS_STORAGE_KEY = 'vistara_settings';
 const PRECHAT_ROTATE_MS = 5000;
 const PRECHAT_FADE_MS = 320;
+
+const runtimeConfig = window.__VISTARA_RUNTIME__ || {};
+const API_BASE_URL = String(runtimeConfig.API_BASE_URL || '').trim().replace(/\/+$/, '');
 
 const DEFAULT_SETTINGS = {
   theme_mode: 'light',
@@ -60,6 +71,9 @@ const state = {
   timelineMessageId: null,
   timelineRunId: null,
   canvasPage: 1,
+  canvasWidthPct: DEFAULT_CANVAS_PCT,
+  isResizingPanels: false,
+  stageZoom: 1,
   settings: { ...DEFAULT_SETTINGS },
   settingsOpen: false,
   dataPaneCollapsed: false,
@@ -104,9 +118,12 @@ const refs = {
   contextForm: document.getElementById('contextForm'),
 
   chatPane: document.getElementById('chatPane'),
+  workspaceShell: document.querySelector('.workspace-shell'),
+  panelDivider: document.getElementById('panelDivider'),
   canvasPane: document.getElementById('canvasPane'),
   canvasShell: document.querySelector('.canvas-shell'),
   canvasViewport: document.getElementById('canvasViewport'),
+  canvasWorld: document.getElementById('canvasWorld'),
 
   dataGate: document.getElementById('dataGate'),
   gateUploadInput: document.getElementById('gateUploadInput'),
@@ -128,6 +145,10 @@ const refs = {
   addWidgetToolbar: document.getElementById('addWidgetToolbar'),
   editModeToggle: document.getElementById('editModeToggle'),
   floatingAddBtn: document.getElementById('floatingAddBtn'),
+  zoomInBtn: document.getElementById('zoomInBtn'),
+  zoomOutBtn: document.getElementById('zoomOutBtn'),
+  zoomResetBtn: document.getElementById('zoomResetBtn'),
+  zoomLevelLabel: document.getElementById('zoomLevelLabel'),
   canvasStage: document.getElementById('canvasStage'),
   canvasPrevPage: document.getElementById('canvasPrevPage'),
   canvasNextPage: document.getElementById('canvasNextPage'),
@@ -176,9 +197,9 @@ function setTheme(mode) {
   const root = document.documentElement;
   const next = resolveThemeMode(mode || 'light');
   root.setAttribute('data-theme', next);
-  if (refs.themeToggle) {
-    refs.themeToggle.textContent = next === 'dark' ? '☀️ Mode Terang' : '🌙 Mode Gelap';
-  }
+  document.dispatchEvent(new CustomEvent('vistara:theme-change', {
+    detail: { theme: next },
+  }));
 }
 
 function setAccent(accentKey = 'orange') {
@@ -248,6 +269,12 @@ function applySettings(nextSettings, options = {}) {
   setTheme(state.settings.theme_mode);
   setAccent(state.settings.accent_color);
   syncSettingsForm();
+  if (!refs.workspacePage?.classList.contains('hidden')) {
+    renderThread();
+    if (state.grid) {
+      renderCanvas();
+    }
+  }
 
   if (persist) {
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(state.settings));
@@ -339,6 +366,9 @@ function toggleTheme() {
 }
 
 async function api(path, options = {}) {
+  const requestUrl = /^https?:\/\//i.test(path)
+    ? path
+    : `${API_BASE_URL}${path}`;
   const headers = new Headers(options.headers || {});
   const isFormData = options.body instanceof FormData;
 
@@ -350,7 +380,7 @@ async function api(path, options = {}) {
     headers.set('Authorization', `Bearer ${state.token}`);
   }
 
-  const response = await fetch(path, {
+  const response = await fetch(requestUrl, {
     ...options,
     headers,
   });
@@ -571,6 +601,7 @@ function setCanvasOpen(open) {
   refs.workspacePage.classList.toggle('canvas-open', state.canvasOpen);
   refs.canvasPane.classList.toggle('hidden', false);
   refs.chatPane.classList.toggle('hidden', false);
+  applyWorkspaceSplitState();
 
   if (state.canvasOpen && window.innerWidth <= 1180) {
     document.body.classList.add('canvas-overlay-open');
@@ -579,8 +610,116 @@ function setCanvasOpen(open) {
   }
 
   if (state.canvasOpen && state.grid) {
+    applyStageDimensions();
     syncGridBounds();
+    if (window.innerWidth > 1180) {
+      window.requestAnimationFrame(() => {
+        centerCanvasStage();
+      });
+    }
   }
+}
+
+function setCanvasWidthPct(nextPct, options = {}) {
+  const clamped = Math.max(MIN_CANVAS_PCT, Math.min(MAX_CANVAS_PCT, Number(nextPct || DEFAULT_CANVAS_PCT)));
+  state.canvasWidthPct = clamped;
+  if (refs.workspacePage) {
+    const baseWidth = refs.workspaceShell?.clientWidth || window.innerWidth || 1440;
+    const panePx = Math.round((baseWidth * clamped) / 100);
+    refs.workspacePage.style.setProperty('--canvas-pane-width', `${clamped}%`);
+    refs.workspacePage.style.setProperty('--canvas-pane-width-px', `${panePx}px`);
+  }
+
+  const shouldAutoCollapseSidebars = clamped >= 84;
+  if (options.autoCollapse !== false && shouldAutoCollapseSidebars) {
+    state.dataPaneCollapsed = true;
+    state.configPaneCollapsed = true;
+  }
+  if (options.autoCollapse !== false && !shouldAutoCollapseSidebars && options.restore !== false) {
+    state.dataPaneCollapsed = false;
+    state.configPaneCollapsed = false;
+  }
+  updateCanvasPaneState();
+}
+
+function applyWorkspaceSplitState() {
+  if (!refs.workspacePage) return;
+  refs.workspacePage.classList.toggle('canvas-open', state.canvasOpen);
+  if (refs.panelDivider) {
+    refs.panelDivider.classList.toggle('hidden', !state.canvasOpen || window.innerWidth <= 1180);
+  }
+  setCanvasWidthPct(state.canvasWidthPct, {
+    autoCollapse: state.canvasOpen,
+    restore: false,
+  });
+}
+
+function bindPanelDivider() {
+  if (!refs.panelDivider || refs.panelDivider.dataset.bound) {
+    return;
+  }
+  refs.panelDivider.dataset.bound = 'true';
+
+  let isDragging = false;
+
+  const onMove = (clientX) => {
+    if (!state.canvasOpen || !refs.workspaceShell) {
+      return;
+    }
+    const rect = refs.workspaceShell.getBoundingClientRect();
+    if (!rect.width) {
+      return;
+    }
+    const relativeX = clientX - rect.left;
+    const canvasPct = ((rect.width - relativeX) / rect.width) * 100;
+    setCanvasWidthPct(canvasPct, { autoCollapse: true, restore: false });
+    syncGridBounds();
+  };
+
+  refs.panelDivider.addEventListener('pointerdown', (event) => {
+    if (!state.canvasOpen || window.innerWidth <= 1180) {
+      return;
+    }
+    isDragging = true;
+    state.isResizingPanels = true;
+    refs.workspaceShell?.classList.add('is-resizing');
+    refs.panelDivider.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+
+  refs.panelDivider.addEventListener('pointermove', (event) => {
+    if (!isDragging) {
+      return;
+    }
+    onMove(event.clientX);
+  });
+
+  const stopDrag = () => {
+    if (!isDragging) {
+      return;
+    }
+    isDragging = false;
+    state.isResizingPanels = false;
+    refs.workspaceShell?.classList.remove('is-resizing');
+  };
+
+  refs.panelDivider.addEventListener('pointerup', stopDrag);
+  refs.panelDivider.addEventListener('pointercancel', stopDrag);
+
+  refs.panelDivider.addEventListener('keydown', (event) => {
+    if (!state.canvasOpen || window.innerWidth <= 1180) {
+      return;
+    }
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      setCanvasWidthPct(state.canvasWidthPct + 4, { autoCollapse: true, restore: false });
+      syncGridBounds();
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      setCanvasWidthPct(state.canvasWidthPct - 4, { autoCollapse: true, restore: false });
+      syncGridBounds();
+    }
+  });
 }
 
 function updateCanvasPaneState() {
@@ -628,7 +767,7 @@ function bindCanvasViewportPan() {
     if (event.button !== 0) {
       return;
     }
-    if (event.target !== refs.canvasViewport && event.target !== refs.canvasStage) {
+    if (event.target instanceof Element && event.target.closest('.grid-widget')) {
       return;
     }
     isPanning = true;
@@ -661,6 +800,83 @@ function bindCanvasViewportPan() {
   refs.canvasViewport.addEventListener('pointerup', stopPan);
   refs.canvasViewport.addEventListener('pointercancel', stopPan);
   refs.canvasViewport.addEventListener('pointerleave', stopPan);
+
+  refs.canvasViewport.addEventListener('wheel', (event) => {
+    if (!refs.canvasStage) {
+      return;
+    }
+    if (!(event.ctrlKey || event.metaKey || event.altKey)) {
+      return;
+    }
+    event.preventDefault();
+    const direction = event.deltaY > 0 ? -1 : 1;
+    setStageZoom(state.stageZoom + direction * ZOOM_STEP, {
+      anchorX: event.clientX,
+      anchorY: event.clientY,
+    });
+  }, { passive: false });
+}
+
+function syncStageZoomLabel() {
+  if (!refs.zoomLevelLabel) {
+    return;
+  }
+  refs.zoomLevelLabel.textContent = `${Math.round(state.stageZoom * 100)}%`;
+}
+
+function applyStageDimensions() {
+  if (!refs.canvasStage || !refs.canvasWorld || !refs.canvasViewport) {
+    return;
+  }
+
+  const width = Math.round(STAGE_BASE_WIDTH * state.stageZoom);
+  const height = Math.round(STAGE_BASE_HEIGHT * state.stageZoom);
+  const worldPad = Math.max(220, Math.round(Math.min(width, height) * 0.35));
+
+  refs.canvasStage.style.width = `${width}px`;
+  refs.canvasStage.style.height = `${height}px`;
+  refs.canvasWorld.style.width = `${width + worldPad * 2}px`;
+  refs.canvasWorld.style.height = `${height + worldPad * 2}px`;
+  refs.canvasStage.style.left = `${worldPad}px`;
+  refs.canvasStage.style.top = `${worldPad}px`;
+  refs.canvasGrid.style.backgroundSize = `${Math.max(16, width / GRID_COLS)}px ${Math.max(16, height / GRID_ROWS)}px`;
+  syncStageZoomLabel();
+}
+
+function centerCanvasStage() {
+  if (!refs.canvasViewport || !refs.canvasWorld || !refs.canvasStage) {
+    return;
+  }
+  const centerX = Math.max(0, (refs.canvasWorld.clientWidth - refs.canvasViewport.clientWidth) / 2);
+  const centerY = Math.max(0, (refs.canvasWorld.clientHeight - refs.canvasViewport.clientHeight) / 2);
+  refs.canvasViewport.scrollLeft = centerX;
+  refs.canvasViewport.scrollTop = centerY;
+}
+
+function setStageZoom(nextZoom, options = {}) {
+  const prevZoom = state.stageZoom;
+  const clamped = Math.max(MIN_STAGE_ZOOM, Math.min(MAX_STAGE_ZOOM, Number(nextZoom || 1)));
+  state.stageZoom = clamped;
+  applyStageDimensions();
+  syncGridBounds();
+
+  if (!refs.canvasViewport || !refs.canvasWorld || !refs.canvasStage || prevZoom === clamped) {
+    return;
+  }
+
+  if (Number.isFinite(options.anchorX) && Number.isFinite(options.anchorY)) {
+    const viewportRect = refs.canvasViewport.getBoundingClientRect();
+    const localX = options.anchorX - viewportRect.left + refs.canvasViewport.scrollLeft;
+    const localY = options.anchorY - viewportRect.top + refs.canvasViewport.scrollTop;
+    const ratio = clamped / prevZoom;
+    refs.canvasViewport.scrollLeft = localX * ratio - (options.anchorX - viewportRect.left);
+    refs.canvasViewport.scrollTop = localY * ratio - (options.anchorY - viewportRect.top);
+    return;
+  }
+
+  if (options.recenter) {
+    centerCanvasStage();
+  }
 }
 
 function setEditMode(editing) {
@@ -680,7 +896,11 @@ function setEditMode(editing) {
   if (state.grid && typeof state.grid.setEditing === 'function') {
     state.grid.setEditing(state.editMode);
   }
-  renderCanvas();
+  if (refs.canvasGrid) {
+    refs.canvasGrid.querySelectorAll('.widget-head-actions').forEach((element) => {
+      element.classList.toggle('hidden-actions', !state.editMode);
+    });
+  }
 }
 
 function setDatasetGateVisible(visible) {
@@ -1824,7 +2044,7 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
     headers.set('Authorization', `Bearer ${state.token}`);
   }
 
-  const response = await fetch('/api/chat/stream', {
+  const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -2117,7 +2337,27 @@ if (refs.floatingAddBtn) {
   });
 }
 
+if (refs.zoomInBtn) {
+  refs.zoomInBtn.addEventListener('click', () => {
+    setStageZoom(state.stageZoom + ZOOM_STEP, { recenter: false });
+  });
+}
+
+if (refs.zoomOutBtn) {
+  refs.zoomOutBtn.addEventListener('click', () => {
+    setStageZoom(state.stageZoom - ZOOM_STEP, { recenter: false });
+  });
+}
+
+if (refs.zoomResetBtn) {
+  refs.zoomResetBtn.addEventListener('click', () => {
+    setStageZoom(1, { recenter: true });
+  });
+}
+
 window.addEventListener('resize', () => {
+  applyWorkspaceSplitState();
+  applyStageDimensions();
   syncGridBounds();
 });
 
@@ -2495,8 +2735,12 @@ refs.logoutBtn.addEventListener('click', () => {
 
 async function bootstrap() {
   applySettings(readSettings(), { persist: false });
+  bindPanelDivider();
   bindCanvasViewportPan();
+  applyStageDimensions();
+  centerCanvasStage();
   updateCanvasPaneState();
+  applyWorkspaceSplitState();
   setEditMode(false);
   switchAuthTab('login');
   setCanvasOpen(false);

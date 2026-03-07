@@ -570,6 +570,8 @@ label {
 }
 
 .workspace-page {
+  --canvas-pane-width: 58%;
+  --canvas-pane-width-px: 56vw;
   border: none;
   border-radius: 0;
   background: transparent;
@@ -1085,14 +1087,53 @@ label {
 /* --- New Workspace Layout (Chat + Slide-out Canvas) --- */
 .workspace-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 0 0;
   min-height: 100%;
-  transition: grid-template-columns var(--transition);
+  transition: grid-template-columns var(--transition), cursor var(--transition);
   gap: 0;
 }
 
 .workspace-page.canvas-open .workspace-shell {
-  grid-template-columns: minmax(320px, 0.42fr) minmax(0, 0.58fr);
+  grid-template-columns:
+    minmax(300px, calc(100% - var(--canvas-pane-width-px)))
+    10px
+    minmax(360px, var(--canvas-pane-width-px));
+}
+
+.workspace-shell.is-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.panel-divider {
+  display: none;
+  width: 10px;
+  position: relative;
+  background: transparent;
+  cursor: col-resize;
+  border-left: 1px solid transparent;
+  border-right: 1px solid transparent;
+  z-index: 15;
+}
+
+.panel-divider::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 56px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 42%, transparent);
+  opacity: 0.45;
+  transition: opacity var(--transition), transform var(--transition);
+}
+
+.panel-divider:hover::before,
+.workspace-shell.is-resizing .panel-divider::before {
+  opacity: 0.9;
+  transform: translate(-50%, -50%) scaleY(1.08);
 }
 
 .workspace-pane {
@@ -1124,6 +1165,10 @@ label {
   transform: translateX(0);
   opacity: 1;
   pointer-events: auto;
+}
+
+.workspace-page.canvas-open .panel-divider {
+  display: block;
 }
 
 .canvas-shell {
@@ -1248,17 +1293,22 @@ label {
 
 .canvas-viewport {
   min-height: 0;
+  position: relative;
   overflow: auto;
   padding: 0.85rem;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
   scroll-behavior: smooth;
   cursor: grab;
+  touch-action: none;
 }
 
 .canvas-viewport.is-panning {
   cursor: grabbing;
+}
+
+.canvas-world {
+  position: relative;
+  min-width: calc(100% + 680px);
+  min-height: calc(100% + 520px);
 }
 
 .canvas-page-controls {
@@ -1294,18 +1344,39 @@ label {
   font-size: 0.88rem;
 }
 
+.canvas-zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-hover);
+}
+
+.canvas-zoom-controls span {
+  min-width: 52px;
+  text-align: center;
+  font-size: 0.83rem;
+  color: var(--ink-secondary);
+}
+
+.canvas-zoom-controls button {
+  min-width: 34px;
+  padding: 0.24rem 0.56rem;
+}
+
 .canvas-stage {
-  width: min(100%, 1280px);
-  min-width: 960px;
-  aspect-ratio: 16 / 9;
-  min-height: 540px;
+  width: 1280px;
+  height: 720px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
-  position: relative;
-  flex: 0 0 auto;
+  position: absolute;
+  left: 260px;
+  top: 220px;
 }
 
 .canvas-grid {
@@ -1507,13 +1578,14 @@ label {
   top: 46%;
   transform: translate(-50%, -50%);
   width: min(680px, calc(100% - 2rem));
-  padding: 0.9rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
-  box-shadow: var(--shadow-sm);
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--ink-muted);
-  font-size: 0.98rem;
+  font-size: 1.04rem;
+  font-weight: 500;
   line-height: 1.5;
   text-align: center;
   opacity: 1;
@@ -1652,6 +1724,10 @@ label {
     grid-template-columns: 1fr;
   }
 
+  .panel-divider {
+    display: none !important;
+  }
+
   .canvas-shell {
     grid-template-columns: 1fr;
   }
@@ -1670,14 +1746,17 @@ label {
   }
 
   .canvas-viewport {
-    justify-content: flex-start;
     padding: 0.7rem;
+  }
+
+  .canvas-world {
+    min-width: calc(100% + 520px);
+    min-height: calc(100% + 420px);
   }
 
   .canvas-stage {
     width: 1280px;
-    min-width: 1280px;
-    min-height: 720px;
+    height: 720px;
   }
 
   .workspace-page.canvas-open .canvas-pane {
@@ -1763,9 +1842,7 @@ label {
 
   .canvas-stage {
     width: 1080px;
-    min-width: 1080px;
-    aspect-ratio: 16 / 9;
-    min-height: 608px;
+    height: 608px;
     border-radius: 12px;
   }
 
