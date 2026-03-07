@@ -40,6 +40,15 @@ function clearQuotaCooldown() {
   quotaCooldownReason = null;
 }
 
+export function getGeminiQuotaCooldownInfo() {
+  const active = isQuotaCooldownActive();
+  return {
+    active,
+    reason: active ? quotaCooldownReason || 'quota_exhausted' : null,
+    until: active ? new Date(quotaCooldownUntil).toISOString() : null,
+  };
+}
+
 function buildPrompt(systemPrompt, userPrompt) {
   if (!systemPrompt) {
     return userPrompt;

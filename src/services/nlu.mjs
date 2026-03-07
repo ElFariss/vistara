@@ -49,17 +49,33 @@ function extractMetric(text) {
   return 'omzet';
 }
 
+function looksAnalyticsMessage(text) {
+  const lower = toLowerAlnum(text);
+  return /(omzet|penjualan|revenue|untung|profit|laba|margin|biaya|pengeluaran|produk|cabang|grafik|chart|dashboard|canvas|tren|trend|laporan|report|target|goal|kpi|performa|analisis|top|terlaris|rank|ranking|compare|banding|vs|minggu|bulan|hari)/i.test(lower);
+}
+
+function looksSmalltalkMessage(text) {
+  const lower = toLowerAlnum(text);
+  if (/^(hi|halo|hello|hai|pagi|siang|sore|malam|permisi|test|tes)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(thanks|thank you|makasih|terima kasih|mantap|sip)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(siapa nama saya|nama saya siapa|siapa saya|who am i|apa nama saya|namaku siapa)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(apa kabar|gimana kabar|selamat pagi|selamat siang|selamat sore|selamat malam)\b/i.test(lower)) {
+    return true;
+  }
+  return false;
+}
+
 function fallbackIntent(message) {
   const lower = toLowerAlnum(message);
-  let intent = 'show_metric';
-  const isGreeting =
-    /^(hi|halo|hello|hai|pagi|siang|sore|malam|permisi|test|tes)\b/i.test(lower)
-    || /\b(apa kabar|gimana kabar|selamat pagi|selamat siang|selamat sore|selamat malam)\b/i.test(lower);
-  const isThanks = /\b(thanks|thank you|makasih|terima kasih|mantap|sip)\b/i.test(lower);
-
-  if (isGreeting || isThanks) {
-    intent = 'smalltalk';
-  }
+  const isSmalltalk = looksSmalltalkMessage(message);
+  const isAnalytics = looksAnalyticsMessage(message);
+  let intent = isSmalltalk || !isAnalytics ? 'smalltalk' : 'show_metric';
 
   if (intent !== 'smalltalk' && /(banding|vs|dibanding|compare)/i.test(lower)) {
     intent = 'compare';

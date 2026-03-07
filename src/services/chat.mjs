@@ -4,6 +4,7 @@ import { parseIntent } from './nlu.mjs';
 import { executeAnalyticsIntent } from './queryEngine.mjs';
 import { ensureDefaultDashboard, applyDashboardModification, getDashboard } from './dashboards.mjs';
 import { runDashboardAgent } from './agentRuntime.mjs';
+import { getGeminiQuotaCooldownInfo } from './gemini.mjs';
 import { generateReport } from './reports.mjs';
 import { createGoal } from './goals.mjs';
 import { logAudit } from './audit.mjs';
@@ -276,8 +277,36 @@ function deterministicDashboardFallback({ tenantId, userId, intent }) {
   };
 }
 
-function buildSmalltalkAnswer(message, datasetReady) {
+function lookupUserDisplayName(tenantId, userId) {
+  if (!tenantId || !userId) {
+    return null;
+  }
+  const row = get(
+    `
+      SELECT name
+      FROM users
+      WHERE id = :id AND tenant_id = :tenant_id
+      LIMIT 1
+    `,
+    {
+      id: userId,
+      tenant_id: tenantId,
+    },
+  );
+  const name = String(row?.name || '').trim();
+  return name || null;
+}
+
+function buildSmalltalkAnswer(message, datasetReady, userDisplayName = null) {
   const lower = String(message || '').toLowerCase();
+  const safeName = userDisplayName || 'Anda';
+
+  if (/\b(siapa nama saya|nama saya siapa|apa nama saya|namaku siapa|siapa saya|who am i)\b/i.test(lower)) {
+    if (userDisplayName) {
+      return `Nama Anda yang terdaftar saat ini: ${safeName}.`;
+    }
+    return 'Saya belum menemukan nama profil Anda di sesi ini. Anda bisa isi lewat Business Context atau Pengaturan.';
+  }
 
   if (/\b(thanks|thank you|makasih|terima kasih)\b/i.test(lower)) {
     return 'Sama-sama. Kalau mau, saya bisa lanjutkan dengan ringkasan omzet, untung, atau tren terbaru.';
@@ -288,10 +317,10 @@ function buildSmalltalkAnswer(message, datasetReady) {
   }
 
   if (datasetReady) {
-    return 'Halo. Saya siap bantu analisis data Anda. Coba tanya: "Omzet 7 hari terakhir" atau "Buat dashboard performa bulan ini".';
+    return `Halo ${safeName}. Saya siap bantu analisis data Anda. Coba tanya: "Omzet 7 hari terakhir" atau "Buat dashboard performa bulan ini".`;
   }
 
-  return 'Halo. Upload dataset dulu (CSV/JSON/XLSX/XLS), lalu saya bantu analisis secara instan.';
+  return `Halo ${safeName}. Upload dataset dulu (CSV/JSON/XLSX/XLS), lalu saya bantu analisis secara instan.`;
 }
 
 export async function processChatMessage({
@@ -318,6 +347,7 @@ export async function processChatMessage({
 
   const intent = await parseIntent(message, history);
   const datasetReady = hasDataset(tenantId);
+  const userDisplayName = lookupUserDisplayName(tenantId, userId);
 
   if (!datasetReady && intent.intent !== 'data_management' && intent.intent !== 'smalltalk') {
     const responsePayload = {
@@ -355,7 +385,7 @@ export async function processChatMessage({
 
   if (intent.intent === 'smalltalk') {
     responsePayload = {
-      answer: buildSmalltalkAnswer(message, datasetReady),
+      answer: buildSmalltalkAnswer(message, datasetReady, userDisplayName),
       widgets: [],
       artifacts: [],
       intent,
@@ -465,6 +495,32 @@ export async function processChatMessage({
           title: 'Agentic Thinking',
         });
       }
+      const quotaState = getGeminiQuotaCooldownInfo();
+      if (quotaState.active) {
+        if (stream && typeof stream.onTimelineStep === 'function') {
+          stream.onTimelineStep({
+            timeline_id: timelineId,
+            id: `dashboard_quota_cooldown_${Date.now()}`,
+            agent: 'system',
+            status: 'pending',
+            title: 'Kuota AI sedang penuh, gunakan fallback dashboard cepat',
+          });
+        }
+        responsePayload = {
+          ...deterministicDashboardFallback({ tenantId, userId, intent }),
+          intent,
+          agent: {
+            mode: 'deterministic_fallback',
+            reason: quotaState.reason || 'quota_exhausted',
+            quota_cooldown_until: quotaState.until || null,
+          },
+        };
+        if (stream && typeof stream.onTimelineDone === 'function') {
+          stream.onTimelineDone({
+            timeline_id: timelineId,
+          });
+        }
+      } else {
       try {
         const complexTimeoutMs = 12000;
         const complex = await Promise.race([
@@ -524,6 +580,7 @@ export async function processChatMessage({
             timeline_id: timelineId,
           });
         }
+      }
       }
     } else {
       const analytics = executeAnalyticsIntent({ tenantId, userId, intent });
