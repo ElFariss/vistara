@@ -1,0 +1,20 @@
+{
+  "name": "umkm-conversational-intelligence",
+  "version": "1.0.0",
+  "description": "Production-ready conversational BI layer for UMKM with Gemini-powered NLU",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/server.mjs",
+    "dev": "node --watch src/server.mjs",
+    "test": "node --test",
+    "check": "node --test"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "dependencies": {
+    "chart.js": "^4.5.1",
+    "gridstack": "^12.4.2"
+  }
+}

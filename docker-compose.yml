@@ -1,0 +1,39 @@
+services:
+  python-agent:
+    build: ./tools/python-agent
+    container_name: umkm-python-agent
+    environment:
+      PY_AGENT_HOST: 0.0.0.0
+      PY_AGENT_PORT: 8091
+      PY_AGENT_TOKEN: ${PYTHON_AGENT_TOKEN:-replace-python-token}
+      PY_AGENT_TIMEOUT_SEC: 2.5
+    expose:
+      - "8091"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  app:
+    build: .
+    container_name: umkm-intelligence
+    depends_on:
+      - python-agent
+    ports:
+      - "${HOST_PORT:-8080}:8080"
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      DATA_DIR: /app/data
+      DB_PATH: /app/data/umkm.db
+      JWT_SECRET: ${JWT_SECRET:-replace-me}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-${GEMINI_API:-}}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-pro}
+      PYTHON_AGENT_URL: http://python-agent:8091
+      PYTHON_AGENT_TOKEN: ${PYTHON_AGENT_TOKEN:-replace-python-token}
+      PYTHON_AGENT_TIMEOUT_MS: 3500
+    volumes:
+      - ./data:/app/data

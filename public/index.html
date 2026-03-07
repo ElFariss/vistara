@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vistara</title>
+  <meta name="description" content="Vistara - AI analytics workspace berbasis upload dataset untuk bisnis." />
+  <meta name="theme-color" content="#faf7f2" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="/vendor/gridstack.min.css" />
+  <link rel="stylesheet" href="/styles.css?v=20260307f" />
+</head>
+
+<body>
+  <div class="ambient ambient-left"></div>
+  <div class="ambient ambient-right"></div>
+
+  <div class="app-shell">
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Asisten Analitik Vistara</p>
+        <h1>Vistara</h1>
+      </div>
+      <div class="header-actions">
+        <button id="headerSettingsBtn" class="ghost" type="button" hidden>Pengaturan</button>
+        <button id="headerLoginBtn" class="ghost">Masuk</button>
+        <button id="editProfileBtn" class="ghost" hidden>Business Context</button>
+        <button id="logoutBtn" class="ghost" hidden>Logout</button>
+      </div>
+    </header>
+
+    <section id="landingPage" class="page-view landing-page">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <p class="hero-eyebrow">Analisis Data Instan untuk Bisnis Anda</p>
+          <h2>Ngobrol dengan data bisnismu tanpa ribet teknis, bersama Vistara.</h2>
+          <p>
+            Upload dataset kamu (CSV, JSON, XLSX/XLS), isi konteks bisnis, lalu tanya dalam bahasa natural.
+            AI akan merangkum insight, chart, dan dashboard secara langsung.
+          </p>
+          <div class="hero-actions">
+            <button id="landingDemo" type="button">Coba Demo (tanpa login)</button>
+            <button id="landingCta" type="button" class="ghost">Daftar Gratis</button>
+          </div>
+        </div>
+        <div class="hero-panel">
+          <div class="hero-card">
+            <div class="hero-card-head">
+              <span></span><span></span><span></span>
+            </div>
+            <div class="hero-card-body">
+              <div class="mock-msg user">Buat dashboard performa bulan ini</div>
+              <div class="mock-msg ai">
+                <strong>Dashboard Generated</strong>
+                <p>6 widget siap: omzet, profit, margin, tren, top produk, top cabang.</p>
+                <div class="mock-dashboard-preview" aria-hidden="true">
+                  <div class="mini-metric">Rp 52.3jt <span>+8.2%</span></div>
+                  <div class="mini-bars">
+                    <span style="--h: 34%"></span>
+                    <span style="--h: 62%"></span>
+                    <span style="--h: 48%"></span>
+                    <span style="--h: 78%"></span>
+                    <span style="--h: 67%"></span>
+                  </div>
+                  <svg viewBox="0 0 180 40" class="mini-line">
+                    <defs>
+                      <linearGradient id="miniAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#F97316" stop-opacity="0.28" />
+                        <stop offset="100%" stop-color="#F97316" stop-opacity="0.03" />
+                      </linearGradient>
+                    </defs>
+                    <path d="M0 34 L0 30 C12 28,18 26,25 26 C34 26,42 29,50 28 C58 27,67 20,75 19 C84 18,91 22,100 21 C108 20,117 14,125 14 C134 14,142 18,150 17 C160 16,170 11,180 8 L180 34 Z"
+                      fill="url(#miniAreaGrad)" />
+                    <path d="M0 30 C12 28,18 26,25 26 C34 26,42 29,50 28 C58 27,67 20,75 19 C84 18,91 22,100 21 C108 20,117 14,125 14 C134 14,142 18,150 17 C160 16,170 11,180 8"
+                      fill="none" stroke="#F97316" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="landing-features">
+        <article>
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F97316" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 15.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2.5" />
+              <path d="M12 3v11" />
+              <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+            </svg>
+          </div>
+          <h3>Upload Data Sekali Klik</h3>
+          <p>Tidak ada integrasi live stream. Semua analisis berbasis file dataset yang kamu berikan.</p>
+        </article>
+        <article>
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F97316" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </div>
+          <h3>Chat + Laporan Inline</h3>
+          <p>Jawaban AI menampilkan metrik, tabel, dan chart langsung di thread chat.</p>
+        </article>
+        <article>
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F97316" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="8" height="8" rx="1.2" />
+              <rect x="13" y="3" width="8" height="5" rx="1.2" />
+              <rect x="13" y="10" width="8" height="11" rx="1.2" />
+              <rect x="3" y="13" width="8" height="8" rx="1.2" />
+            </svg>
+          </div>
+          <h3>Canvas Dashboard Builder</h3>
+          <p>Susun dashboard sendiri dengan drag-resize widget, lalu simpan layout.</p>
+        </article>
+      </div>
+
+      <section class="how-it-works" aria-label="Cara Kerja Vistara">
+        <div class="hiw-head">
+          <p class="hero-eyebrow">Cara Kerja</p>
+          <h3>3 langkah instan dari file ke dashboard</h3>
+        </div>
+        <div class="hiw-steps">
+          <div class="hiw-step">
+            <div class="hiw-number">1</div>
+            <h4>Upload file data</h4>
+            <p>Pilih CSV, Excel, atau JSON. Vistara langsung membaca dan memetakan kolom penting.</p>
+          </div>
+          <div class="hiw-step">
+            <div class="hiw-number">2</div>
+            <h4>Tulis pertanyaan natural</h4>
+            <p>Ketik “Analisis tren penjualan bulan ini” atau pilih prompt cepat di bawah chat.</p>
+          </div>
+          <div class="hiw-step">
+            <div class="hiw-number">3</div>
+            <h4>Lihat visual & dashboard</h4>
+            <p>Untuk 1 grafik/metrik, hasil langsung muncul di chat. Untuk banyak grafik, buka Canvas.</p>
+          </div>
+        </div>
+      </section>
+
+      <div class="landing-bottom">
+        <button id="landingCtaBottom" type="button">Daftar & Setup</button>
+      </div>
+    </section>
+
+    <section id="authPage" class="page-view auth-page hidden">
+      <div class="auth-card">
+        <h2>Masuk ke Workspace</h2>
+        <p class="auth-sub">Langkah 1 dari 2: autentikasi akun</p>
+
+        <div class="tabs" id="authTabs" role="tablist">
+          <button class="tab active" data-auth-tab="login" type="button">Login</button>
+          <button class="tab" data-auth-tab="register" type="button">Register</button>
+        </div>
+
+        <form id="loginForm" class="stack auth-form">
+          <label>Email<input name="email" type="email" required placeholder="nama@bisnis.com" /></label>
+          <label>Password<input name="password" type="password" required placeholder="Masukkan password" /></label>
+          <button type="submit">Masuk</button>
+        </form>
+
+        <form id="registerForm" class="stack auth-form hidden">
+          <label>Nama<input name="name" required placeholder="Nama lengkap" /></label>
+          <label>Email<input name="email" type="email" required placeholder="nama@bisnis.com" /></label>
+          <label>Password<input name="password" type="password" minlength="8" required placeholder="Min. 8 karakter" /></label>
+          <label>No. HP<input name="phone" placeholder="08xx-xxxx-xxxx" /></label>
+          <label>Nama Bisnis<input name="business_name" required placeholder="Nama bisnis kamu" /></label>
+          <button type="submit">Buat Akun</button>
+        </form>
+      </div>
+    </section>
+
+    <section id="contextPage" class="page-view context-page hidden">
+      <div class="context-card">
+        <h2>Business Context</h2>
+        <p class="auth-sub">Langkah 2 dari 2: isi konteks bisnis untuk grounding AI</p>
+
+        <form id="contextForm" class="stack">
+          <label>Nama Bisnis<input name="name" required /></label>
+          <label>Industri<input name="industry" required placeholder="F&B, Retail, Jasa" /></label>
+          <label>Kota<input name="city" required placeholder="Jakarta, Bandung" /></label>
+          <label>Timezone<input name="timezone" value="Asia/Jakarta" /></label>
+          <label>Mata Uang<input name="currency" value="IDR" /></label>
+          <label>Waktu Verdict<input name="morning_verdict_time" value="07:00" /></label>
+          <button type="submit">Masuk Workspace</button>
+        </form>
+      </div>
+    </section>
+
+    <main id="workspacePage" class="page-view workspace-page hidden">
+      <div class="workspace-shell">
+        <section id="chatPane" class="workspace-pane chat-pane">
+          <div id="dataGate" class="data-gate hidden">
+            <h3>Upload Dataset Dulu</h3>
+            <p>Workspace ini bekerja dari dataset statis yang kamu upload. Tidak ada stream data real-time.</p>
+            <div class="gate-actions">
+              <label class="attach-btn gate-upload-label">
+                <input id="gateUploadInput" type="file" />
+                Pilih Dataset
+              </label>
+              <button id="gateUploadBtn" type="button">Upload & Gunakan</button>
+              <button id="gateDemoBtn" type="button" class="ghost">Gunakan Demo test.csv</button>
+            </div>
+          </div>
+
+          <div id="chatMessages" class="chat-thread" aria-live="polite"></div>
+          <div id="preChatTicker" class="prechat-ticker hidden" aria-live="polite"></div>
+
+          <div id="typingIndicator" class="typing-indicator hidden">
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+          </div>
+
+          <div class="quick-prompts">
+            <button type="button" class="pill" data-prompt="Analisis tren penjualan">Analisis tren penjualan</button>
+            <button type="button" class="pill" data-prompt="Buat dashboard performa bulan ini">Buat dashboard performa bulan ini</button>
+            <button type="button" class="pill" data-prompt="Lihat produk terlaris minggu ini">Lihat produk terlaris minggu ini</button>
+          </div>
+
+          <form id="chatForm" class="composer">
+            <label class="attach-btn">
+              <input id="chatFile" type="file" />
+              Upload Dataset
+            </label>
+            <textarea id="chatInput" rows="1" placeholder='Contoh: "Top produk 30 hari terakhir"'></textarea>
+            <div class="composer-actions">
+              <span id="fileLabel" class="file-label">Tidak ada file</span>
+              <button id="sendBtn" type="submit">Kirim</button>
+            </div>
+          </form>
+        </section>
+
+        <section id="canvasPane" class="workspace-pane canvas-pane">
+          <div class="canvas-shell">
+            <aside class="data-pane" id="dataPane">
+              <div class="pane-head">
+                <strong>Data Fields</strong>
+              </div>
+              <div id="dataFields" class="data-fields"></div>
+            </aside>
+
+            <div class="canvas-main">
+              <div class="canvas-bar">
+                <div>
+                  <h2>Canvas Builder</h2>
+                  <p>Susun dan atur widget secara bebas.</p>
+                </div>
+                <div class="canvas-bar-actions">
+                  <button id="toggleDataPaneBtn" type="button" class="ghost" aria-controls="dataPane" aria-expanded="true">Sembunyikan Field</button>
+                  <button id="toggleConfigPaneBtn" type="button" class="ghost" aria-controls="configPane" aria-expanded="true">Sembunyikan Panel</button>
+                  <div class="canvas-page-controls" aria-label="Navigasi slide dashboard">
+                    <button id="canvasPrevPage" type="button" class="ghost" aria-label="Halaman sebelumnya">◀</button>
+                    <span id="canvasPageIndicator">Hal 1 / 1</span>
+                    <button id="canvasNextPage" type="button" class="ghost" aria-label="Halaman berikutnya">▶</button>
+                  </div>
+                  <button id="addWidgetToolbar" type="button">Tambah Widget</button>
+                  <label class="edit-toggle">
+                    <input id="editModeToggle" type="checkbox" />
+                    <span>Mode Edit</span>
+                  </label>
+                  <button id="saveCanvasBtn" type="button" class="ghost">Simpan</button>
+                  <button id="closeCanvasBtn" type="button" class="ghost" aria-label="Tutup Canvas">Tutup</button>
+                </div>
+              </div>
+
+              <div id="canvasViewport" class="canvas-viewport">
+                <div id="canvasStage" class="canvas-stage">
+                  <div id="canvasGrid" class="canvas-grid"></div>
+                  <button id="floatingAddBtn" type="button" class="floating-add">Tambah Widget</button>
+                </div>
+              </div>
+            </div>
+
+            <aside class="config-pane" id="configPane">
+              <div id="configEmpty" class="config-empty">
+                <div class="config-placeholder-icon" aria-hidden="true"></div>
+                <p>Pilih widget untuk mengatur visualisasi.</p>
+              </div>
+              <form id="configForm" class="config-form hidden">
+                <label>Judul<input name="title" /></label>
+                <label>Dataset<select name="dataset" id="configDataset"></select></label>
+                <label>Measure<select name="measure" id="configMeasure"></select></label>
+                <label>Group By<select name="group_by" id="configGroupBy"></select></label>
+                <label>Visualisasi<select name="visualization" id="configVisualization"></select></label>
+                <label>Periode<input name="time_period" value="30 hari terakhir" /></label>
+                <label>Limit<input name="limit" type="number" value="12" min="1" max="500" /></label>
+                <button type="submit">Terapkan</button>
+              </form>
+            </aside>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer id="statusBar" class="status-bar hidden">
+      <div id="verdictBadge" class="verdict-badge">Verdict: belum tersedia</div>
+      <div id="sourceStats" class="source-stats">Data: 0 source</div>
+    </footer>
+  </div>
+
+  <aside id="toast" class="toast hidden"></aside>
+
+  <div id="settingsBackdrop" class="settings-backdrop hidden" aria-hidden="true"></div>
+  <aside id="settingsPanel" class="settings-panel hidden" aria-label="Panel Pengaturan">
+    <div class="settings-head">
+      <div>
+        <h3>Pengaturan</h3>
+        <p>Personalisasi tampilan dan karakter asisten.</p>
+      </div>
+      <button id="settingsCloseBtn" type="button" class="ghost" aria-label="Tutup Pengaturan">Tutup</button>
+    </div>
+
+    <form id="settingsForm" class="settings-form">
+      <label>Tema Tampilan
+        <select name="theme_mode" id="settingsThemeMode">
+          <option value="light">Terang</option>
+          <option value="dark">Gelap</option>
+          <option value="system">Ikuti Sistem</option>
+        </select>
+      </label>
+
+      <label>Warna Aksen
+        <select name="accent_color" id="settingsAccentColor">
+          <option value="orange">Oranye Vistara</option>
+          <option value="blue">Biru Profesional</option>
+          <option value="green">Hijau Pertumbuhan</option>
+          <option value="rose">Merah Muda Modern</option>
+        </select>
+      </label>
+
+      <label>Nama Panggilan
+        <input name="nickname" id="settingsNickname" maxlength="40" placeholder="Contoh: Kak Andi" />
+      </label>
+
+      <label>Gaya Respons
+        <select name="response_style" id="settingsResponseStyle">
+          <option value="ringkas">Ringkas</option>
+          <option value="detail">Detail</option>
+          <option value="formal">Formal</option>
+          <option value="santai">Santai</option>
+        </select>
+      </label>
+
+      <label>Karakter Asisten
+        <select name="assistant_character" id="settingsAssistantCharacter">
+          <option value="proaktif">Proaktif</option>
+          <option value="teliti">Teliti</option>
+          <option value="tegas">Tegas</option>
+          <option value="suportif">Suportif</option>
+        </select>
+      </label>
+
+      <label>Fokus Personalisasi
+        <textarea name="personalization_focus" id="settingsPersonalizationFocus" rows="3"
+          placeholder="Contoh: fokus pada arus kas, margin, dan rekomendasi aksi mingguan."></textarea>
+      </label>
+
+      <div class="settings-actions">
+        <button id="settingsResetBtn" type="button" class="ghost">Reset Default</button>
+        <button type="submit">Simpan Pengaturan</button>
+      </div>
+    </form>
+  </aside>
+
+  <script src="/vendor/gridstack-all.js"></script>
+  <script src="/vendor/chart.umd.min.js"></script>
+  <script type="module" src="/app.js?v=20260307m"></script>
+</body>
+
+</html>
