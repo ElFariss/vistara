@@ -1,5 +1,5 @@
 import { renderArtifact } from './vendor/chart-lite.js?v=20260307c';
-import { createGridStackLite } from './vendor/gridstack-lite.js?v=20260307c';
+import { createGridStackLite } from './vendor/gridstack-lite.js?v=20260307e';
 
 const GRID_COLS = 16;
 const GRID_ROWS = 9;
@@ -71,6 +71,7 @@ const state = {
   timelineMessageId: null,
   timelineRunId: null,
   canvasPage: 1,
+  canvasPagesCount: 1,
   canvasWidthPct: DEFAULT_CANVAS_PCT,
   isResizingPanels: false,
   stageZoom: 1,
@@ -106,6 +107,12 @@ const refs = {
   settingsResponseStyle: document.getElementById('settingsResponseStyle'),
   settingsAssistantCharacter: document.getElementById('settingsAssistantCharacter'),
   settingsPersonalizationFocus: document.getElementById('settingsPersonalizationFocus'),
+  settingsBusinessName: document.getElementById('settingsBusinessName'),
+  settingsBusinessIndustry: document.getElementById('settingsBusinessIndustry'),
+  settingsBusinessCity: document.getElementById('settingsBusinessCity'),
+  settingsBusinessTimezone: document.getElementById('settingsBusinessTimezone'),
+  settingsBusinessCurrency: document.getElementById('settingsBusinessCurrency'),
+  settingsBusinessVerdictTime: document.getElementById('settingsBusinessVerdictTime'),
 
   landingPage: document.getElementById('landingPage'),
   authPage: document.getElementById('authPage'),
@@ -150,7 +157,7 @@ const refs = {
   toggleDataPaneBtn: document.getElementById('toggleDataPaneBtn'),
   toggleConfigPaneBtn: document.getElementById('toggleConfigPaneBtn'),
   addWidgetToolbar: document.getElementById('addWidgetToolbar'),
-  editModeToggle: document.getElementById('editModeToggle'),
+  editModeBtn: document.getElementById('editModeBtn'),
   floatingAddBtn: document.getElementById('floatingAddBtn'),
   zoomInBtn: document.getElementById('zoomInBtn'),
   zoomOutBtn: document.getElementById('zoomOutBtn'),
@@ -159,7 +166,9 @@ const refs = {
   canvasStage: document.getElementById('canvasStage'),
   canvasPrevPage: document.getElementById('canvasPrevPage'),
   canvasNextPage: document.getElementById('canvasNextPage'),
+  canvasAddPage: document.getElementById('canvasAddPage'),
   canvasPageIndicator: document.getElementById('canvasPageIndicator'),
+  canvasDock: document.getElementById('canvasDock'),
   canvasGrid: document.getElementById('canvasGrid'),
   dataFields: document.getElementById('dataFields'),
   dataPane: document.getElementById('dataPane'),
@@ -263,6 +272,26 @@ function syncSettingsForm() {
   refs.settingsResponseStyle.value = state.settings.response_style;
   refs.settingsAssistantCharacter.value = state.settings.assistant_character;
   refs.settingsPersonalizationFocus.value = state.settings.personalization_focus;
+  syncBusinessSettingsFields();
+}
+
+function syncBusinessSettingsFields() {
+  if (
+    !refs.settingsBusinessName
+    || !refs.settingsBusinessIndustry
+    || !refs.settingsBusinessCity
+    || !refs.settingsBusinessTimezone
+    || !refs.settingsBusinessCurrency
+    || !refs.settingsBusinessVerdictTime
+  ) {
+    return;
+  }
+  refs.settingsBusinessName.value = state.profile?.name || '';
+  refs.settingsBusinessIndustry.value = state.profile?.industry || '';
+  refs.settingsBusinessCity.value = state.profile?.city || '';
+  refs.settingsBusinessTimezone.value = state.profile?.timezone || 'Asia/Jakarta';
+  refs.settingsBusinessCurrency.value = state.profile?.currency || 'IDR';
+  refs.settingsBusinessVerdictTime.value = state.profile?.morning_verdict_time || '07:00';
 }
 
 function applySettings(nextSettings, options = {}) {
@@ -649,6 +678,7 @@ function showPage(page) {
   if (refs.appShell) {
     refs.appShell.classList.remove('workspace-active');
   }
+  document.body.classList.remove('workspace-mode');
 
   if (page === 'landing') {
     refs.landingPage.classList.remove('hidden');
@@ -671,6 +701,7 @@ function showPage(page) {
   if (refs.appShell) {
     refs.appShell.classList.add('workspace-active');
   }
+  document.body.classList.add('workspace-mode');
 }
 
 function switchAuthTab(tab) {
@@ -700,11 +731,9 @@ function setCanvasOpen(open) {
   if (state.canvasOpen && state.grid) {
     applyStageDimensions();
     syncGridBounds();
-    if (window.innerWidth > 1180) {
-      window.requestAnimationFrame(() => {
-        centerCanvasStage();
-      });
-    }
+    window.requestAnimationFrame(() => {
+      centerCanvasStage();
+    });
   }
 }
 
@@ -817,14 +846,19 @@ function updateCanvasPaneState() {
   refs.canvasShell.classList.toggle('config-collapsed', state.configPaneCollapsed);
 
   if (refs.toggleDataPaneBtn) {
-    refs.toggleDataPaneBtn.textContent = state.dataPaneCollapsed ? 'Tampilkan Field' : 'Sembunyikan Field';
     refs.toggleDataPaneBtn.setAttribute('aria-expanded', String(!state.dataPaneCollapsed));
+    refs.toggleDataPaneBtn.classList.toggle('is-active', !state.dataPaneCollapsed);
+    refs.toggleDataPaneBtn.setAttribute('title', state.dataPaneCollapsed ? 'Buka Field Data' : 'Tutup Field Data');
+    refs.toggleDataPaneBtn.setAttribute('data-tip', state.dataPaneCollapsed ? 'Buka Field Data' : 'Tutup Field Data');
   }
 
   if (refs.toggleConfigPaneBtn) {
-    refs.toggleConfigPaneBtn.textContent = state.configPaneCollapsed ? 'Tampilkan Panel' : 'Sembunyikan Panel';
     refs.toggleConfigPaneBtn.setAttribute('aria-expanded', String(!state.configPaneCollapsed));
+    refs.toggleConfigPaneBtn.classList.toggle('is-active', !state.configPaneCollapsed);
+    refs.toggleConfigPaneBtn.setAttribute('title', state.configPaneCollapsed ? 'Buka Panel Konfigurasi' : 'Tutup Panel Konfigurasi');
+    refs.toggleConfigPaneBtn.setAttribute('data-tip', state.configPaneCollapsed ? 'Buka Panel Konfigurasi' : 'Tutup Panel Konfigurasi');
   }
+  bindHintTooltips();
 }
 
 function setDataPaneCollapsed(collapsed) {
@@ -935,6 +969,11 @@ function centerCanvasStage() {
   if (!refs.canvasViewport || !refs.canvasWorld || !refs.canvasStage) {
     return;
   }
+  if (window.innerWidth <= 1180) {
+    refs.canvasViewport.scrollLeft = Math.max(0, refs.canvasStage.offsetLeft - 20);
+    refs.canvasViewport.scrollTop = Math.max(0, refs.canvasStage.offsetTop - 20);
+    return;
+  }
   const centerX = Math.max(0, (refs.canvasWorld.clientWidth - refs.canvasViewport.clientWidth) / 2);
   const centerY = Math.max(0, (refs.canvasWorld.clientHeight - refs.canvasViewport.clientHeight) / 2);
   refs.canvasViewport.scrollLeft = centerX;
@@ -969,17 +1008,14 @@ function setStageZoom(nextZoom, options = {}) {
 
 function setEditMode(editing) {
   state.editMode = Boolean(editing);
-  if (refs.editModeToggle) {
-    refs.editModeToggle.checked = state.editMode;
+  if (refs.editModeBtn) {
+    refs.editModeBtn.classList.toggle('is-active', state.editMode);
+    refs.editModeBtn.setAttribute('aria-pressed', String(state.editMode));
+    refs.editModeBtn.setAttribute('title', state.editMode ? 'Mode Edit: ON' : 'Mode Edit: OFF');
+    refs.editModeBtn.setAttribute('data-tip', state.editMode ? 'Mode Edit: ON' : 'Mode Edit: OFF');
   }
   if (refs.canvasGrid) {
     refs.canvasGrid.classList.toggle('editing', state.editMode);
-  }
-  if (refs.floatingAddBtn) {
-    refs.floatingAddBtn.classList.toggle('hidden', !state.editMode);
-  }
-  if (refs.addWidgetToolbar) {
-    refs.addWidgetToolbar.classList.toggle('hidden', !state.editMode);
   }
   if (state.grid && typeof state.grid.setEditing === 'function') {
     state.grid.setEditing(state.editMode);
@@ -989,7 +1025,7 @@ function setEditMode(editing) {
       element.classList.toggle('hidden-actions', !state.editMode);
     });
   }
-  renderCanvas();
+  bindHintTooltips();
 }
 
 function setDatasetGateVisible(visible) {
@@ -1243,6 +1279,7 @@ function normalizeIncomingWidgets(inputWidgets = []) {
 function getCanvasConfig() {
   return {
     mode: 'manual',
+    pages: Math.max(1, Number(state.canvasPagesCount || 1)),
     components: state.canvasWidgets,
     updated_by: 'user',
   };
@@ -1308,15 +1345,6 @@ function renderCanvasItem(item) {
   const actions = document.createElement('div');
   actions.className = 'widget-head-actions';
 
-  const dragBtn = document.createElement('button');
-  dragBtn.type = 'button';
-  dragBtn.className = 'widget-drag-handle';
-  dragBtn.textContent = 'Drag';
-  dragBtn.addEventListener('click', (event) => {
-    event.stopPropagation();
-    selectWidget(widgetId);
-  });
-
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
   removeBtn.textContent = 'Hapus';
@@ -1327,7 +1355,7 @@ function renderCanvasItem(item) {
     removeWidgetById(widgetId);
   });
 
-  actions.append(dragBtn, removeBtn);
+  actions.append(removeBtn);
   head.append(title, actions);
 
   actions.classList.toggle('hidden-actions', !state.editMode);
@@ -1458,7 +1486,7 @@ function allPages() {
     const page = Number(widget.layout?.page || 1);
     return Math.max(max, page);
   }, 1);
-  return Math.max(1, maxPage);
+  return Math.max(1, Number(state.canvasPagesCount || 1), maxPage);
 }
 
 function setCanvasPage(page, rerender = true) {
@@ -1469,10 +1497,16 @@ function setCanvasPage(page, rerender = true) {
   } else {
     updateCanvasPagination();
   }
+  if (state.canvasOpen) {
+    window.requestAnimationFrame(() => {
+      centerCanvasStage();
+    });
+  }
 }
 
 function updateCanvasPagination() {
   const total = allPages();
+  state.canvasPagesCount = total;
   if (refs.canvasPageIndicator) {
     refs.canvasPageIndicator.textContent = `Hal ${state.canvasPage} / ${total}`;
   }
@@ -1482,6 +1516,21 @@ function updateCanvasPagination() {
   if (refs.canvasNextPage) {
     refs.canvasNextPage.disabled = state.canvasPage >= total;
   }
+}
+
+function addCanvasPage() {
+  const total = allPages();
+  state.canvasPagesCount = total + 1;
+  state.canvasPage = state.canvasPagesCount;
+  state.selectedWidgetId = null;
+  renderCanvas();
+  if (state.canvasOpen) {
+    window.requestAnimationFrame(() => {
+      centerCanvasStage();
+    });
+  }
+  scheduleCanvasSave();
+  showToast(`Halaman ${state.canvasPage} siap.`);
 }
 
 function pageWidgets() {
@@ -1721,6 +1770,7 @@ function addEmptyWidget() {
     layout: nextWidgetLayout('chart'),
   };
 
+  state.canvasPagesCount = Math.max(state.canvasPagesCount, Number(widget.layout?.page || state.canvasPage || 1));
   state.canvasWidgets.push(widget);
   renderCanvas();
   setCanvasOpen(true);
@@ -1801,15 +1851,23 @@ async function refreshDashboards() {
   try {
     const response = await api('/api/dashboards');
     state.currentDashboard = (response.dashboards || [])[0] || null;
+    state.canvasPagesCount = Math.max(1, Number(state.currentDashboard?.config?.pages || 1));
 
     const components = state.currentDashboard?.config?.components;
     if (Array.isArray(components) && components.length > 0) {
       state.canvasWidgets = normalizeIncomingWidgets(components);
-      state.canvasPage = 1;
+      const maxWidgetPage = state.canvasWidgets.reduce((max, widget) => Math.max(max, Number(widget.layout?.page || 1)), 1);
+      state.canvasPagesCount = Math.max(state.canvasPagesCount, maxWidgetPage);
+      state.canvasPage = Math.min(Math.max(1, state.canvasPage), state.canvasPagesCount);
+      renderCanvas();
+    } else {
+      state.canvasWidgets = [];
+      state.canvasPage = Math.min(Math.max(1, state.canvasPage), state.canvasPagesCount);
       renderCanvas();
     }
   } catch {
     state.currentDashboard = null;
+    state.canvasPagesCount = Math.max(1, state.canvasPagesCount || 1);
   }
 }
 
@@ -1826,6 +1884,7 @@ async function refreshProfile() {
   const response = await api('/api/business/profile');
   state.profile = response.profile;
   fillContextForm(state.profile);
+  syncBusinessSettingsFields();
 }
 
 async function refreshVerdict() {
@@ -1906,6 +1965,10 @@ async function refreshChatHistory() {
 
   if (lastCanvas) {
     state.canvasWidgets = normalizeIncomingWidgets(lastCanvas.widgets);
+    state.canvasPagesCount = Math.max(
+      state.canvasPagesCount,
+      state.canvasWidgets.reduce((max, widget) => Math.max(max, Number(widget.layout?.page || 1)), 1),
+    );
     state.canvasPage = 1;
     renderCanvas();
   }
@@ -2174,6 +2237,9 @@ function applyAssistantResponse(response, options = {}) {
   if (mode === 'canvas' && Array.isArray(widgets) && widgets.length > 0) {
     try {
       state.canvasWidgets = normalizeIncomingWidgets(widgets);
+      const maxWidgetPage = state.canvasWidgets.reduce((max, widget) => Math.max(max, Number(widget.layout?.page || 1)), 1);
+      const configPages = Number(response.dashboard?.config?.pages || 1);
+      state.canvasPagesCount = Math.max(1, configPages, maxWidgetPage);
       state.canvasPage = 1;
       renderCanvas();
       scheduleCanvasSave();
@@ -2349,6 +2415,251 @@ async function sendChatMessage(userText) {
   }
 }
 
+function drawRoundedRect(context, x, y, width, height, radius) {
+  const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+  context.beginPath();
+  context.moveTo(x + r, y);
+  context.lineTo(x + width - r, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + r);
+  context.lineTo(x + width, y + height - r);
+  context.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  context.lineTo(x + r, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - r);
+  context.lineTo(x, y + r);
+  context.quadraticCurveTo(x, y, x + r, y);
+  context.closePath();
+}
+
+function drawWidgetChart(context, artifact, area) {
+  const series = Array.isArray(artifact?.series) ? artifact.series : [];
+  const values = (series[0]?.values || []).map((value) => Number(value || 0));
+  if (!values.length) {
+    context.fillStyle = '#94a3b8';
+    context.fillText('Tidak ada data chart', area.x + 12, area.y + 24);
+    return;
+  }
+
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const span = maxValue - minValue || 1;
+  const chartType = String(artifact?.chart_type || 'line').toLowerCase();
+  const accent = '#f97316';
+
+  context.strokeStyle = '#e2e8f0';
+  context.lineWidth = 1;
+  for (let i = 0; i <= 4; i += 1) {
+    const y = area.y + (area.height * i) / 4;
+    context.beginPath();
+    context.moveTo(area.x, y);
+    context.lineTo(area.x + area.width, y);
+    context.stroke();
+  }
+
+  if (chartType === 'bar') {
+    const barGap = Math.max(6, area.width * 0.015);
+    const barWidth = Math.max(8, (area.width - barGap * (values.length + 1)) / values.length);
+    values.forEach((value, index) => {
+      const ratio = (value - minValue) / span;
+      const barHeight = Math.max(8, ratio * (area.height - 12));
+      const x = area.x + barGap + index * (barWidth + barGap);
+      const y = area.y + area.height - barHeight;
+      context.fillStyle = accent;
+      drawRoundedRect(context, x, y, barWidth, barHeight, 4);
+      context.fill();
+    });
+    return;
+  }
+
+  if (chartType === 'pie') {
+    const total = values.reduce((acc, value) => acc + Math.max(0, value), 0) || 1;
+    const radius = Math.min(area.width, area.height) * 0.36;
+    const cx = area.x + area.width / 2;
+    const cy = area.y + area.height / 2;
+    const palette = ['#f97316', '#fb923c', '#fdba74', '#f59e0b', '#84cc16', '#38bdf8', '#a78bfa'];
+    let angle = -Math.PI / 2;
+    values.forEach((value, index) => {
+      const slice = (Math.max(0, value) / total) * Math.PI * 2;
+      context.beginPath();
+      context.moveTo(cx, cy);
+      context.arc(cx, cy, radius, angle, angle + slice);
+      context.closePath();
+      context.fillStyle = palette[index % palette.length];
+      context.fill();
+      angle += slice;
+    });
+    return;
+  }
+
+  const stepX = values.length > 1 ? area.width / (values.length - 1) : area.width;
+  const points = values.map((value, index) => {
+    const ratio = (value - minValue) / span;
+    return {
+      x: area.x + index * stepX,
+      y: area.y + area.height - ratio * (area.height - 10),
+    };
+  });
+
+  context.beginPath();
+  context.moveTo(points[0].x, area.y + area.height);
+  points.forEach((point) => context.lineTo(point.x, point.y));
+  context.lineTo(points[points.length - 1].x, area.y + area.height);
+  context.closePath();
+  context.fillStyle = 'rgba(249, 115, 22, 0.2)';
+  context.fill();
+
+  context.beginPath();
+  context.moveTo(points[0].x, points[0].y);
+  points.slice(1).forEach((point) => context.lineTo(point.x, point.y));
+  context.strokeStyle = accent;
+  context.lineWidth = 2.5;
+  context.stroke();
+}
+
+function drawWidgetOnExport(context, widget, rect) {
+  const artifact = widget?.artifact || {};
+  context.fillStyle = '#ffffff';
+  drawRoundedRect(context, rect.x, rect.y, rect.w, rect.h, 12);
+  context.fill();
+  context.strokeStyle = '#e2e8f0';
+  context.lineWidth = 1;
+  context.stroke();
+
+  context.fillStyle = '#475569';
+  context.font = '600 20px Inter, Arial, sans-serif';
+  context.fillText(String(widget.title || artifact.title || 'Widget').slice(0, 36), rect.x + 14, rect.y + 30);
+
+  const body = {
+    x: rect.x + 14,
+    y: rect.y + 42,
+    width: rect.w - 28,
+    height: rect.h - 56,
+  };
+
+  if (artifact.kind === 'metric') {
+    context.fillStyle = '#0f172a';
+    context.font = '700 38px Space Grotesk, Inter, Arial, sans-serif';
+    context.fillText(String(artifact.value || '-').slice(0, 18), body.x, body.y + Math.min(66, body.height - 10));
+    return;
+  }
+
+  if (artifact.kind === 'table') {
+    const rows = Array.isArray(artifact.rows) ? artifact.rows.slice(0, 6) : [];
+    const columns = Array.isArray(artifact.columns) ? artifact.columns : [];
+    context.fillStyle = '#64748b';
+    context.font = '600 14px Inter, Arial, sans-serif';
+    context.fillText(columns.join('  |  '), body.x, body.y + 18);
+    context.fillStyle = '#0f172a';
+    context.font = '500 13px Inter, Arial, sans-serif';
+    rows.forEach((row, index) => {
+      const text = columns.map((column) => String(row?.[column] ?? '')).join('  |  ');
+      context.fillText(text.slice(0, 72), body.x, body.y + 42 + index * 20);
+    });
+    return;
+  }
+
+  if (artifact.kind === 'placeholder') {
+    context.fillStyle = '#94a3b8';
+    context.font = '500 16px Inter, Arial, sans-serif';
+    context.fillText('Pilih data di panel kanan', body.x, body.y + 24);
+    return;
+  }
+
+  drawWidgetChart(context, artifact, {
+    x: body.x,
+    y: body.y + 4,
+    width: Math.max(40, body.width),
+    height: Math.max(40, body.height - 8),
+  });
+}
+
+async function downloadCanvasAsJpg() {
+  if (!refs.canvasStage || !state.canvasWidgets.length) {
+    showToast('Canvas belum tersedia.');
+    return;
+  }
+
+  const width = 1600;
+  const height = 900;
+  const outerPad = 24;
+  const gap = 10;
+  const cellWidth = (width - outerPad * 2 - gap * (GRID_COLS - 1)) / GRID_COLS;
+  const cellHeight = (height - outerPad * 2 - gap * (GRID_ROWS - 1)) / GRID_ROWS;
+
+  const pageItems = state.canvasWidgets
+    .filter((widget) => Number(widget.layout?.page || 1) === state.canvasPage)
+    .map((widget) => ({
+      ...widget,
+      layout: normalizeLayout(widget.layout || {}, state.canvasPage),
+    }));
+
+  if (!pageItems.length) {
+    showToast('Halaman ini belum memiliki widget untuk diexport.');
+    return;
+  }
+
+  const scale = 1;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(width * scale);
+  canvas.height = Math.round(height * scale);
+  const context = canvas.getContext('2d');
+  if (!context) {
+    showToast('Browser tidak mendukung export JPG.');
+    return;
+  }
+
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.scale(scale, scale);
+  context.fillStyle = '#f8fafc';
+  drawRoundedRect(context, 0, 0, width, height, 0);
+  context.fill();
+
+  pageItems.forEach((widget) => {
+    const layout = widget.layout;
+    const x = outerPad + layout.x * (cellWidth + gap);
+    const y = outerPad + layout.y * (cellHeight + gap);
+    const w = layout.w * cellWidth + (layout.w - 1) * gap;
+    const h = layout.h * cellHeight + (layout.h - 1) * gap;
+    drawWidgetOnExport(context, widget, { x, y, w, h });
+  });
+
+  const anchor = document.createElement('a');
+  anchor.href = canvas.toDataURL('image/jpeg', 0.92);
+  anchor.download = `vistara-dashboard-hal-${state.canvasPage}.jpg`;
+  anchor.click();
+  showToast('JPG dashboard berhasil diunduh.');
+}
+
+function bindHintTooltips() {
+  document.querySelectorAll('[data-tip]').forEach((node) => {
+    if (!(node instanceof HTMLElement) || node.dataset.tipBound === 'true') {
+      return;
+    }
+    node.dataset.tipBound = 'true';
+
+    let timer = null;
+    const clearTimer = () => {
+      if (timer) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+    };
+
+    node.addEventListener('pointerdown', () => {
+      clearTimer();
+      timer = window.setTimeout(() => {
+        const text = node.getAttribute('data-tip');
+        if (text) {
+          showToast(text, 1800);
+        }
+      }, 480);
+    });
+    node.addEventListener('pointerup', clearTimer);
+    node.addEventListener('pointerleave', clearTimer);
+    node.addEventListener('pointercancel', clearTimer);
+  });
+}
+
 async function loadWorkspace() {
   await Promise.allSettled([refreshProfile(), refreshSources(), refreshVerdict(), refreshDashboards(), refreshChatHistory(), loadSchema()]);
   ensureWelcomeMessage();
@@ -2438,8 +2749,12 @@ refs.chatForm.addEventListener('submit', async (event) => {
 });
 
 if (refs.saveCanvasBtn) {
-  refs.saveCanvasBtn.addEventListener('click', () => {
-    scheduleCanvasSave();
+  refs.saveCanvasBtn.addEventListener('click', async () => {
+    try {
+      await downloadCanvasAsJpg();
+    } catch (error) {
+      showToast(`Gagal export JPG: ${error.message}`);
+    }
   });
 }
 
@@ -2461,8 +2776,17 @@ if (refs.canvasNextPage) {
   });
 }
 
+if (refs.canvasAddPage) {
+  refs.canvasAddPage.addEventListener('click', () => {
+    addCanvasPage();
+  });
+}
+
 if (refs.addWidgetToolbar) {
   refs.addWidgetToolbar.addEventListener('click', () => {
+    if (!state.editMode) {
+      setEditMode(true);
+    }
     addEmptyWidget();
   });
 }
@@ -2479,9 +2803,9 @@ if (refs.toggleConfigPaneBtn) {
   });
 }
 
-if (refs.editModeToggle) {
-  refs.editModeToggle.addEventListener('change', (event) => {
-    setEditMode(event.target.checked);
+if (refs.editModeBtn) {
+  refs.editModeBtn.addEventListener('click', () => {
+    setEditMode(!state.editMode);
   });
 }
 
@@ -2735,10 +3059,35 @@ if (refs.settingsResetBtn) {
 }
 
 if (refs.settingsForm) {
-  refs.settingsForm.addEventListener('submit', (event) => {
+  refs.settingsForm.addEventListener('submit', async (event) => {
     event.preventDefault();
-    const payload = Object.fromEntries(new FormData(refs.settingsForm).entries());
+    const formData = new FormData(refs.settingsForm);
+    const payload = Object.fromEntries(formData.entries());
     applySettings(payload);
+
+    if (state.token) {
+      try {
+        const profilePayload = {
+          name: String(payload.business_name || state.profile?.name || '').trim() || state.profile?.name || '',
+          industry: String(payload.business_industry || state.profile?.industry || '').trim(),
+          city: String(payload.business_city || state.profile?.city || '').trim(),
+          timezone: String(payload.business_timezone || state.profile?.timezone || 'Asia/Jakarta').trim() || 'Asia/Jakarta',
+          currency: String(payload.business_currency || state.profile?.currency || 'IDR').trim() || 'IDR',
+          morning_verdict_time: String(payload.business_verdict_time || state.profile?.morning_verdict_time || '07:00').trim() || '07:00',
+        };
+
+        const response = await api('/api/business/profile', {
+          method: 'PUT',
+          body: JSON.stringify(profilePayload),
+        });
+        state.profile = response.profile;
+        fillContextForm(state.profile);
+        syncBusinessSettingsFields();
+      } catch (error) {
+        showToast(`Pengaturan visual tersimpan, update business context gagal: ${error.message}`);
+      }
+    }
+
     refreshWelcomeGreeting();
     setSettingsOpen(false);
     showToast('Pengaturan berhasil disimpan.');
@@ -2879,6 +3228,7 @@ refs.logoutBtn.addEventListener('click', () => {
   state.currentDashboard = null;
   state.canvasWidgets = [];
   state.canvasPage = 1;
+  state.canvasPagesCount = 1;
   state.datasetReady = false;
   state.dataPaneCollapsed = true;
   state.configPaneCollapsed = true;
@@ -2917,6 +3267,7 @@ async function bootstrap() {
   updateCanvasPaneState();
   applyWorkspaceSplitState();
   setEditMode(false);
+  bindHintTooltips();
   switchAuthTab('login');
   setCanvasOpen(false);
   updateCanvasPagination();

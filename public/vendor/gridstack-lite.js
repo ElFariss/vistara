@@ -49,7 +49,11 @@ function createGridStackLibrary(container, options = {}) {
     margin: settings.gap,
     cellHeight: settings.rowHeight,
     float: true,
-    handle: '.widget-drag-handle',
+    handle: '.grid-stack-item-content',
+    draggable: {
+      handle: '.grid-stack-item-content',
+      cancel: 'button, input, textarea, select, option, a, .widget-head-actions, .widget-resize-handle',
+    },
     resizable: { handles: 'se' },
   };
   if (settings.maxRows) {
@@ -414,13 +418,18 @@ function createFallbackGrid(container, options = {}) {
   }
 
   function attachInteractions(id, wrapper) {
-    const dragHandle = wrapper.querySelector('.widget-drag-handle');
     const resizeHandle = wrapper.querySelector('.widget-resize-handle');
-
-    if (dragHandle) {
-      dragHandle.addEventListener('pointerdown', (event) => {
+    if (wrapper.dataset.dragBound !== 'true') {
+      wrapper.dataset.dragBound = 'true';
+      wrapper.addEventListener('pointerdown', (event) => {
         if (!editingEnabled) {
           return;
+        }
+        const target = event.target;
+        if (target instanceof Element) {
+          if (target.closest('button, input, textarea, select, option, a, .widget-head-actions, .widget-resize-handle')) {
+            return;
+          }
         }
         event.preventDefault();
         wrapper.setPointerCapture(event.pointerId);
@@ -655,9 +664,7 @@ function createFallbackGrid(container, options = {}) {
 }
 
 export function createGridStackLite(container, options = {}) {
-  if (window.GridStack && typeof window.GridStack.init === 'function') {
-    return createGridStackLibrary(container, options);
-  }
-
+  // Force lightweight fallback engine to guarantee stable drag/resize behavior
+  // across environments where GridStack DnD bindings may not initialize reliably.
   return createFallbackGrid(container, options);
 }

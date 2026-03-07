@@ -232,15 +232,26 @@ function inferTemplate(intent) {
     return intent.template_id;
   }
 
+  const normalizedMetric = normalizeMetric(intent.metric);
+  const requestedViz = String(intent.visualization || '').toLowerCase();
+  if (requestedViz && requestedViz !== 'metric' && intent.intent !== 'rank') {
+    if (requestedViz === 'line' || requestedViz === 'bar') {
+      if (normalizedMetric === 'total_expense') {
+        return 'total_expense';
+      }
+      return 'revenue_trend';
+    }
+  }
+
   switch (intent.intent) {
     case 'rank':
       return intent.dimension === 'branch' ? 'branch_performance' : 'top_products';
     case 'compare':
-      return normalizeMetric(intent.metric);
+      return normalizedMetric;
     case 'show_metric':
     case 'explain':
     default:
-      return normalizeMetric(intent.metric);
+      return normalizedMetric;
   }
 }
 

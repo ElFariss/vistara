@@ -13,7 +13,7 @@
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
     rel="stylesheet" />
   <link rel="stylesheet" href="/vendor/gridstack.min.css" />
-  <link rel="stylesheet" href="/styles.css?v=20260307k" />
+  <link rel="stylesheet" href="/styles.css?v=20260307l" />
 </head>
 
 <body>
@@ -27,7 +27,11 @@
         <h1>Vistara</h1>
       </div>
       <div class="header-actions">
-        <button id="headerSettingsBtn" class="ghost" type="button" hidden>Pengaturan</button>
+        <button id="headerSettingsBtn" class="ghost icon-nav-btn" type="button" hidden aria-label="Pengaturan" title="Pengaturan">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 8.3a3.7 3.7 0 1 0 0 7.4 3.7 3.7 0 0 0 0-7.4zm9.2 3.7-.9-.5a7.7 7.7 0 0 0-.4-1l.5-.9a1.2 1.2 0 0 0-.2-1.5l-1.2-1.2a1.2 1.2 0 0 0-1.5-.2l-.9.5c-.3-.2-.7-.3-1-.4l-.5-.9A1.2 1.2 0 0 0 14 4h-2a1.2 1.2 0 0 0-1.1.7l-.5.9c-.3.1-.7.2-1 .4l-.9-.5a1.2 1.2 0 0 0-1.5.2L5.8 6.9a1.2 1.2 0 0 0-.2 1.5l.5.9c-.2.3-.3.7-.4 1l-.9.5A1.2 1.2 0 0 0 4 12v2c0 .5.3.9.7 1.1l.9.5c.1.3.2.7.4 1l-.5.9a1.2 1.2 0 0 0 .2 1.5l1.2 1.2c.4.4 1 .5 1.5.2l.9-.5c.3.2.7.3 1 .4l.5.9c.2.4.6.7 1.1.7h2c.5 0 .9-.3 1.1-.7l.5-.9c.3-.1.7-.2 1-.4l.9.5c.5.3 1.1.2 1.5-.2l1.2-1.2c.4-.4.5-1 .2-1.5l-.5-.9c.2-.3.3-.7.4-1l.9-.5c.4-.2.7-.6.7-1.1v-2c0-.5-.3-.9-.7-1.1z"></path>
+          </svg>
+        </button>
         <button id="headerCtaBtn" class="cta-nav" type="button">Mulai Gratis</button>
         <button id="headerLoginBtn" class="ghost">Masuk</button>
         <button id="editProfileBtn" class="ghost" hidden>Business Context</button>
@@ -350,27 +354,10 @@
                   <h2>Canvas Builder</h2>
                   <p>Susun dan atur widget secara bebas.</p>
                 </div>
-                <div class="canvas-bar-actions">
-                  <button id="toggleDataPaneBtn" type="button" class="ghost" aria-controls="dataPane" aria-expanded="true">Sembunyikan Field</button>
-                  <button id="toggleConfigPaneBtn" type="button" class="ghost" aria-controls="configPane" aria-expanded="true">Sembunyikan Panel</button>
-                  <div class="canvas-zoom-controls" aria-label="Kontrol zoom canvas">
-                    <button id="zoomOutBtn" type="button" class="ghost" aria-label="Zoom keluar">−</button>
-                    <span id="zoomLevelLabel">100%</span>
-                    <button id="zoomInBtn" type="button" class="ghost" aria-label="Zoom masuk">+</button>
-                    <button id="zoomResetBtn" type="button" class="ghost" aria-label="Reset zoom">Reset</button>
-                  </div>
+                <div class="canvas-bar-meta">
                   <div class="canvas-page-controls" aria-label="Navigasi slide dashboard">
-                    <button id="canvasPrevPage" type="button" class="ghost" aria-label="Halaman sebelumnya">◀</button>
                     <span id="canvasPageIndicator">Hal 1 / 1</span>
-                    <button id="canvasNextPage" type="button" class="ghost" aria-label="Halaman berikutnya">▶</button>
                   </div>
-                  <button id="addWidgetToolbar" type="button">Tambah Widget</button>
-                  <label class="edit-toggle">
-                    <input id="editModeToggle" type="checkbox" />
-                    <span>Mode Edit</span>
-                  </label>
-                  <button id="saveCanvasBtn" type="button" class="ghost">Simpan</button>
-                  <button id="closeCanvasBtn" type="button" class="ghost" aria-label="Tutup Canvas">Tutup</button>
                 </div>
               </div>
 
@@ -381,6 +368,46 @@
                     <button id="floatingAddBtn" type="button" class="floating-add">Tambah Widget</button>
                   </div>
                 </div>
+              </div>
+
+              <div id="canvasDock" class="canvas-dock" aria-label="Kontrol Canvas">
+                <button id="toggleDataPaneBtn" type="button" class="ghost canvas-tool-btn" aria-controls="dataPane" aria-expanded="false" data-tip="Panel Field Data" title="Panel Field Data">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v14H4zM14 5h6v6h-6zM14 13h6v6h-6z"></path></svg>
+                </button>
+                <button id="toggleConfigPaneBtn" type="button" class="ghost canvas-tool-btn" aria-controls="configPane" aria-expanded="false" data-tip="Panel Konfigurasi" title="Panel Konfigurasi">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v4H4zM4 10h10v4H4zM4 16h16v4H4z"></path></svg>
+                </button>
+                <button id="canvasPrevPage" type="button" class="ghost canvas-tool-btn" aria-label="Halaman sebelumnya" data-tip="Halaman Sebelumnya" title="Halaman Sebelumnya">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"></path></svg>
+                </button>
+                <button id="canvasAddPage" type="button" class="ghost canvas-tool-btn" aria-label="Tambah halaman" data-tip="Tambah Halaman" title="Tambah Halaman">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+                </button>
+                <button id="canvasNextPage" type="button" class="ghost canvas-tool-btn" aria-label="Halaman berikutnya" data-tip="Halaman Berikutnya" title="Halaman Berikutnya">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5 7 7-7 7"></path></svg>
+                </button>
+                <button id="zoomOutBtn" type="button" class="ghost canvas-tool-btn" aria-label="Zoom keluar" data-tip="Zoom Keluar" title="Zoom Keluar">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>
+                </button>
+                <button id="zoomInBtn" type="button" class="ghost canvas-tool-btn" aria-label="Zoom masuk" data-tip="Zoom Masuk" title="Zoom Masuk">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14"></path></svg>
+                </button>
+                <button id="zoomResetBtn" type="button" class="ghost canvas-tool-btn" aria-label="Reset zoom" data-tip="Reset Zoom" title="Reset Zoom">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM8 12h8"></path></svg>
+                </button>
+                <span id="zoomLevelLabel" class="canvas-zoom-chip" aria-live="polite">100%</span>
+                <button id="addWidgetToolbar" type="button" class="canvas-tool-btn" data-tip="Tambah Widget" title="Tambah Widget">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+                </button>
+                <button id="editModeBtn" type="button" class="ghost canvas-tool-btn canvas-edit-toggle" aria-pressed="false" data-tip="Mode Edit (ON/OFF)" title="Mode Edit">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16.5V20h3.5L19 8.5 15.5 5 4 16.5zM14 6.5l3.5 3.5"></path></svg>
+                </button>
+                <button id="saveCanvasBtn" type="button" class="ghost canvas-tool-btn" data-tip="Simpan JPG" title="Simpan JPG">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19h14V5H5zM8 3v4M16 3v4M8 14h8"></path></svg>
+                </button>
+                <button id="closeCanvasBtn" type="button" class="ghost canvas-tool-btn" aria-label="Tutup Canvas" data-tip="Tutup Canvas" title="Tutup Canvas">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg>
+                </button>
               </div>
             </div>
 
@@ -468,6 +495,30 @@
           placeholder="Contoh: fokus pada arus kas, margin, dan rekomendasi aksi mingguan."></textarea>
       </label>
 
+      <div class="settings-section">
+        <h4>Business Context</h4>
+        <label>Nama Bisnis
+          <input name="business_name" id="settingsBusinessName" maxlength="120" placeholder="Contoh: Vistara Mart" />
+        </label>
+        <label>Industri
+          <input name="business_industry" id="settingsBusinessIndustry" maxlength="80" placeholder="Contoh: Retail" />
+        </label>
+        <label>Kota
+          <input name="business_city" id="settingsBusinessCity" maxlength="80" placeholder="Contoh: Jakarta" />
+        </label>
+        <div class="settings-inline-grid">
+          <label>Timezone
+            <input name="business_timezone" id="settingsBusinessTimezone" maxlength="60" placeholder="Asia/Jakarta" />
+          </label>
+          <label>Mata Uang
+            <input name="business_currency" id="settingsBusinessCurrency" maxlength="12" placeholder="IDR" />
+          </label>
+        </div>
+        <label>Waktu Verdict
+          <input name="business_verdict_time" id="settingsBusinessVerdictTime" maxlength="8" placeholder="07:00" />
+        </label>
+      </div>
+
       <div class="settings-actions">
         <button id="settingsResetBtn" type="button" class="ghost">Reset Default</button>
         <button type="submit">Simpan Pengaturan</button>
@@ -478,7 +529,7 @@
   <script src="/vendor/gridstack-all.js"></script>
   <script src="/vendor/chart.umd.min.js"></script>
   <script src="/runtime-env.js"></script>
-  <script type="module" src="/app.js?v=20260307t"></script>
+  <script type="module" src="/app.js?v=20260307x"></script>
 </body>
 
 </html>

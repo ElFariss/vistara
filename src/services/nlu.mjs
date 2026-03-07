@@ -31,6 +31,9 @@ function extractBranch(text) {
 
 function extractMetric(text) {
   const lower = toLowerAlnum(text);
+  if (lower.includes('penjualan') || lower.includes('sales')) {
+    return 'omzet';
+  }
   if (lower.includes('untung') || lower.includes('profit') || lower.includes('laba')) {
     return 'untung';
   }
@@ -47,6 +50,26 @@ function extractMetric(text) {
     return 'cabang';
   }
   return 'omzet';
+}
+
+function extractVisualization(text) {
+  const lower = toLowerAlnum(text);
+  if (/\b(line|garis|trend|tren|grafik)\b/i.test(lower)) {
+    return 'line';
+  }
+  if (/\b(bar|batang)\b/i.test(lower)) {
+    return 'bar';
+  }
+  if (/\b(pie|donut|lingkaran)\b/i.test(lower)) {
+    return 'pie';
+  }
+  if (/\b(table|tabel)\b/i.test(lower)) {
+    return 'table';
+  }
+  if (/\b(metric|kartu|single)\b/i.test(lower)) {
+    return 'metric';
+  }
+  return null;
 }
 
 function looksAnalyticsMessage(text) {
@@ -109,6 +132,7 @@ function fallbackIntent(message) {
   return {
     intent,
     metric: intent === 'smalltalk' ? null : extractMetric(message),
+    visualization: intent === 'smalltalk' ? null : extractVisualization(message),
     time_period: intent === 'smalltalk' ? null : extractTimePeriod(message),
     branch: extractBranch(message),
     channel: /tokopedia/i.test(lower)
@@ -136,6 +160,9 @@ function sanitizeIntent(raw, fallback) {
   return {
     intent,
     metric: typeof raw.metric === 'string' ? raw.metric : fallback.metric,
+    visualization: typeof raw.visualization === 'string'
+      ? (['metric', 'line', 'bar', 'pie', 'table'].includes(raw.visualization.toLowerCase()) ? raw.visualization.toLowerCase() : fallback.visualization)
+      : fallback.visualization,
     time_period: typeof raw.time_period === 'string' ? raw.time_period : fallback.time_period,
     branch: typeof raw.branch === 'string' ? raw.branch : fallback.branch,
     channel: typeof raw.channel === 'string' ? raw.channel : fallback.channel,
@@ -160,6 +187,7 @@ export async function parseIntent(message, history = []) {
       ...fallback,
       intent: 'smalltalk',
       metric: null,
+      visualization: null,
       time_period: null,
       limit: null,
       nlu_source: 'rule_smalltalk',
@@ -179,6 +207,7 @@ export async function parseIntent(message, history = []) {
       expected_fields: {
         intent: 'string',
         metric: 'string|null',
+        visualization: 'string|null',
         time_period: 'string|null',
         branch: 'string|null',
         channel: 'string|null',

@@ -70,6 +70,10 @@ body.canvas-overlay-open {
   overflow: hidden;
 }
 
+body.workspace-mode {
+  overflow: hidden;
+}
+
 h1,
 h2,
 h3,
@@ -118,6 +122,24 @@ button.ghost {
 button.ghost:hover {
   background: var(--surface-hover);
   color: var(--accent);
+}
+
+.icon-nav-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+}
+
+.icon-nav-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.icon-nav-btn svg path {
+  fill: currentColor;
+  stroke: none;
 }
 
 input,
@@ -1258,7 +1280,7 @@ label {
   align-items: center;
   padding: 0.48rem 0.55rem;
   border-bottom: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface);
 }
 
 .widget-head strong {
@@ -1275,7 +1297,7 @@ label {
 
 .widget-head-actions button {
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--surface);
   color: var(--ink-secondary);
   padding: 0.2rem 0.4rem;
   border-radius: 7px;
@@ -1285,10 +1307,6 @@ label {
 
 .hidden-actions {
   display: none;
-}
-
-.widget-drag-handle {
-  cursor: grab;
 }
 
 .widget-body {
@@ -1408,31 +1426,34 @@ label {
 }
 
 .canvas-shell {
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 280px;
+  display: block;
+  position: relative;
   min-height: 0;
   height: 100%;
-  transition: grid-template-columns var(--transition);
-}
-
-.canvas-shell.data-collapsed {
-  grid-template-columns: 0 minmax(0, 1fr) 280px;
-}
-
-.canvas-shell.config-collapsed {
-  grid-template-columns: 240px minmax(0, 1fr) 0;
-}
-
-.canvas-shell.data-collapsed.config-collapsed {
-  grid-template-columns: 0 minmax(0, 1fr) 0;
 }
 
 .data-pane {
-  min-width: 0;
+  position: absolute;
+  top: var(--canvas-topbar-height, 64px);
+  bottom: 0;
+  left: 0;
+  width: min(320px, 34vw);
+  z-index: 24;
   border-right: 1px solid var(--line);
   background: var(--surface);
   padding: 1rem;
   overflow: auto;
+  box-shadow: var(--shadow);
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+  transition: transform var(--transition), opacity var(--transition);
+}
+
+.canvas-shell.data-collapsed .data-pane {
+  transform: translateX(-104%);
+  opacity: 0;
+  pointer-events: none;
 }
 
 .pane-head {
@@ -1492,6 +1513,8 @@ label {
   grid-template-rows: auto minmax(0, 1fr);
   position: relative;
   min-height: 0;
+  height: 100%;
+  --canvas-topbar-height: 64px;
   background: var(--bg-warm);
   overflow: hidden;
 }
@@ -1499,40 +1522,28 @@ label {
 .canvas-bar {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  align-content: center;
-  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 0.6rem;
-  padding: 0.75rem 1rem;
+  padding: 0.75rem 0.9rem;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
   position: sticky;
   top: 0;
-  z-index: 12;
+  z-index: 22;
 }
 
-.canvas-bar-actions {
+.canvas-bar-meta {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.4rem;
   align-items: center;
-  flex-wrap: wrap;
   justify-content: flex-end;
-}
-
-.canvas-shell.data-collapsed .data-pane,
-.canvas-shell.config-collapsed .config-pane {
-  opacity: 0;
-  pointer-events: none;
-  overflow: hidden;
-  padding: 0;
-  border: none;
 }
 
 .canvas-viewport {
   min-height: 0;
   position: relative;
   overflow: auto;
-  padding: 0.85rem;
+  padding: 0.75rem 0.75rem 5.35rem;
   scroll-behavior: smooth;
   cursor: grab;
   touch-action: none;
@@ -1551,8 +1562,8 @@ label {
 .canvas-page-controls {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.2rem 0.45rem;
+  gap: 0.35rem;
+  padding: 0.24rem 0.55rem;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   background: var(--surface-hover);
@@ -1565,42 +1576,72 @@ label {
   text-align: center;
 }
 
-.canvas-page-controls button {
-  min-width: 34px;
-  padding: 0.25rem 0.55rem;
-}
-
-.edit-toggle {
-  display: inline-flex;
+.canvas-dock {
+  position: absolute;
+  left: 50%;
+  bottom: 0.9rem;
+  transform: translateX(-50%);
+  z-index: 26;
+  display: flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.3rem 0.7rem;
+  gap: 0.36rem;
+  padding: 0.45rem;
   border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: var(--surface-hover);
-  font-size: 0.88rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow);
+  max-width: calc(100% - 1.2rem);
+  overflow-x: auto;
 }
 
-.canvas-zoom-controls {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.2rem 0.5rem;
+.canvas-tool-btn {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
   border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  background: var(--surface-hover);
-}
-
-.canvas-zoom-controls span {
-  min-width: 52px;
-  text-align: center;
-  font-size: 0.83rem;
+  background: var(--surface);
   color: var(--ink-secondary);
+  box-shadow: none;
 }
 
-.canvas-zoom-controls button {
-  min-width: 34px;
-  padding: 0.24rem 0.56rem;
+.canvas-tool-btn:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.canvas-tool-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.canvas-tool-btn svg path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.canvas-tool-btn.is-active,
+.canvas-edit-toggle.is-active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.canvas-zoom-chip {
+  min-width: 62px;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--ink-secondary);
+  padding: 0.25rem 0.52rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-hover);
 }
 
 .canvas-stage {
@@ -1630,21 +1671,31 @@ label {
 }
 
 .floating-add {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  border-radius: var(--radius-pill);
-  box-shadow: var(--shadow);
-  padding: 0.7rem 1.2rem;
-  z-index: 3;
+  display: none !important;
 }
 
 .config-pane {
-  min-width: 0;
+  position: absolute;
+  top: var(--canvas-topbar-height, 64px);
+  bottom: 0;
+  right: 0;
+  width: min(340px, 36vw);
+  z-index: 24;
   border-left: 1px solid var(--line);
   background: var(--surface);
   padding: 1rem;
   overflow: auto;
+  box-shadow: var(--shadow);
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+  transition: transform var(--transition), opacity var(--transition);
+}
+
+.canvas-shell.config-collapsed .config-pane {
+  transform: translateX(104%);
+  opacity: 0;
+  pointer-events: none;
 }
 
 .config-empty {
@@ -1934,6 +1985,27 @@ label {
   padding-right: 0.2rem;
 }
 
+.settings-section {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.65rem;
+  background: var(--surface-hover);
+}
+
+.settings-section h4 {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--ink-secondary);
+}
+
+.settings-inline-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+}
+
 .settings-actions {
   display: flex;
   justify-content: space-between;
@@ -1972,12 +2044,12 @@ label {
   }
 
   .canvas-shell {
-    grid-template-columns: 1fr;
+    display: block;
   }
 
   .data-pane,
   .config-pane {
-    display: none;
+    width: min(86vw, 330px);
   }
 
   .canvas-pane {
@@ -1989,7 +2061,7 @@ label {
   }
 
   .canvas-viewport {
-    padding: 0.7rem;
+    padding: 0.7rem 0.7rem 5.2rem;
   }
 
   .canvas-world {
@@ -2071,17 +2143,18 @@ label {
 
   .canvas-bar {
     flex-direction: row;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.5rem;
   }
 
-  .canvas-bar-actions {
-    width: 100%;
-    justify-content: flex-start;
+  .canvas-main {
+    --canvas-topbar-height: 62px;
   }
 
-  .canvas-page-controls {
-    order: 3;
+  .canvas-dock {
+    bottom: 0.55rem;
+    width: calc(100% - 0.7rem);
+    justify-content: flex-start;
   }
 
   .canvas-stage {
@@ -2102,11 +2175,18 @@ label {
     background-size: calc(100% / 16) calc(100% / 9);
   }
 
-  .floating-add {
-    position: sticky;
-    right: auto;
-    bottom: 0.7rem;
-    left: calc(100% - 180px);
+  .canvas-tool-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .canvas-zoom-chip {
+    min-width: 56px;
+    font-size: 0.76rem;
+  }
+
+  .settings-inline-grid {
+    grid-template-columns: 1fr;
   }
 
   .settings-panel {
