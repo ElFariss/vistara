@@ -82,6 +82,8 @@ const state = {
   preChatTickerInterval: null,
   preChatTickerSwapTimer: null,
   preChatTickerKey: '',
+  isProgrammaticGridUpdate: false,
+  isRenderingCanvas: false,
 };
 
 const refs = {
@@ -1282,6 +1284,9 @@ function ensureGrid() {
     rowHeight,
     maxRows: GRID_ROWS,
     onChange: (items) => {
+      if (state.isProgrammaticGridUpdate) {
+        return;
+      }
       const map = new Map(items.map((item) => [item.id, item.layout]));
       state.canvasWidgets = state.canvasWidgets.map((widget) => {
         const currentLayout = normalizeLayout(widget.layout || {}, 1);
@@ -1339,15 +1344,22 @@ function syncGridBounds() {
   if (!state.grid) return;
   const rowHeight = getCanvasRowHeight();
 
-  if (typeof state.grid.setBounds === 'function') {
-    state.grid.setBounds({
-      cols: GRID_COLS,
-      maxRows: GRID_ROWS,
-      rowHeight,
-      gap: GRID_GAP,
-    });
+  try {
+    state.isProgrammaticGridUpdate = true;
+    if (typeof state.grid.setBounds === 'function') {
+      state.grid.setBounds({
+        cols: GRID_COLS,
+        maxRows: GRID_ROWS,
+        rowHeight,
+        gap: GRID_GAP,
+      });
+    }
+    state.grid.refresh();
+  } catch (error) {
+    console.warn('syncGridBounds_failed', error);
+  } finally {
+    state.isProgrammaticGridUpdate = false;
   }
-  state.grid.refresh();
 }
 
 function allPages() {
@@ -1641,16 +1653,29 @@ function removeWidgetById(widgetId) {
 }
 
 function renderCanvas() {
-  ensureGrid();
-  if (state.canvasPage > allPages()) {
-    state.canvasPage = allPages();
+  if (state.isRenderingCanvas) {
+    return;
   }
-  updateCanvasPagination();
-  state.grid.setItems(pageWidgets(), renderCanvasItem);
-  syncGridBounds();
+  state.isRenderingCanvas = true;
+  try {
+    ensureGrid();
+    if (state.canvasPage > allPages()) {
+      state.canvasPage = allPages();
+    }
+    updateCanvasPagination();
+    state.isProgrammaticGridUpdate = true;
+    state.grid.setItems(pageWidgets(), renderCanvasItem);
+    syncGridBounds();
 
-  if (state.selectedWidgetId && !state.canvasWidgets.find((w) => w.id === state.selectedWidgetId)) {
-    selectWidget(null);
+    if (state.selectedWidgetId && !state.canvasWidgets.find((w) => w.id === state.selectedWidgetId)) {
+      selectWidget(null);
+    }
+  } catch (error) {
+    console.warn('renderCanvas_failed', error);
+    showToast('Dashboard siap, tetapi canvas gagal dirender. Coba buka ulang Canvas.');
+  } finally {
+    state.isProgrammaticGridUpdate = false;
+    state.isRenderingCanvas = false;
   }
 }
 
@@ -2029,10 +2054,15 @@ function applyAssistantResponse(response, options = {}) {
   });
 
   if (mode === 'canvas' && Array.isArray(widgets) && widgets.length > 0) {
-    state.canvasWidgets = normalizeIncomingWidgets(widgets);
-    state.canvasPage = 1;
-    renderCanvas();
-    scheduleCanvasSave();
+    try {
+      state.canvasWidgets = normalizeIncomingWidgets(widgets);
+      state.canvasPage = 1;
+      renderCanvas();
+      scheduleCanvasSave();
+    } catch (error) {
+      console.warn('applyAssistantResponse_canvas_failed', error);
+      showToast('Jawaban masuk, tapi render canvas gagal. Coba buka ulang Canvas.');
+    }
   }
 }
 

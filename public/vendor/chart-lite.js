@@ -87,55 +87,6 @@ function randomColor(index) {
   return palette[index % palette.length];
 }
 
-function allChartInstances() {
-  const instances = window.Chart?.instances;
-  if (!instances) return [];
-  if (typeof instances.values === 'function') {
-    return Array.from(instances.values());
-  }
-  if (Array.isArray(instances)) {
-    return instances.filter(Boolean);
-  }
-  if (typeof instances === 'object') {
-    return Object.values(instances).filter(Boolean);
-  }
-  return [];
-}
-
-function applyThemeToChart(chart) {
-  if (!chart || !chart.options) return;
-  const type = String(chart.config?.type || '').toLowerCase();
-  const inkSecondary = cssColor('--ink-secondary', '#6b5a48');
-  const inkPrimary = cssColor('--ink', '#2c1e0e');
-  const surface = cssColor('--surface', '#ffffff');
-  const gridColor = cssColor('--line', 'rgba(180,155,120,0.16)');
-
-  chart.options.plugins = chart.options.plugins || {};
-  chart.options.plugins.tooltip = {
-    ...(chart.options.plugins.tooltip || {}),
-    backgroundColor: surface,
-    titleColor: inkPrimary,
-    bodyColor: inkSecondary,
-    borderColor: gridColor,
-    borderWidth: 1,
-  };
-
-  if (type !== 'pie') {
-    chart.options.scales = chart.options.scales || {};
-    chart.options.scales.x = chart.options.scales.x || {};
-    chart.options.scales.y = chart.options.scales.y || {};
-    chart.options.scales.x.ticks = { ...(chart.options.scales.x.ticks || {}), color: inkSecondary };
-    chart.options.scales.y.ticks = { ...(chart.options.scales.y.ticks || {}), color: inkSecondary };
-    chart.options.scales.x.grid = { ...(chart.options.scales.x.grid || {}), color: gridColor };
-    chart.options.scales.y.grid = { ...(chart.options.scales.y.grid || {}), color: gridColor };
-  }
-
-  if (chart.options.plugins.legend?.labels) {
-    chart.options.plugins.legend.labels.color = inkSecondary;
-  }
-  chart.update('none');
-}
-
 function formatCompactNumber(rawValue) {
   const value = Number(rawValue);
   if (!Number.isFinite(value)) {
@@ -254,7 +205,6 @@ function renderChartWithLibrary(element, artifact) {
 
   const chart = new window.Chart(canvas, config);
   chartInstances.set(canvas, chart);
-  applyThemeToChart(chart);
 }
 
 function renderChartFallback(element, artifact) {
@@ -334,9 +284,3 @@ export function renderArtifact(element, artifact) {
     content: JSON.stringify(artifact, null, 2),
   });
 }
-
-document.addEventListener('vistara:theme-change', () => {
-  for (const chart of allChartInstances()) {
-    applyThemeToChart(chart);
-  }
-});
