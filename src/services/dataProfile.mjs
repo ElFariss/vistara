@@ -48,6 +48,23 @@ function toDateValue(value) {
   return parsed.toISOString();
 }
 
+function looksLikeDateCandidate(value) {
+  if (value instanceof Date) {
+    return true;
+  }
+
+  const text = cleanText(value);
+  if (!text) {
+    return false;
+  }
+
+  if (/[a-z]/i.test(text)) {
+    return true;
+  }
+
+  return /[\/.-]/.test(text);
+}
+
 function inferColumnKind(values = []) {
   const sample = values.filter((value) => cleanText(value) !== '').slice(0, 120);
   if (sample.length === 0) {
@@ -61,7 +78,7 @@ function inferColumnKind(values = []) {
     if (toNumeric(value) !== null) {
       numericHits += 1;
     }
-    if (toDateValue(value) !== null) {
+    if (looksLikeDateCandidate(value) && toDateValue(value) !== null) {
       dateHits += 1;
     }
     if (/^(true|false|ya|tidak|yes|no|0|1)$/i.test(cleanText(value))) {
@@ -70,9 +87,9 @@ function inferColumnKind(values = []) {
   }
 
   const ratio = (hits) => hits / sample.length;
-  if (ratio(dateHits) >= 0.7) return 'date';
-  if (ratio(numericHits) >= 0.7) return 'number';
   if (ratio(booleanHits) >= 0.8) return 'boolean';
+  if (ratio(numericHits) >= 0.7) return 'number';
+  if (ratio(dateHits) >= 0.7) return 'date';
   return 'string';
 }
 
