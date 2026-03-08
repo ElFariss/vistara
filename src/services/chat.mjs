@@ -43,16 +43,6 @@ export class DatasetRequiredError extends ChatRequestError {
   }
 }
 
-export class UnsupportedChatRequestError extends ChatRequestError {
-  constructor() {
-    super(
-      'UNSUPPORTED_CHAT_REQUEST',
-      'Sapaan umum tidak didukung. Tanyakan insight data atau minta dashboard.',
-      400,
-    );
-  }
-}
-
 function isDefaultConversationTitle(title) {
   return String(title || '').trim().toLowerCase() === DEFAULT_CONVERSATION_TITLE.toLowerCase();
 }
@@ -201,6 +191,37 @@ function createMessage({ conversationId, tenantId, userId, role, content, payloa
   );
 
   return id;
+}
+
+function persistAssistantErrorMessage({
+  conversationId,
+  tenantId,
+  error,
+  intent = null,
+}) {
+  const message = error?.message || 'Permintaan tidak dapat diproses.';
+  const payload = {
+    answer: `Error: ${message}`,
+    widgets: [],
+    artifacts: [],
+    intent,
+    presentation_mode: 'chat',
+    error: {
+      code: error?.code || 'CHAT_FAILED',
+      message,
+      status: error?.statusCode || 500,
+      details: error?.details ?? null,
+    },
+  };
+
+  createMessage({
+    conversationId,
+    tenantId,
+    userId: null,
+    role: 'assistant',
+    content: payload.answer,
+    payload,
+  });
 }
 
 function maybeAutoTitleConversation({ tenantId, userId, conversationId, message }) {
@@ -569,14 +590,16 @@ function buildSmalltalkAnswer(message, datasetReady, userDisplayName = null) {
   }
 
   if (/\b(halo|hai|hi|hello|pagi|siang|sore|malam)\b/i.test(lower)) {
-    return null;
+    return datasetReady
+      ? 'Halo. Saya siap bantu analisis data Anda. Coba minta ringkasan, tren, atau dashboard.'
+      : 'Halo. Saya siap bantu. Upload dataset saat siap, lalu tanya insight bisnis Anda.';
   }
 
   if (!datasetReady && /\b(apa yang bisa kamu lakukan|bisa bantu apa|cara pakai|mulai dari mana)\b/i.test(lower)) {
     return `Upload dataset dulu (CSV/JSON/XLSX/XLS), lalu saya bantu analisis secara instan untuk ${safeName}.`;
   }
 
-  return null;
+  return 'Saya siap bantu. Tanyakan insight data, tren, atau minta dashboard kapan saja.';
 }
 
 export async function processChatMessage({
@@ -612,7 +635,14 @@ export async function processChatMessage({
   const userDisplayName = lookupUserDisplayName(tenantId, userId);
 
   if (!datasetReady && intent.intent !== 'data_management' && intent.intent !== 'smalltalk') {
-    throw new DatasetRequiredError();
+    const error = new DatasetRequiredError();
+    persistAssistantErrorMessage({
+      conversationId: conversation.id,
+      tenantId,
+      error,
+      intent,
+    });
+    throw error;
   }
 
   let responsePayload = {
@@ -624,12 +654,8 @@ export async function processChatMessage({
   };
 
   if (intent.intent === 'smalltalk') {
-    const answer = buildSmalltalkAnswer(message, datasetReady, userDisplayName);
-    if (!answer) {
-      throw new UnsupportedChatRequestError();
-    }
     responsePayload = {
-      answer,
+      answer: buildSmalltalkAnswer(message, datasetReady, userDisplayName),
       widgets: [],
       artifacts: [],
       intent,

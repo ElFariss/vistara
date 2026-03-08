@@ -207,7 +207,7 @@ test('processChatMessage returns a structured error for missing datasets', async
   }
 });
 
-test('processChatMessage returns a structured error for unsupported smalltalk prompts', async () => {
+test('processChatMessage persists a dataset-required error in conversation history', async () => {
   const { tenantId, userId } = seedTenantUser();
   try {
     await assert.rejects(
@@ -215,10 +215,34 @@ test('processChatMessage returns a structured error for unsupported smalltalk pr
         processChatMessage({
           tenantId,
           userId,
-          message: 'hi',
+          message: 'berapa omzet hari ini?',
         }),
-      (error) => error?.code === 'UNSUPPORTED_CHAT_REQUEST' && error?.statusCode === 400,
+      (error) => error?.code === 'DATASET_REQUIRED' && error?.statusCode === 400,
     );
+
+    const history = getChatHistory({ tenantId, userId });
+    assert.equal(history.messages.length, 2);
+    assert.equal(history.messages[0].role, 'user');
+    assert.equal(history.messages[1].role, 'assistant');
+    assert.equal(history.messages[1].payload?.error?.code, 'DATASET_REQUIRED');
+    assert.match(history.messages[1].content, /^Error:/);
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('processChatMessage allows generic smalltalk prompts', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    const response = await processChatMessage({
+      tenantId,
+      userId,
+      message: 'hi',
+    });
+
+    assert.equal(response.intent.intent, 'smalltalk');
+    assert.equal(response.presentation_mode, 'chat');
+    assert.match(response.answer, /halo/i);
   } finally {
     cleanupTenant(tenantId);
   }
@@ -314,15 +338,27 @@ test('chat routes return 400 for structured chat request errors', async () => {
     });
     assert.equal(datasetRequiredResponse.statusCode, 400);
     assert.equal(datasetRequiredResponse.payload.error.code, 'DATASET_REQUIRED');
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
 
-    const unsupportedPromptResponse = await invokeRoute(router, 'POST', '/api/chat', {
+test('chat routes allow generic smalltalk prompts', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    const router = new Router();
+    registerChatRoutes(router);
+
+    const response = await invokeRoute(router, 'POST', '/api/chat', {
       user: { id: userId, tenant_id: tenantId },
       body: {
         message: 'hi',
       },
     });
-    assert.equal(unsupportedPromptResponse.statusCode, 400);
-    assert.equal(unsupportedPromptResponse.payload.error.code, 'UNSUPPORTED_CHAT_REQUEST');
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.payload.intent.intent, 'smalltalk');
+    assert.match(response.payload.answer, /halo/i);
   } finally {
     cleanupTenant(tenantId);
   }

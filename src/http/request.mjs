@@ -41,7 +41,8 @@ export async function readBody(req, maxBytes = config.maxUploadSizeBytes) {
 }
 
 export async function parseRequestBody(req) {
-  const contentType = String(req.headers['content-type'] || '').toLowerCase();
+  const rawContentType = String(req.headers['content-type'] || '');
+  const contentType = rawContentType.toLowerCase();
   const body = await readBody(req);
 
   if (!body.length) {
@@ -57,7 +58,7 @@ export async function parseRequestBody(req) {
   }
 
   if (contentType.includes('multipart/form-data')) {
-    return parseMultipartBody(body, contentType);
+    return parseMultipartBody(body, rawContentType);
   }
 
   if (contentType.includes('application/x-www-form-urlencoded')) {

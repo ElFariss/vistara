@@ -1,6 +1,7 @@
 import { renderArtifact } from './vendor/chart-lite.js?v=20260308d';
 import { createGridStackLite } from './vendor/gridstack-lite.js?v=20260307e';
 import { resolveCanvasViewportTarget } from './canvasViewport.js';
+import { shouldRetryNonStreamChatRequest } from './chatRequestPolicy.js';
 import {
   didDeleteActiveConversation,
   normalizeAppPath,
@@ -260,10 +261,19 @@ function resolveThemeMode(mode = 'light') {
   return mode === 'dark' ? 'dark' : 'light';
 }
 
+function syncBrowserThemeChrome(theme) {
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+  if (!themeMeta) {
+    return;
+  }
+  themeMeta.setAttribute('content', theme === 'dark' ? '#111315' : '#faf7f2');
+}
+
 function setTheme(mode) {
   const root = document.documentElement;
   const next = resolveThemeMode(mode || 'light');
   root.setAttribute('data-theme', next);
+  syncBrowserThemeChrome(next);
   document.dispatchEvent(new CustomEvent('vistara:theme-change', {
     detail: { theme: next },
   }));
@@ -764,6 +774,7 @@ function routePrimaryEntry(options = {}) {
 
   showPage('auth', {
     replace: options.replace !== false,
+    scrollTop: true,
   });
   switchAuthTab(options.authTab || 'register');
   setOnboardingSlide(0);
@@ -828,12 +839,18 @@ function showPage(page, options = {}) {
   if (page === 'auth') {
     refs.authPage.classList.remove('hidden');
     setSettingsOpen(false);
+    if (options.scrollTop !== false) {
+      window.scrollTo({ top: 0, behavior: options.smooth ? 'smooth' : 'auto' });
+    }
     return;
   }
 
   if (page === 'context') {
     refs.contextPage.classList.remove('hidden');
     setSettingsOpen(false);
+    if (options.scrollTop !== false) {
+      window.scrollTo({ top: 0, behavior: options.smooth ? 'smooth' : 'auto' });
+    }
     return;
   }
 
@@ -2345,6 +2362,7 @@ async function refreshChatHistory(conversationId = state.conversationId) {
         widgets: Array.isArray(payload.widgets) ? payload.widgets : [],
         mode: payload.presentation_mode || 'chat',
         fileName: null,
+        error: Boolean(payload.error),
       };
     })
     .filter((entry) => !(entry.role === 'assistant' && entry.mode === 'chat' && /^selamat datang/i.test(entry.content || '')));
@@ -2824,8 +2842,11 @@ async function sendChatMessage(userText) {
       const streamed = await streamChatMessage(userText, streamState);
       response = streamed.payload;
       streamTimelineSeen = Boolean(streamed.timelineSeen);
-    } catch {
+    } catch (error) {
       streamTimelineSeen = Boolean(streamState.hadTimeline);
+      if (!(isNetworkLikeError(error) || shouldRetryNonStreamChatRequest(error))) {
+        throw error;
+      }
       response = await api('/api/chat', {
         method: 'POST',
         body: JSON.stringify({
@@ -2849,6 +2870,14 @@ async function sendChatMessage(userText) {
   } catch (error) {
     hideTyping();
     finalizeTimeline(state.timelineRunId);
+    if (error?.statusCode && error.statusCode < 500 && state.conversationId) {
+      try {
+        await refreshChatHistory(state.conversationId);
+        return;
+      } catch (refreshError) {
+        console.warn('refreshChatHistory_after_error_failed', refreshError);
+      }
+    }
     appendMessage({
       role: 'assistant',
       content: `Error: ${error.message || 'Permintaan tidak dapat diproses.'}`,
@@ -3292,7 +3321,7 @@ refs.chatForm.addEventListener('submit', async (event) => {
 
   if (file) {
     try {
-      await uploadDataset({ file, silent: true });
+      await uploadDataset({ file, silent: Boolean(userText) });
     } catch (error) {
       showToast(`Upload gagal: ${error.message}`);
       return;
