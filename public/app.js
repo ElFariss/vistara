@@ -1,5 +1,6 @@
 import { renderArtifact } from './vendor/chart-lite.js?v=20260308d';
 import { createGridStackLite } from './vendor/gridstack-lite.js?v=20260307e';
+import { resolveCanvasViewportTarget } from './canvasViewport.js';
 import {
   didDeleteActiveConversation,
   getChatHeaderState,
@@ -576,6 +577,7 @@ function setAuth(token, user = null, options = {}) {
   state.token = token || '';
   state.user = user;
   state.isDemoSession = state.token ? isDemo : false;
+  document.body.classList.toggle('is-authenticated', Boolean(state.token));
 
   if (state.token) {
     if (persist) {
@@ -726,6 +728,20 @@ function syncLandingScrollCue() {
 function syncAppHeaderOffset() {
   const headerHeight = refs.appHeader?.offsetHeight || 0;
   document.documentElement.style.setProperty('--app-header-height', `${headerHeight}px`);
+}
+
+function routePrimaryEntry(options = {}) {
+  if (state.token) {
+    void handleRouteNavigation(pathFromPage('workspace'), {
+      replace: options.replace !== false,
+    });
+    return;
+  }
+
+  showPage('auth', {
+    replace: options.replace !== false,
+  });
+  switchAuthTab(options.authTab || 'register');
 }
 
 function setSessionRailCollapsed(collapsed) {
@@ -1088,17 +1104,52 @@ function centerCanvasStage() {
     return;
   }
 
-  const targetLeft = Math.max(
-    0,
-    refs.canvasStage.offsetLeft - Math.round((refs.canvasViewport.clientWidth - refs.canvasStage.clientWidth) / 2),
-  );
-  const targetTop = Math.max(
-    0,
-    refs.canvasStage.offsetTop - Math.round((refs.canvasViewport.clientHeight - refs.canvasStage.clientHeight) / 2),
-  );
+  const worldRect = refs.canvasWorld.getBoundingClientRect();
+  const viewportScrollLeft = refs.canvasViewport.scrollLeft;
+  const viewportScrollTop = refs.canvasViewport.scrollTop;
+  const stageRect = {
+    left: refs.canvasStage.offsetLeft,
+    top: refs.canvasStage.offsetTop,
+    width: refs.canvasStage.clientWidth,
+    height: refs.canvasStage.clientHeight,
+  };
 
-  refs.canvasViewport.scrollLeft = targetLeft;
-  refs.canvasViewport.scrollTop = targetTop;
+  let focusRect = null;
+  const widgetShells = Array.from(refs.canvasGrid?.querySelectorAll('.widget-shell') || []);
+  if (widgetShells.length > 0) {
+    let left = Number.POSITIVE_INFINITY;
+    let top = Number.POSITIVE_INFINITY;
+    let right = Number.NEGATIVE_INFINITY;
+    let bottom = Number.NEGATIVE_INFINITY;
+
+    widgetShells.forEach((shell) => {
+      const rect = shell.getBoundingClientRect();
+      left = Math.min(left, rect.left - worldRect.left + viewportScrollLeft);
+      top = Math.min(top, rect.top - worldRect.top + viewportScrollTop);
+      right = Math.max(right, rect.right - worldRect.left + viewportScrollLeft);
+      bottom = Math.max(bottom, rect.bottom - worldRect.top + viewportScrollTop);
+    });
+
+    if (Number.isFinite(left) && Number.isFinite(top) && Number.isFinite(right) && Number.isFinite(bottom)) {
+      focusRect = {
+        left,
+        top,
+        width: Math.max(0, right - left),
+        height: Math.max(0, bottom - top),
+      };
+    }
+  }
+
+  const target = resolveCanvasViewportTarget({
+    stageRect,
+    viewportRect: {
+      width: refs.canvasViewport.clientWidth,
+      height: refs.canvasViewport.clientHeight,
+    },
+    focusRect,
+  });
+
+  refs.canvasViewport.scrollTo(target.scrollLeft, target.scrollTop);
 }
 
 function queueCanvasStageCenter() {
@@ -3420,14 +3471,12 @@ document.addEventListener('click', (event) => {
 
 if (refs.landingCta) {
   refs.landingCta.addEventListener('click', () => {
-    showPage('auth');
-    switchAuthTab('register');
+    routePrimaryEntry({ authTab: 'register' });
   });
 }
 if (refs.landingWelcomeCta) {
   refs.landingWelcomeCta.addEventListener('click', () => {
-    showPage('auth');
-    switchAuthTab('register');
+    routePrimaryEntry({ authTab: 'register' });
   });
 }
 if (refs.headerLoginBtn) {
@@ -3438,18 +3487,21 @@ if (refs.headerLoginBtn) {
 }
 if (refs.headerCtaBtn) {
   refs.headerCtaBtn.addEventListener('click', () => {
-    showPage('auth');
-    switchAuthTab('register');
+    routePrimaryEntry({ authTab: 'register' });
   });
 }
 if (refs.landingCtaBottom) {
   refs.landingCtaBottom.addEventListener('click', () => {
-    showPage('auth');
-    switchAuthTab('register');
+    routePrimaryEntry({ authTab: 'register' });
   });
 }
 
 async function startDemoSession() {
+  if (state.token) {
+    routePrimaryEntry({ replace: true });
+    return;
+  }
+
   const originalText = refs.landingDemo?.textContent || 'Coba Demo (tanpa login)';
   if (refs.landingDemo) {
     refs.landingDemo.disabled = true;

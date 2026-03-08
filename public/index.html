@@ -7,6 +7,7 @@
   <title>Vistara</title>
   <meta name="description" content="Vistara - AI analytics workspace berbasis upload dataset untuk bisnis." />
   <meta name="theme-color" content="#faf7f2" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -264,17 +265,17 @@
         </div>
 
         <form id="loginForm" class="stack auth-form">
-          <label>Email<input name="email" type="email" required placeholder="nama@bisnis.com" /></label>
-          <label>Password<input name="password" type="password" required placeholder="Masukkan password" /></label>
+          <label>Email<input name="email" type="email" required autocomplete="email" placeholder="nama@bisnis.com" /></label>
+          <label>Password<input name="password" type="password" required autocomplete="current-password" placeholder="Masukkan password" /></label>
           <button type="submit">Masuk</button>
         </form>
 
         <form id="registerForm" class="stack auth-form hidden">
-          <label>Nama<input name="name" required placeholder="Nama lengkap" /></label>
-          <label>Email<input name="email" type="email" required placeholder="nama@bisnis.com" /></label>
-          <label>Password<input name="password" type="password" minlength="8" required placeholder="Min. 8 karakter" /></label>
-          <label>No. HP<input name="phone" placeholder="08xx-xxxx-xxxx" /></label>
-          <label>Nama Bisnis<input name="business_name" required placeholder="Nama bisnis kamu" /></label>
+          <label>Nama<input name="name" required autocomplete="name" placeholder="Nama lengkap" /></label>
+          <label>Email<input name="email" type="email" required autocomplete="email" placeholder="nama@bisnis.com" /></label>
+          <label>Password<input name="password" type="password" minlength="8" required autocomplete="new-password" placeholder="Min. 8 karakter" /></label>
+          <label>No. HP<input name="phone" autocomplete="tel" placeholder="08xx-xxxx-xxxx" /></label>
+          <label>Nama Bisnis<input name="business_name" required autocomplete="organization" placeholder="Nama bisnis kamu" /></label>
           <button type="submit">Buat Akun</button>
         </form>
       </div>
@@ -286,11 +287,11 @@
         <p class="auth-sub">Langkah 2 dari 2: isi konteks bisnis untuk grounding AI</p>
 
         <form id="contextForm" class="stack">
-          <label>Nama Bisnis<input name="name" required /></label>
-          <label>Industri<input name="industry" required placeholder="F&B, Retail, Jasa" /></label>
-          <label>Kota<input name="city" required placeholder="Jakarta, Bandung" /></label>
-          <label>Timezone<input name="timezone" value="Asia/Jakarta" /></label>
-          <label>Mata Uang<input name="currency" value="IDR" /></label>
+          <label>Nama Bisnis<input name="name" required autocomplete="organization" /></label>
+          <label>Industri<input name="industry" required autocomplete="organization-title" placeholder="F&B, Retail, Jasa" /></label>
+          <label>Kota<input name="city" required autocomplete="address-level2" placeholder="Jakarta, Bandung" /></label>
+          <label>Timezone<input name="timezone" autocomplete="off" value="Asia/Jakarta" /></label>
+          <label>Mata Uang<input name="currency" autocomplete="off" value="IDR" /></label>
           <label>Waktu Verdict<input name="morning_verdict_time" value="07:00" /></label>
           <button type="submit">Masuk Workspace</button>
         </form>

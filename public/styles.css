@@ -2730,8 +2730,26 @@ label {
     height: 44px;
   }
 
-  body:not(.workspace-mode) .header-actions {
+  body:not(.workspace-mode):not(.is-authenticated) .header-actions {
     display: none;
+  }
+
+  body.is-authenticated:not(.workspace-mode) .app-header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  body.is-authenticated:not(.workspace-mode) .header-actions {
+    width: auto;
+    display: inline-flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  body.is-authenticated:not(.workspace-mode) .header-actions > * {
+    width: auto;
   }
 
   .workspace-page {
@@ -2826,6 +2844,7 @@ label {
     gap: 1rem;
     justify-items: center;
     width: 100%;
+    padding-top: 0;
     padding-inline: 0.75rem;
   }
 
@@ -2847,7 +2866,7 @@ label {
   .landing-features article,
   .pain-strip article {
     width: 100%;
-    max-width: calc(100vw - 1.5rem);
+    max-width: 100%;
     margin-inline: auto;
   }
 
@@ -3055,6 +3074,25 @@ label {
     width: calc(100vw - 1rem);
     max-height: calc(100dvh - 1rem);
     padding: 1rem;
+  }
+
+  .settings-actions {
+    position: static;
+    background: transparent;
+    padding-top: 0.35rem;
+    flex-direction: column-reverse;
+  }
+
+  .settings-actions > * {
+    width: 100%;
+  }
+}
+
+@media (max-height: 600px) {
+  .settings-actions {
+    position: static;
+    background: transparent;
+    padding-top: 0.35rem;
   }
 }
 
