@@ -1,4 +1,5 @@
 const chartInstances = new WeakMap();
+const chartObservers = new WeakMap();
 
 function cssColor(varName, fallback) {
   const root = document.documentElement;
@@ -11,6 +12,10 @@ function clearElement(element) {
   if (existingCanvas && chartInstances.has(existingCanvas)) {
     chartInstances.get(existingCanvas).destroy();
     chartInstances.delete(existingCanvas);
+  }
+  if (existingCanvas && chartObservers.has(existingCanvas)) {
+    chartObservers.get(existingCanvas).disconnect();
+    chartObservers.delete(existingCanvas);
   }
 
   while (element.firstChild) {
@@ -113,6 +118,9 @@ function formatCompactNumber(rawValue) {
 function renderChartWithLibrary(element, artifact) {
   const wrap = document.createElement('div');
   wrap.className = 'artifact-chart-wrap';
+  if (element.classList.contains('widget-body')) {
+    wrap.classList.add('artifact-chart-wrap-compact');
+  }
 
   const plot = document.createElement('div');
   plot.className = 'artifact-chart-plot';
@@ -209,6 +217,35 @@ function renderChartWithLibrary(element, artifact) {
 
   const chart = new window.Chart(canvas, config);
   chartInstances.set(canvas, chart);
+
+  if (typeof window.ResizeObserver === 'function') {
+    const observer = new window.ResizeObserver(() => {
+      window.requestAnimationFrame(() => {
+        try {
+          chart.resize();
+        } catch {
+          // Ignore late resize calls after teardown.
+        }
+      });
+    });
+    observer.observe(plot);
+    chartObservers.set(canvas, observer);
+  }
+
+  window.requestAnimationFrame(() => {
+    try {
+      chart.resize();
+    } catch {
+      // Ignore late resize calls after teardown.
+    }
+  });
+  window.setTimeout(() => {
+    try {
+      chart.resize();
+    } catch {
+      // Ignore late resize calls after teardown.
+    }
+  }, 90);
 }
 
 function renderChartFallback(element, artifact) {

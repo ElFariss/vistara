@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { config } from '../src/config.mjs';
 import { initializeDatabase, run } from '../src/db.mjs';
 import { executeAnalyticsIntent } from '../src/services/queryEngine.mjs';
 import { runDashboardAgent } from '../src/services/agentRuntime.mjs';
@@ -143,6 +144,19 @@ function artifactHasData(artifact) {
   return false;
 }
 
+async function withDeterministicDashboardAgent(runTest) {
+  const previousGeminiApiKey = config.geminiApiKey;
+  const previousGeminiModel = config.geminiModel;
+  config.geminiApiKey = '';
+  config.geminiModel = 'gemini-disabled-for-tests';
+  try {
+    return await runTest();
+  } finally {
+    config.geminiApiKey = previousGeminiApiKey;
+    config.geminiModel = previousGeminiModel;
+  }
+}
+
 test('executeAnalyticsIntent anchors relative period to latest dataset date', () => {
   const { tenantId, userId } = seedTenantUser();
   try {
@@ -184,7 +198,7 @@ test('runDashboardAgent builds dashboard widgets from template with non-empty ar
       revenue: 2_250_000,
     });
 
-    const response = await runDashboardAgent({
+    const response = await withDeterministicDashboardAgent(() => runDashboardAgent({
       tenantId,
       userId,
       goal: 'Buat dashboard lengkap performa bisnis',
@@ -192,13 +206,138 @@ test('runDashboardAgent builds dashboard widgets from template with non-empty ar
         intent: 'show_metric',
         time_period: '7 hari terakhir',
       },
-    });
+    }));
 
     assert.equal(response.presentation_mode, 'canvas');
     assert.ok(Array.isArray(response.widgets));
     assert.ok(response.widgets.length > 0);
     assert.ok((response.artifacts || []).some((artifact) => artifactHasData(artifact)));
     assert.equal(response.agent.mode, 'multi_agent_runtime');
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('runDashboardAgent preserves an explicit component layout when it does not collide', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    seedTransaction({
+      tenantId,
+      date: '2024-01-10T00:00:00.000Z',
+      revenue: 1_500_000,
+    });
+
+    const response = await withDeterministicDashboardAgent(() => runDashboardAgent({
+      tenantId,
+      userId,
+      goal: 'Buat dashboard omzet',
+      intent: {
+        intent: 'show_metric',
+        time_period: '7 hari terakhir',
+      },
+      dashboard: {
+        config: {
+          components: [
+            {
+              id: 'component_1',
+              type: 'TrendChart',
+              title: 'Trend Omzet',
+              metric: 'revenue_trend',
+              layout: { x: 8, y: 2, w: 8, h: 4, page: 1 },
+            },
+          ],
+        },
+      },
+    }));
+
+    assert.equal(response.presentation_mode, 'canvas');
+    assert.ok(Array.isArray(response.widgets));
+    assert.ok(response.widgets.length >= 1);
+    assert.equal(response.widgets[0].layout?.x, 8);
+    assert.equal(response.widgets[0].layout?.y, 2);
+    assert.equal(response.widgets[0].layout?.w, 8);
+    assert.equal(response.widgets[0].layout?.h, 4);
+    assert.equal(response.widgets[0].layout?.page, 1);
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('runDashboardAgent preserves explicit dashboard component layout when provided', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    seedTransaction({
+      tenantId,
+      date: '2024-01-11T00:00:00.000Z',
+      revenue: 2_250_000,
+    });
+
+    const response = await withDeterministicDashboardAgent(() => runDashboardAgent({
+      tenantId,
+      userId,
+      goal: 'Buat dashboard omzet sederhana',
+      intent: {
+        intent: 'show_metric',
+        time_period: '7 hari terakhir',
+      },
+      dashboard: {
+        id: 'dash_test',
+        config: {
+          components: [
+            {
+              type: 'MetricCard',
+              title: 'Omzet',
+              metric: 'revenue',
+              layout: { x: 6, y: 0, w: 4, h: 2, page: 1 },
+            },
+          ],
+        },
+      },
+    }));
+
+    assert.equal(response.widgets[0]?.layout?.x, 6);
+    assert.equal(response.widgets[0]?.layout?.page, 1);
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('runDashboardAgent preserves explicit component layout when generating widgets', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    seedTransaction({
+      tenantId,
+      date: '2024-01-18T00:00:00.000Z',
+      revenue: 2_000_000,
+    });
+
+    const response = await withDeterministicDashboardAgent(() => runDashboardAgent({
+      tenantId,
+      userId,
+      goal: 'Buat dashboard omzet dengan layout khusus',
+      dashboard: {
+        config: {
+          components: [
+            {
+              type: 'MetricCard',
+              title: 'Omzet',
+              metric: 'revenue',
+              layout: { x: 4, y: 1, w: 4, h: 2, page: 1 },
+            },
+          ],
+        },
+      },
+      intent: {
+        intent: 'show_metric',
+        time_period: '7 hari terakhir',
+      },
+    }));
+
+    assert.equal(response.presentation_mode, 'canvas');
+    assert.equal(response.widgets?.[0]?.layout?.x, 4);
+    assert.equal(response.widgets?.[0]?.layout?.y, 1);
+    assert.equal(response.widgets?.[0]?.layout?.w, 4);
+    assert.equal(response.widgets?.[0]?.layout?.h, 2);
   } finally {
     cleanupTenant(tenantId);
   }

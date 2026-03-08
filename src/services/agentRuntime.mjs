@@ -3,6 +3,7 @@ import { executeAnalyticsIntent, executeBuilderQuery, getBuilderSchema } from '.
 import { ensureDefaultDashboard, getDashboard } from './dashboards.mjs';
 import { runPythonSnippet } from './pythonRuntime.mjs';
 import { generateWithGeminiTools } from './gemini.mjs';
+import { normalizeDashboardLayout, packDashboardLayout } from '../../public/dashboard-layout.js';
 
 const VISTARA_SYSTEM_PROMPT = `
 Kamu adalah Vistara AI, asisten analitik bisnis. Fokus pada insight bisnis, bukan kode atau topik di luar data.
@@ -18,8 +19,6 @@ const MAX_WIDGETS = 8;
 const MAX_TRACE = 64;
 const MAX_WORKER_STEPS = 10;
 const MAX_REVIEWER_STEPS = 4;
-const GRID_COLS = 16;
-const GRID_ROWS = 9;
 const GEMINI_THINKING_BUDGET_MAX = 32768;
 const PLANNER_MAX_OUTPUT_TOKENS = 1800;
 const WORKER_MAX_OUTPUT_TOKENS = 2200;
@@ -553,85 +552,20 @@ function toolCallFromComponent(component, scope) {
 }
 
 function cloneComponent(component) {
+  const kind = component?.type === 'MetricCard'
+    ? 'metric'
+    : component?.type === 'TopList'
+      ? 'table'
+      : 'chart';
   return {
     ...component,
     layout: component?.layout
-      ? {
-          x: Number(component.layout.x || 0),
-          y: Number(component.layout.y || 0),
-          w: Number(component.layout.w || 4),
-          h: Number(component.layout.h || 4),
+      ? normalizeDashboardLayout(component.layout, {
           page: Number(component.layout.page || 1),
-          minW: Number(component.layout.minW || 2),
-          minH: Number(component.layout.minH || 3),
-        }
+          kind,
+        })
       : null,
   };
-}
-
-const METRIC_PAGE_SLOTS = [
-  { x: 0, y: 0, w: 4, h: 2, minW: 3, minH: 2 },
-  { x: 4, y: 0, w: 4, h: 2, minW: 3, minH: 2 },
-  { x: 8, y: 0, w: 4, h: 2, minW: 3, minH: 2 },
-  { x: 12, y: 0, w: 4, h: 2, minW: 3, minH: 2 },
-];
-
-const VISUAL_PAGE_SLOTS = [
-  { x: 0, y: 2, w: 8, h: 3, minW: 5, minH: 3 },
-  { x: 8, y: 2, w: 8, h: 3, minW: 5, minH: 3 },
-  { x: 0, y: 5, w: 8, h: 4, minW: 5, minH: 3 },
-  { x: 8, y: 5, w: 8, h: 4, minW: 5, minH: 3 },
-];
-
-function isMetricKind(kind = 'chart') {
-  return String(kind || '').toLowerCase() === 'metric';
-}
-
-function intersectsLayout(a, b) {
-  if ((a.page || 1) !== (b.page || 1)) {
-    return false;
-  }
-  return !(
-    a.x + a.w <= b.x ||
-    b.x + b.w <= a.x ||
-    a.y + a.h <= b.y ||
-    b.y + b.h <= a.y
-  );
-}
-
-function clampLayout(layout) {
-  const page = Math.max(1, Number(layout.page || 1));
-  const w = Math.max(1, Math.min(Number(layout.w || 1), GRID_COLS));
-  const h = Math.max(1, Math.min(Number(layout.h || 1), GRID_ROWS));
-  const x = Math.max(0, Math.min(Number(layout.x || 0), GRID_COLS - w));
-  const y = Math.max(0, Math.min(Number(layout.y || 0), GRID_ROWS - h));
-
-  return {
-    ...layout,
-    page,
-    x,
-    y,
-    w,
-    h,
-  };
-}
-
-function layoutForKind(occupiedLayouts, kind = 'metric') {
-  const preferMetric = isMetricKind(kind);
-  const primary = preferMetric ? METRIC_PAGE_SLOTS : VISUAL_PAGE_SLOTS;
-  const secondary = preferMetric ? VISUAL_PAGE_SLOTS : METRIC_PAGE_SLOTS;
-  const highestPage = occupiedLayouts.reduce((max, item) => Math.max(max, Number(item.page || 1)), 1);
-
-  for (let page = 1; page <= highestPage + 1; page += 1) {
-    for (const slot of [...primary, ...secondary]) {
-      const candidate = clampLayout({ ...slot, page });
-      if (!occupiedLayouts.some((item) => intersectsLayout(candidate, item))) {
-        return candidate;
-      }
-    }
-  }
-
-  return clampLayout({ ...VISUAL_PAGE_SLOTS[0], page: highestPage + 1 });
 }
 
 function toArtifactFromLegacyWidget(widget) {
@@ -715,24 +649,84 @@ function artifactLooksEmpty(artifact) {
   return false;
 }
 
-function buildWidgetsFromArtifacts({ artifacts, calls }) {
+function widgetLayoutKey(widget = {}) {
+  const templateId = normalizeTemplateId(widget?.query?.template_id || widget?.query?.metric || '');
+  if (templateId) {
+    return templateId;
+  }
+
+  return componentMetricKey({
+    metric: widget?.query?.metric || widget?.metric || '',
+    title: widget?.title || widget?.artifact?.title || '',
+  });
+}
+
+function normalizeLayoutTitle(value = '') {
+  return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function applyComponentLayouts(widgets = [], components = []) {
+  const layoutPool = new Map();
+  const titlePool = new Map();
+
+  for (const component of components) {
+    if (!component?.layout) {
+      continue;
+    }
+    const titleKey = normalizeLayoutTitle(component.title);
+    if (titleKey) {
+      const titleList = titlePool.get(titleKey) || [];
+      titleList.push(component.layout);
+      titlePool.set(titleKey, titleList);
+    }
+    const key = componentMetricKey(component);
+    const list = layoutPool.get(key) || [];
+    list.push(component.layout);
+    layoutPool.set(key, list);
+  }
+
+  return widgets.map((widget) => {
+    const titleKey = normalizeLayoutTitle(widget?.title || widget?.artifact?.title);
+    const titleList = titlePool.get(titleKey);
+    if (Array.isArray(titleList) && titleList.length > 0) {
+      const [layout, ...rest] = titleList;
+      titlePool.set(titleKey, rest);
+      return {
+        ...widget,
+        layout,
+      };
+    }
+
+    const key = widgetLayoutKey(widget);
+    const list = layoutPool.get(key);
+    if (!Array.isArray(list) || list.length === 0) {
+      return widget;
+    }
+
+    const [layout, ...rest] = list;
+    layoutPool.set(key, rest);
+    return {
+      ...widget,
+      layout,
+    };
+  });
+}
+
+function buildWidgetsFromArtifacts({ artifacts, calls, components = [] }) {
   const widgets = [];
   const flatArtifacts = [];
-  const occupiedLayouts = [];
 
   for (let i = 0; i < calls.length; i += 1) {
     const call = calls[i];
     const callArtifacts = artifacts[i] || [];
     for (const artifact of callArtifacts) {
-      const layout = layoutForKind(occupiedLayouts, artifact.kind);
-      occupiedLayouts.push(layout);
       flatArtifacts.push(artifact);
       widgets.push({
         id: generateId(),
         title: artifact.title || `Widget ${widgets.length + 1}`,
         artifact,
         query: call.query || null,
-        layout,
+        layout: call?.component?.layout || null,
       });
 
       if (widgets.length >= MAX_WIDGETS) {
@@ -744,8 +738,20 @@ function buildWidgetsFromArtifacts({ artifacts, calls }) {
     }
   }
 
+  const seededWidgets = applyComponentLayouts(widgets, components);
+  const packedWidgets = packDashboardLayout(seededWidgets.map((widget) => ({
+    ...widget,
+    kind: widget.artifact?.kind || 'chart',
+  }))).map((widget) => ({
+    ...widget,
+    layout: normalizeDashboardLayout(widget.layout || {}, {
+      page: Number(widget.layout?.page || 1),
+      kind: widget.artifact?.kind || 'chart',
+    }),
+  }));
+
   return {
-    widgets,
+    widgets: packedWidgets,
     artifacts: flatArtifacts.slice(0, MAX_WIDGETS),
   };
 }
@@ -1092,6 +1098,7 @@ function runTemplateComponentsDeterministic({ tenantId, userId, components, scop
         type: component.type || null,
         title: component.title || null,
         metric: component.metric || null,
+        layout: component.layout || null,
       },
       agent_context: execution.agent_context,
     });
@@ -1119,7 +1126,7 @@ function runTemplateComponentsDeterministic({ tenantId, userId, components, scop
     });
   }
 
-  const built = buildWidgetsFromArtifacts({ artifacts: artifactGroups, calls });
+  const built = buildWidgetsFromArtifacts({ artifacts: artifactGroups, calls, components });
   const nonEmpty = built.artifacts.filter((artifact) => !artifactLooksEmpty(artifact));
 
   return {
@@ -1368,6 +1375,7 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
   const built = buildWidgetsFromArtifacts({
     artifacts: artifactGroups,
     calls: callRecords,
+    components,
   });
 
   const nonEmpty = built.artifacts.filter((artifact) => !artifactLooksEmpty(artifact));
@@ -1601,6 +1609,7 @@ export async function runDashboardAgent({
   tenantId,
   userId,
   dashboardId = null,
+  dashboard: inputDashboard = null,
   goal = '',
   intent = {},
   hooks = null,
@@ -1613,7 +1622,7 @@ export async function runDashboardAgent({
     steps: [],
   };
 
-  const dashboard = dashboardFromContext(tenantId, userId, dashboardId);
+  const dashboard = inputDashboard || dashboardFromContext(tenantId, userId, dashboardId);
   const baseComponents = normalizeTemplateComponents(dashboard);
   const components = isFullDashboardGoal(goal, intent) ? mergeWithComplexDefaults(baseComponents) : baseComponents;
   const templateStepId = `template_${Date.now()}`;
@@ -1742,6 +1751,7 @@ export async function runDashboardAgent({
     const mergedWidgets = buildWidgetsFromArtifacts({
       artifacts: uniqueArtifacts.map((art) => [art]),
       calls: augment.calls.length ? augment.calls : worker.calls,
+      components,
     }).widgets.slice(0, MAX_WIDGETS);
 
     worker = {

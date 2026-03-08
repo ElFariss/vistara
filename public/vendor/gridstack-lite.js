@@ -178,11 +178,11 @@ function createGridStackLibrary(container, options = {}) {
 
       const content = document.createElement('div');
       content.className = 'grid-stack-item-content grid-widget';
-      content.append(renderItem(prepared));
       item.append(content);
 
       container.append(item);
       grid.makeWidget(item);
+      content.append(renderItem(prepared));
       if (typeof grid.movable === 'function') {
         grid.movable(item, editingEnabled);
       }
@@ -532,9 +532,8 @@ function createFallbackGrid(container, options = {}) {
     wrapper.dataset.widgetId = item.id;
     wrapper.style.position = 'absolute';
 
-    wrapper.append(renderItem(item));
-
     container.append(wrapper);
+    wrapper.append(renderItem(item));
     wrappers.set(item.id, wrapper);
     attachInteractions(item.id, wrapper);
     applyPosition(item.id);

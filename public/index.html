@@ -13,7 +13,7 @@
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
     rel="stylesheet" />
   <link rel="stylesheet" href="/vendor/gridstack.min.css" />
-  <link rel="stylesheet" href="/styles.css?v=20260307l" />
+  <link rel="stylesheet" href="/styles.css?v=20260308p" />
 </head>
 
 <body>
@@ -22,10 +22,10 @@
 
   <div class="app-shell">
     <header class="app-header">
-      <div>
-        <p class="eyebrow">Asisten Analitik Vistara</p>
-        <h1>Vistara</h1>
-      </div>
+      <button id="brandHomeLink" class="brand-home" type="button" aria-label="Kembali ke landing page">
+        <span class="brand-home-mark" aria-hidden="true"></span>
+        <span class="brand-home-text">Vistara</span>
+      </button>
       <div class="header-actions">
         <button id="headerSettingsBtn" class="ghost icon-nav-btn" type="button" hidden aria-label="Pengaturan" title="Pengaturan">
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -50,10 +50,10 @@
             <button id="landingWelcomeDemo" type="button" class="ghost">Coba Demo</button>
           </div>
         </div>
-        <button id="landingScrollCue" type="button" class="landing-scroll-cue" aria-label="Scroll ke bawah">
+        <div id="landingScrollCue" class="landing-scroll-cue" aria-hidden="true">
           <span>Scroll ke bawah</span>
           <span class="landing-scroll-arrow" aria-hidden="true">↓</span>
-        </button>
+        </div>
       </section>
 
       <div id="landingHeroStart" class="hero-grid">
@@ -302,25 +302,25 @@
       <div class="workspace-shell">
         <aside id="sessionRail" class="workspace-pane session-rail" aria-label="Riwayat percakapan">
           <div class="session-rail-head">
-            <div>
-              <p class="session-kicker">Percakapan</p>
-              <h2>Riwayat analisis</h2>
-            </div>
-            <button id="newSessionBtn" type="button" class="ghost">Chat Baru</button>
+            <button id="sessionRailToggleBtn" type="button" class="ghost session-rail-toggle" aria-controls="sessionRail" aria-expanded="true" title="Ciutkan riwayat">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>
+              <span id="sessionRailToggleLabel">Riwayat</span>
+            </button>
+            <button id="newSessionBtn" type="button" class="ghost session-rail-new" aria-label="Buat chat baru" title="Chat Baru">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+            </button>
           </div>
-          <p class="session-rail-copy">Setiap obrolan tersimpan otomatis, jadi Anda bisa lanjut dari konteks sebelumnya.</p>
           <div id="sessionList" class="session-list" aria-live="polite"></div>
         </aside>
 
         <section id="chatPane" class="workspace-pane chat-pane">
-          <div class="chat-pane-head">
-            <div class="chat-title-block">
-              <p class="chat-kicker">Asisten data</p>
-              <h2 id="chatTitle">Percakapan baru</h2>
-              <p id="chatSubtitle" class="chat-subtitle">Tanya dengan bahasa biasa. Saya urus analisis dan visualnya.</p>
-            </div>
+          <div id="chatPaneHead" class="chat-pane-head" hidden>
+            <h2 id="chatTitle" class="sr-only">Percakapan baru</h2>
+            <p id="chatSubtitle" class="sr-only" hidden></p>
             <div class="chat-head-actions">
-              <button id="openCanvasBtn" type="button" class="ghost" hidden>Lihat Dashboard</button>
+              <button id="openCanvasBtn" type="button" class="ghost icon-nav-btn" hidden aria-label="Buka dashboard" title="Buka dashboard">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v5h-7zM13 11h7v9h-7zM4 13h7v7H4z"></path></svg>
+              </button>
             </div>
           </div>
 
@@ -346,7 +346,7 @@
             <span class="typing-dot"></span>
           </div>
 
-          <div class="quick-prompts">
+          <div id="quickPrompts" class="quick-prompts">
             <button type="button" class="pill" data-prompt="Ringkas performa bisnis saya minggu ini">Ringkas minggu ini</button>
             <button type="button" class="pill" data-prompt="Apa 3 insight terpenting dari data ini?">3 insight penting</button>
             <button type="button" class="pill" data-prompt="Buat dashboard performa bulan ini">Buat dashboard</button>
@@ -378,9 +378,8 @@
 
             <div class="canvas-main">
               <div class="canvas-bar">
-                <div>
-                  <h2>Canvas Builder</h2>
-                  <p>Susun dan atur widget secara bebas.</p>
+                <div class="canvas-bar-copy">
+                  <h2>Dashboard</h2>
                 </div>
                 <div class="canvas-bar-meta">
                   <div class="canvas-page-controls" aria-label="Navigasi slide dashboard">
@@ -557,7 +556,7 @@
   <script src="/vendor/gridstack-all.js"></script>
   <script src="/vendor/chart.umd.min.js"></script>
   <script src="/runtime-env.js"></script>
-  <script type="module" src="/app.js?v=20260307x"></script>
+  <script type="module" src="/app.js?v=20260308f"></script>
 </body>
 
 </html>
