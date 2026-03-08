@@ -280,8 +280,21 @@ function deriveProductName(row, mapping) {
   const explicitProduct = rowValueByAliases(row, PRODUCT_NAME_ALIASES);
   const variant = rowValueByAliases(row, PRODUCT_VARIANT_ALIASES);
   const brand = rowValueByAliases(row, PRODUCT_BRAND_ALIASES);
+  const normalizedMappedColumn = toLowerSafe(mappedColumn);
 
-  if (mappedColumn && PRODUCT_NAME_ALIASES.includes(toLowerSafe(mappedColumn)) && mappedValue) {
+  if (mappedValue && PRODUCT_NAME_ALIASES.includes(normalizedMappedColumn)) {
+    return mappedValue;
+  }
+
+  if (mappedValue && PRODUCT_VARIANT_ALIASES.includes(normalizedMappedColumn)) {
+    return joinUniqueText([brand, mappedValue]) || mappedValue;
+  }
+
+  if (mappedValue && PRODUCT_BRAND_ALIASES.includes(normalizedMappedColumn)) {
+    return mappedValue;
+  }
+
+  if (mappedValue) {
     return mappedValue;
   }
 

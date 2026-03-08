@@ -281,6 +281,65 @@ test('ingestion composes usable product names from merk and type style datasets'
   }
 });
 
+test('ingestion respects explicit product mapping when brand is selected', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  const filePath = path.join(os.tmpdir(), `${uid('dataset-brand')}.csv`);
+
+  fs.writeFileSync(filePath, [
+    'tanggal,merk,type,Harga',
+    '01-01-2024,Oppo,A18,1498000',
+    '02-01-2024,Samsung,A15,2999000',
+  ].join('\n'));
+
+  try {
+    insertSourceFileRecord({
+      tenantId,
+      filePath,
+      mapping: {
+        transaction_date: 'tanggal',
+        product_name: 'merk',
+        unit_price: 'Harga',
+        total_revenue: '__derived__',
+      },
+    });
+
+    const source = get(
+      `
+        SELECT id
+        FROM source_files
+        WHERE tenant_id = :tenant_id
+        ORDER BY upload_date DESC
+        LIMIT 1
+      `,
+      { tenant_id: tenantId },
+    );
+
+    const { processSourceFile } = await import('../src/services/ingestion.mjs');
+    await processSourceFile({
+      tenantId,
+      userId,
+      sourceId: source.id,
+    });
+
+    const productNames = all(
+      `
+        SELECT name
+        FROM products
+        WHERE tenant_id = :tenant_id
+        ORDER BY name
+      `,
+      { tenant_id: tenantId },
+    ).map((row) => row.name);
+
+    assert.deepEqual(productNames, ['Oppo', 'Samsung']);
+  } finally {
+    cleanupTenant(tenantId);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  }
+});
+
 test('data profile endpoint returns the latest dataset profile for authenticated tenants', async () => {
   const { tenantId, userId } = seedTenantUser();
   const filePath = path.join(os.tmpdir(), `${uid('profile')}.csv`);
