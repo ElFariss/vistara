@@ -4,7 +4,7 @@ import {
   getChatHeaderState,
   resolveInitialConversationId,
   resolveNextConversationIdAfterDelete,
-} from '../public/workspaceState.mjs';
+} from '../public/workspaceState.js';
 
 test('resolveInitialConversationId keeps the empty session state reachable', () => {
   assert.equal(resolveInitialConversationId([]), null);
@@ -33,6 +33,6 @@ test('getChatHeaderState returns explicit empty-state copy when there is no conv
     conversationCount: 0,
   });
 
-  assert.equal(empty.title, 'Belum ada percakapan');
+  assert.equal(empty.title, 'Mulai analisis baru');
   assert.match(empty.subtitle, /Kirim pertanyaan pertama/);
 });

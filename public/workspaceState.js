@@ -1,8 +1,9 @@
 const DEFAULT_CHAT_TITLE = 'Percakapan baru';
-const EMPTY_CHAT_TITLE = 'Belum ada percakapan';
+const EMPTY_CHAT_TITLE = 'Mulai analisis baru';
 const READY_CHAT_SUBTITLE = 'Tanya dengan bahasa biasa. Saya akan jawab dengan insight yang bisa langsung dipakai.';
 const SETUP_CHAT_SUBTITLE = 'Upload dataset sekali, lalu lanjut ngobrol seperti konsultasi bisnis.';
-const EMPTY_CHAT_SUBTITLE = 'Kirim pertanyaan pertama atau tekan "Chat Baru" untuk mulai sesi baru kapan saja.';
+const EMPTY_READY_CHAT_SUBTITLE = 'Data sudah siap. Kirim pertanyaan pertama untuk mulai sesi baru.';
+const EMPTY_SETUP_CHAT_SUBTITLE = 'Upload dataset dulu, lalu kirim pertanyaan pertama untuk memulai sesi baru.';
 
 export function resolveInitialConversationId(conversations = []) {
   return Array.isArray(conversations) && conversations[0]?.id ? conversations[0].id : null;
@@ -29,7 +30,7 @@ export function getChatHeaderState({
   if (Number(conversationCount || 0) <= 0) {
     return {
       title: EMPTY_CHAT_TITLE,
-      subtitle: EMPTY_CHAT_SUBTITLE,
+      subtitle: hasDatasetReady ? EMPTY_READY_CHAT_SUBTITLE : EMPTY_SETUP_CHAT_SUBTITLE,
     };
   }
 

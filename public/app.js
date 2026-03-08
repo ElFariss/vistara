@@ -4,7 +4,7 @@ import {
   getChatHeaderState,
   resolveInitialConversationId,
   resolveNextConversationIdAfterDelete,
-} from './workspaceState.mjs?v=20260308a';
+} from './workspaceState.js?v=20260308a';
 
 const GRID_COLS = 16;
 const GRID_ROWS = 9;
@@ -387,7 +387,7 @@ function updatePreChatTicker() {
     return;
   }
 
-  const shouldShow = Boolean(state.token) && state.messages.length === 0;
+  const shouldShow = Boolean(state.token) && Boolean(state.conversationId) && state.messages.length === 0;
 
   if (!shouldShow) {
     stopPreChatTicker();
@@ -1221,8 +1221,8 @@ function renderThread() {
       const empty = document.createElement('div');
       empty.className = 'thread-empty';
       empty.innerHTML = `
-        <strong>Belum ada percakapan aktif.</strong>
-        <span>Kirim pertanyaan pertama atau tekan "Chat Baru" kapan saja.</span>
+        <strong>Tanya insight pertama Anda.</strong>
+        <span>Saya akan membuat sesi otomatis saat pesan pertama dikirim.</span>
       `;
       refs.chatMessages.append(empty);
     }
@@ -2938,7 +2938,8 @@ function bindHintTooltips() {
 }
 
 async function loadWorkspace() {
-  await Promise.allSettled([refreshProfile(), refreshSources(), refreshVerdict(), refreshDashboards(), refreshConversationList(), loadSchema()]);
+  await Promise.allSettled([refreshProfile(), refreshSources(), refreshDashboards(), refreshConversationList(), loadSchema()]);
+  await refreshVerdict();
   const initialConversationId = resolveInitialConversationId(state.conversations);
   if (initialConversationId) {
     await refreshChatHistory(initialConversationId);
@@ -3610,7 +3611,9 @@ async function bootstrap() {
   showPage('workspace');
   await loadWorkspace();
   setCanvasOpen(false);
-  showToast('Session dipulihkan.');
+  if (state.conversations.length > 0) {
+    showToast('Session dipulihkan.');
+  }
   } catch {
     setAuth('', null, {
       persist: false,
