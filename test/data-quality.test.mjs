@@ -376,7 +376,50 @@ test('data profile endpoint returns the latest dataset profile for authenticated
     assert.deepEqual(payload.profile.detected.date_columns, ['tanggal']);
     assert.ok(payload.profile.detected.numeric_columns.includes('no'));
     assert.ok(payload.profile.detected.numeric_columns.includes('Harga'));
+    assert.ok(!payload.profile.detected.numeric_columns.includes('type'));
+    assert.ok(payload.profile.detected.categorical_columns.includes('type'));
     assert.ok(!payload.profile.detected.date_columns.includes('no'));
+  } finally {
+    cleanupTenant(tenantId);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  }
+});
+
+test('data profile inspect endpoint answers in Indonesian and keeps SKU-like values categorical', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  const filePath = path.join(os.tmpdir(), `${uid('profile-inspect')}.csv`);
+
+  fs.writeFileSync(filePath, [
+    'tanggal,merk,type,Harga',
+    '01-01-2024,Oppo,A18,1498000',
+    '02-01-2024,Samsung,A15,2999000',
+  ].join('\n'));
+
+  try {
+    await ingestUploadedSource({
+      tenantId,
+      userId,
+      filePath,
+      filename: 'phones.csv',
+      contentType: 'text/csv',
+      replaceExisting: true,
+    });
+
+    const router = new Router();
+    registerDataRoutes(router);
+    const response = await invokeRoute(router, 'POST', '/api/data/profile/inspect', {
+      user: { id: userId, tenant_id: tenantId },
+      body: { message: 'cek kolom dan kualitas dataset saya' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.payload.ok, true);
+    assert.match(response.payload.answer, /Saya menemukan 4 kolom/);
+    const typeColumn = response.payload.profile.columns.find((column) => column.name === 'type');
+    assert.equal(typeColumn.kind, 'string');
+    assert.equal(response.payload.artifacts[0].title, 'Kolom Dataset');
   } finally {
     cleanupTenant(tenantId);
     if (fs.existsSync(filePath)) {

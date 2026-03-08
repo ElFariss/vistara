@@ -48,6 +48,24 @@ function toDateValue(value) {
   return parsed.toISOString();
 }
 
+function looksLikeNumericCandidate(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value);
+  }
+
+  const text = cleanText(value);
+  if (!text) {
+    return false;
+  }
+
+  const normalized = text.replace(/rp\.?|idr/gi, '').trim();
+  if (!/[0-9]/.test(normalized)) {
+    return false;
+  }
+
+  return !/[a-z]/i.test(normalized);
+}
+
 function looksLikeDateCandidate(value) {
   if (value instanceof Date) {
     return true;
@@ -75,7 +93,7 @@ function inferColumnKind(values = []) {
   let dateHits = 0;
   let booleanHits = 0;
   for (const value of sample) {
-    if (toNumeric(value) !== null) {
+    if (looksLikeNumericCandidate(value) && toNumeric(value) !== null) {
       numericHits += 1;
     }
     if (looksLikeDateCandidate(value) && toDateValue(value) !== null) {
@@ -258,7 +276,7 @@ export async function inspectDatasetQuestion({ tenantId, message = '' }) {
   const profile = await getDatasetProfile(tenantId);
   if (!profile) {
     return {
-      answer: 'No dataset is available yet.',
+      answer: 'Belum ada dataset yang tersedia.',
       artifacts: [],
       profile: null,
     };
@@ -274,8 +292,8 @@ export async function inspectDatasetQuestion({ tenantId, message = '' }) {
       sample: column.sample_values.join(', '),
     }));
     return {
-      answer: `I found ${profile.columns.length} columns in your dataset.`,
-      artifacts: [tableArtifact('Dataset Columns', ['column', 'type', 'missing_pct', 'sample'], rows)],
+      answer: `Saya menemukan ${profile.columns.length} kolom pada dataset Anda.`,
+      artifacts: [tableArtifact('Kolom Dataset', ['column', 'type', 'missing_pct', 'sample'], rows)],
       profile,
     };
   }
@@ -291,21 +309,21 @@ export async function inspectDatasetQuestion({ tenantId, message = '' }) {
         missing_pct: `${column.missing_pct}%`,
       }));
     return {
-      answer: `Dataset quality summary: ${profile.summary.total_missing} missing values and ${profile.summary.duplicate_rows} duplicate rows.`,
+      answer: `Ringkasan kualitas dataset: ${profile.summary.total_missing} nilai kosong dan ${profile.summary.duplicate_rows} baris duplikat.`,
       artifacts: [
         {
           kind: 'metric',
-          title: 'Missing Values',
-          value: profile.summary.total_missing.toLocaleString('en-US'),
+          title: 'Nilai Kosong',
+          value: profile.summary.total_missing.toLocaleString('id-ID'),
           raw_value: profile.summary.total_missing,
         },
         {
           kind: 'metric',
-          title: 'Duplicate Rows',
-          value: profile.summary.duplicate_rows.toLocaleString('en-US'),
+          title: 'Baris Duplikat',
+          value: profile.summary.duplicate_rows.toLocaleString('id-ID'),
           raw_value: profile.summary.duplicate_rows,
         },
-        tableArtifact('Columns With Missing Values', ['column', 'missing_count', 'missing_pct'], worstColumns),
+        tableArtifact('Kolom Dengan Nilai Kosong', ['column', 'missing_count', 'missing_pct'], worstColumns),
       ].filter((artifact) => {
         if (artifact.kind !== 'table') return true;
         return artifact.rows.length > 0;
@@ -322,27 +340,27 @@ export async function inspectDatasetQuestion({ tenantId, message = '' }) {
     }));
     return {
       answer: rows.length > 0
-        ? `I found ${rows.length} strong numeric correlations in the dataset.`
-        : 'I could not find enough numeric columns to compute meaningful correlations.',
+        ? `Saya menemukan ${rows.length} korelasi numerik yang cukup kuat pada dataset ini.`
+        : 'Saya belum menemukan cukup kolom numerik untuk menghitung korelasi yang bermakna.',
       artifacts: rows.length > 0
-        ? [tableArtifact('Top Correlations', ['feature_1', 'feature_2', 'correlation'], rows)]
+        ? [tableArtifact('Korelasi Teratas', ['feature_1', 'feature_2', 'correlation'], rows)]
         : [],
       profile,
     };
   }
 
   return {
-    answer: `Dataset loaded: ${profile.summary.rows.toLocaleString('en-US')} rows, ${profile.summary.columns} columns, ${profile.detected.numeric_columns.length} numeric columns, and ${profile.detected.date_columns.length} date columns.`,
+    answer: `Dataset aktif berisi ${profile.summary.rows.toLocaleString('id-ID')} baris, ${profile.summary.columns} kolom, ${profile.detected.numeric_columns.length} kolom numerik, dan ${profile.detected.date_columns.length} kolom tanggal.`,
     artifacts: [
       {
         kind: 'metric',
-        title: 'Rows',
-        value: profile.summary.rows.toLocaleString('en-US'),
+        title: 'Baris',
+        value: profile.summary.rows.toLocaleString('id-ID'),
         raw_value: profile.summary.rows,
       },
       {
         kind: 'metric',
-        title: 'Columns',
+        title: 'Kolom',
         value: String(profile.summary.columns),
         raw_value: profile.summary.columns,
       },
