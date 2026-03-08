@@ -190,6 +190,40 @@ test('processChatMessage answers dataset inspection questions in chat', async ()
   }
 });
 
+test('processChatMessage returns a structured error for missing datasets', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    await assert.rejects(
+      () =>
+        processChatMessage({
+          tenantId,
+          userId,
+          message: 'berapa omzet hari ini?',
+        }),
+      (error) => error?.code === 'DATASET_REQUIRED' && error?.statusCode === 400,
+    );
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('processChatMessage returns a structured error for unsupported smalltalk prompts', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    await assert.rejects(
+      () =>
+        processChatMessage({
+          tenantId,
+          userId,
+          message: 'hi',
+        }),
+      (error) => error?.code === 'UNSUPPORTED_CHAT_REQUEST' && error?.statusCode === 400,
+    );
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
 test('processChatMessage rejects an explicit stale conversation id instead of writing into latest', async () => {
   const { tenantId, userId } = seedTenantUser();
   try {
@@ -261,6 +295,34 @@ test('chat routes return 404 for explicit stale conversation ids', async () => {
     });
     assert.equal(chatResponse.statusCode, 404);
     assert.equal(chatResponse.payload.error.code, 'CONVERSATION_NOT_FOUND');
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('chat routes return 400 for structured chat request errors', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    const router = new Router();
+    registerChatRoutes(router);
+
+    const datasetRequiredResponse = await invokeRoute(router, 'POST', '/api/chat', {
+      user: { id: userId, tenant_id: tenantId },
+      body: {
+        message: 'berapa omzet hari ini?',
+      },
+    });
+    assert.equal(datasetRequiredResponse.statusCode, 400);
+    assert.equal(datasetRequiredResponse.payload.error.code, 'DATASET_REQUIRED');
+
+    const unsupportedPromptResponse = await invokeRoute(router, 'POST', '/api/chat', {
+      user: { id: userId, tenant_id: tenantId },
+      body: {
+        message: 'hi',
+      },
+    });
+    assert.equal(unsupportedPromptResponse.statusCode, 400);
+    assert.equal(unsupportedPromptResponse.payload.error.code, 'UNSUPPORTED_CHAT_REQUEST');
   } finally {
     cleanupTenant(tenantId);
   }

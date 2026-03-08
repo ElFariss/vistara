@@ -24,6 +24,35 @@ export class ConversationNotFoundError extends Error {
   }
 }
 
+export class ChatRequestError extends Error {
+  constructor(code = 'CHAT_REQUEST_INVALID', message = 'Permintaan chat tidak valid.', statusCode = 400) {
+    super(message);
+    this.name = 'ChatRequestError';
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
+
+export class DatasetRequiredError extends ChatRequestError {
+  constructor() {
+    super(
+      'DATASET_REQUIRED',
+      'Dataset belum tersedia. Upload file data dulu (CSV/JSON/XLSX/XLS) atau gunakan Demo Dataset, lalu coba pertanyaan ini lagi.',
+      400,
+    );
+  }
+}
+
+export class UnsupportedChatRequestError extends ChatRequestError {
+  constructor() {
+    super(
+      'UNSUPPORTED_CHAT_REQUEST',
+      'Sapaan umum tidak didukung. Tanyakan insight data atau minta dashboard.',
+      400,
+    );
+  }
+}
+
 function isDefaultConversationTitle(title) {
   return String(title || '').trim().toLowerCase() === DEFAULT_CONVERSATION_TITLE.toLowerCase();
 }
@@ -539,11 +568,15 @@ function buildSmalltalkAnswer(message, datasetReady, userDisplayName = null) {
     return 'Saya aktif dan siap bantu analisis data Anda.';
   }
 
-  if (datasetReady) {
-    return `Halo ${safeName}. Saya siap bantu analisis data Anda. Coba tanya: "Omzet 7 hari terakhir" atau "Buat dashboard performa bulan ini".`;
+  if (/\b(halo|hai|hi|hello|pagi|siang|sore|malam)\b/i.test(lower)) {
+    return null;
   }
 
-  return `Halo ${safeName}. Upload dataset dulu (CSV/JSON/XLSX/XLS), lalu saya bantu analisis secara instan.`;
+  if (!datasetReady && /\b(apa yang bisa kamu lakukan|bisa bantu apa|cara pakai|mulai dari mana)\b/i.test(lower)) {
+    return `Upload dataset dulu (CSV/JSON/XLSX/XLS), lalu saya bantu analisis secara instan untuk ${safeName}.`;
+  }
+
+  return null;
 }
 
 export async function processChatMessage({
@@ -579,30 +612,7 @@ export async function processChatMessage({
   const userDisplayName = lookupUserDisplayName(tenantId, userId);
 
   if (!datasetReady && intent.intent !== 'data_management' && intent.intent !== 'smalltalk') {
-    const responsePayload = {
-      answer:
-        'Dataset belum tersedia. Upload file data dulu (CSV/JSON/XLSX/XLS) atau gunakan Demo Dataset, lalu coba pertanyaan ini lagi.',
-      widgets: [],
-      artifacts: [],
-      intent,
-      presentation_mode: 'chat',
-      requires_dataset: true,
-    };
-
-    createMessage({
-      conversationId: conversation.id,
-      tenantId,
-      userId: null,
-      role: 'assistant',
-      content: responsePayload.answer,
-      payload: responsePayload,
-    });
-
-    return {
-      conversation_id: conversation.id,
-      conversation: getConversationWithStats(tenantId, userId, conversation.id),
-      ...responsePayload,
-    };
+    throw new DatasetRequiredError();
   }
 
   let responsePayload = {
@@ -614,8 +624,12 @@ export async function processChatMessage({
   };
 
   if (intent.intent === 'smalltalk') {
+    const answer = buildSmalltalkAnswer(message, datasetReady, userDisplayName);
+    if (!answer) {
+      throw new UnsupportedChatRequestError();
+    }
     responsePayload = {
-      answer: buildSmalltalkAnswer(message, datasetReady, userDisplayName),
+      answer,
       widgets: [],
       artifacts: [],
       intent,

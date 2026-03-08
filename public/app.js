@@ -3,7 +3,6 @@ import { createGridStackLite } from './vendor/gridstack-lite.js?v=20260307e';
 import { resolveCanvasViewportTarget } from './canvasViewport.js';
 import {
   didDeleteActiveConversation,
-  getChatHeaderState,
   normalizeAppPath,
   normalizeSettingsSection,
   normalizeConversationTitle,
@@ -12,7 +11,9 @@ import {
   resolveAccessiblePage,
   resolveInitialConversationId,
   resolveNextConversationIdAfterDelete,
-} from './workspaceState.js?v=20260308c';
+  shouldCenterComposer,
+  shouldShowChatHeader,
+} from './workspaceState.js?v=20260309a';
 import {
   normalizeDashboardLayout,
   packDashboardLayout,
@@ -109,6 +110,7 @@ const state = {
   isProgrammaticGridUpdate: false,
   isRenderingCanvas: false,
   landingRevealObserver: null,
+  onboardingSlideIndex: 0,
   currentPage: 'landing',
 };
 
@@ -150,18 +152,19 @@ const refs = {
   contextPage: document.getElementById('contextPage'),
   workspacePage: document.getElementById('workspacePage'),
 
-  landingCta: document.getElementById('landingCta'),
   landingWelcomeCta: document.getElementById('landingWelcomeCta'),
   landingWelcomeDemo: document.getElementById('landingWelcomeDemo'),
   landingCtaBottom: document.getElementById('landingCtaBottom'),
-  landingDemo: document.getElementById('landingDemo'),
   landingTryNowBtn: document.getElementById('landingTryNowBtn'),
+  landingFinalCta: document.getElementById('landingFinalCta'),
   landingScrollCue: document.getElementById('landingScrollCue'),
   landingHeroStart: document.getElementById('landingHeroStart'),
 
   authTabs: document.getElementById('authTabs'),
   loginForm: document.getElementById('loginForm'),
   registerForm: document.getElementById('registerForm'),
+  authOnboardingSlides: Array.from(document.querySelectorAll('[data-onboarding-slide]')),
+  authOnboardingDots: Array.from(document.querySelectorAll('[data-onboarding-dot]')),
   contextForm: document.getElementById('contextForm'),
 
   sessionRail: document.getElementById('sessionRail'),
@@ -173,7 +176,6 @@ const refs = {
 
   chatPane: document.getElementById('chatPane'),
   chatPaneHead: document.getElementById('chatPaneHead'),
-  chatTitle: document.getElementById('chatTitle'),
   chatSubtitle: document.getElementById('chatSubtitle'),
   openCanvasBtn: document.getElementById('openCanvasBtn'),
   workspaceShell: document.querySelector('.workspace-shell'),
@@ -452,7 +454,8 @@ function updatePreChatTicker() {
   const shouldShow = Boolean(state.token)
     && Boolean(state.conversationId)
     && state.messages.length === 0
-    && state.conversations.length > 0;
+    && state.conversations.length > 0
+    && !shouldCenterComposer({ messageCount: state.messages.length });
 
   if (!shouldShow) {
     stopPreChatTicker();
@@ -533,6 +536,20 @@ async function fetchWithRetry(url, options = {}, config = {}) {
   throw lastError || new Error('Network request failed');
 }
 
+function createAppError(message, options = {}) {
+  const error = new Error(message || 'Request gagal');
+  if (options.code) {
+    error.code = options.code;
+  }
+  if (options.statusCode || options.status) {
+    error.statusCode = Number(options.statusCode || options.status);
+  }
+  if (options.details !== undefined) {
+    error.details = options.details;
+  }
+  return error;
+}
+
 async function api(path, options = {}) {
   const requestUrl = /^https?:\/\//i.test(path)
     ? path
@@ -564,7 +581,11 @@ async function api(path, options = {}) {
   const payload = contentType.includes('application/json') ? await response.json() : await response.text();
 
   if (!response.ok) {
-    throw new Error(payload?.error?.message || response.statusText || 'Request gagal');
+    throw createAppError(payload?.error?.message || response.statusText || 'Request gagal', {
+      code: payload?.error?.code || null,
+      statusCode: payload?.error?.status || response.status,
+      details: payload?.error?.details ?? null,
+    });
   }
 
   return payload;
@@ -717,12 +738,15 @@ function initLandingReveal() {
 }
 
 function syncLandingScrollCue() {
-  if (!refs.landingScrollCue) {
-    return;
-  }
   const landingVisible = refs.landingPage && !refs.landingPage.classList.contains('hidden');
-  const hide = !landingVisible || window.scrollY > 40;
-  refs.landingScrollCue.classList.toggle('is-hidden', hide);
+  if (refs.landingScrollCue) {
+    const hide = !landingVisible || window.scrollY > 40;
+    refs.landingScrollCue.classList.toggle('is-hidden', hide);
+  }
+  if (refs.landingFinalCta) {
+    const docked = landingVisible && window.scrollY > Math.max(240, window.innerHeight * 0.6);
+    refs.landingFinalCta.classList.toggle('is-docked', docked);
+  }
 }
 
 function syncAppHeaderOffset() {
@@ -742,6 +766,7 @@ function routePrimaryEntry(options = {}) {
     replace: options.replace !== false,
   });
   switchAuthTab(options.authTab || 'register');
+  setOnboardingSlide(0);
 }
 
 function setSessionRailCollapsed(collapsed) {
@@ -837,6 +862,27 @@ function switchAuthTab(tab) {
 
   refs.loginForm.classList.toggle('hidden', tab !== 'login');
   refs.registerForm.classList.toggle('hidden', tab !== 'register');
+}
+
+function setOnboardingSlide(index = 0) {
+  const total = refs.authOnboardingSlides.length;
+  if (!total) {
+    return;
+  }
+
+  const nextIndex = ((Number(index) % total) + total) % total;
+  state.onboardingSlideIndex = nextIndex;
+
+  refs.authOnboardingSlides.forEach((slide, slideIndex) => {
+    const isActive = slideIndex === nextIndex;
+    slide.hidden = !isActive;
+    slide.classList.toggle('is-active', isActive);
+  });
+
+  refs.authOnboardingDots.forEach((dot, dotIndex) => {
+    dot.classList.toggle('is-active', dotIndex === nextIndex);
+    dot.setAttribute('aria-pressed', String(dotIndex === nextIndex));
+  });
 }
 
 function setCanvasOpen(open) {
@@ -1241,6 +1287,7 @@ function appendMessage(message) {
     timeline: message.timeline || null,
     collapsed: Boolean(message.collapsed),
     timelineRunId: message.timelineRunId || null,
+    error: Boolean(message.error),
   });
 
   renderThread();
@@ -1339,9 +1386,11 @@ function renderThread() {
   for (const message of state.messages) {
     const row = document.createElement('div');
     row.className = `msg ${message.role}`;
+    row.classList.toggle('is-error', Boolean(message.error));
 
     const bubble = document.createElement('div');
     bubble.className = 'msg-bubble';
+    bubble.classList.toggle('is-error', Boolean(message.error));
 
     if (message.mode === 'timeline') {
       bubble.append(renderTimeline(message));
@@ -1387,21 +1436,12 @@ function renderThread() {
     refs.chatMessages.append(row);
   }
 
+  const centeredComposer = shouldCenterComposer({ messageCount: state.messages.length });
+  refs.chatPane?.classList.toggle('is-empty-thread', centeredComposer);
+
   if (state.messages.length > 0) {
     scrollToBottom();
   } else {
-    const empty = document.createElement('div');
-    empty.className = 'thread-empty';
-    empty.innerHTML = state.conversationId
-      ? `
-        <strong>Mulai dengan pertanyaan singkat.</strong>
-        <span>Pilih contoh di bawah atau ketik pertanyaan Anda sendiri.</span>
-      `
-      : `
-        <strong>Tanya insight pertama Anda.</strong>
-        <span>Saya akan membuat sesi otomatis saat pesan pertama dikirim.</span>
-      `;
-    refs.chatMessages.append(empty);
     refs.chatMessages.scrollTo({ top: 0 });
   }
   updatePreChatTicker();
@@ -2130,30 +2170,21 @@ async function refreshSources() {
     setDatasetGateVisible(!state.datasetReady);
     updateChatHeader();
   } catch {
-    state.datasetReady = false;
     if (refs.sourceStats) {
       refs.sourceStats.textContent = 'Data: tidak dapat dimuat';
     }
-    setDatasetGateVisible(true);
+    setDatasetGateVisible(!state.datasetReady);
     updateChatHeader();
   }
 }
 
 function updateChatHeader() {
-  const activeConversation = state.conversations.find((item) => item.id === state.conversationId) || null;
-  const headerState = getChatHeaderState({
-    activeConversation,
-    fallbackTitle: state.conversationTitle,
-  });
-  if (refs.chatTitle) {
-    refs.chatTitle.textContent = headerState.title;
-  }
+  const hasCanvasWidgets = Array.isArray(state.canvasWidgets) && state.canvasWidgets.length > 0;
   if (refs.openCanvasBtn) {
-    const hasCanvasWidgets = Array.isArray(state.canvasWidgets) && state.canvasWidgets.length > 0;
     refs.openCanvasBtn.hidden = !hasCanvasWidgets;
   }
   if (refs.chatPaneHead) {
-    refs.chatPaneHead.hidden = false;
+    refs.chatPaneHead.hidden = !shouldShowChatHeader({ hasCanvasWidgets });
   }
 }
 
@@ -2687,10 +2718,18 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
   });
 
   if (!response.ok) {
-    throw new Error(`Stream gagal (${response.status})`);
+    const contentType = response.headers.get('content-type') || '';
+    const payload = contentType.includes('application/json') ? await response.json() : null;
+    throw createAppError(payload?.error?.message || `Stream gagal (${response.status})`, {
+      code: payload?.error?.code || 'CHAT_STREAM_FAILED',
+      statusCode: payload?.error?.status || response.status,
+      details: payload?.error?.details ?? null,
+    });
   }
   if (!response.body) {
-    throw new Error('Stream tidak tersedia.');
+    throw createAppError('Stream tidak tersedia.', {
+      code: 'CHAT_STREAM_UNAVAILABLE',
+    });
   }
 
   const reader = response.body.getReader();
@@ -2751,13 +2790,17 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
       } else if (event.type === 'final') {
         finalPayload = event.payload || null;
       } else if (event.type === 'error') {
-        throw new Error(event.message || 'Stream error.');
+        throw createAppError(event.message || 'Stream error.', {
+          code: event.code || 'CHAT_STREAM_FAILED',
+        });
       }
     }
   }
 
   if (!finalPayload) {
-    throw new Error('Final payload tidak diterima dari stream.');
+    throw createAppError('Final payload tidak diterima dari stream.', {
+      code: 'CHAT_STREAM_INCOMPLETE',
+    });
   }
 
   return {
@@ -2767,17 +2810,6 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
 }
 
 async function sendChatMessage(userText) {
-  if (!state.datasetReady) {
-    setDatasetGateVisible(true);
-    appendMessage({
-      role: 'assistant',
-      content: 'Upload dataset dulu atau gunakan Demo Dataset sebelum bertanya.',
-      mode: 'chat',
-      artifacts: [],
-    });
-    return;
-  }
-
   const needsTimeline = /dashboard|grafik|chart|visual|canvas/i.test(userText);
   if (state.timelineRunId) {
     finalizeTimeline(state.timelineRunId);
@@ -2817,14 +2849,12 @@ async function sendChatMessage(userText) {
   } catch (error) {
     hideTyping();
     finalizeTimeline(state.timelineRunId);
-    const text = isNetworkLikeError(error)
-      ? 'Koneksi ke server terputus sementara. Coba kirim ulang dalam 2-3 detik.'
-      : `Gagal memproses pertanyaan: ${error.message}`;
     appendMessage({
       role: 'assistant',
-      content: text,
+      content: `Error: ${error.message || 'Permintaan tidak dapat diproses.'}`,
       mode: 'chat',
       artifacts: [],
+      error: true,
     });
   }
 }
@@ -3173,6 +3203,7 @@ refs.chatInput.addEventListener('input', () => {
 refs.chatFile.addEventListener('change', () => {
   const file = refs.chatFile.files[0];
   if (refs.fileLabel) {
+    refs.fileLabel.hidden = !file;
     refs.fileLabel.textContent = file ? file.name : 'Tidak ada file';
   }
 });
@@ -3260,27 +3291,16 @@ refs.chatForm.addEventListener('submit', async (event) => {
   }
 
   if (file) {
-    appendMessage({
-      role: 'user',
-      content: userText || `Upload dataset ${file.name}`,
-      fileName: file.name,
-      artifacts: [],
-    });
-
     try {
       await uploadDataset({ file, silent: true });
     } catch (error) {
-      appendMessage({
-        role: 'assistant',
-        content: `Upload gagal: ${error.message}`,
-        mode: 'chat',
-        artifacts: [],
-      });
+      showToast(`Upload gagal: ${error.message}`);
       return;
     } finally {
       refs.chatFile.value = '';
       if (refs.fileLabel) {
         refs.fileLabel.textContent = 'Tidak ada file';
+        refs.fileLabel.hidden = true;
       }
     }
   }
@@ -3469,11 +3489,6 @@ document.addEventListener('click', (event) => {
   renderConversationList();
 });
 
-if (refs.landingCta) {
-  refs.landingCta.addEventListener('click', () => {
-    routePrimaryEntry({ authTab: 'register' });
-  });
-}
 if (refs.landingWelcomeCta) {
   refs.landingWelcomeCta.addEventListener('click', () => {
     routePrimaryEntry({ authTab: 'register' });
@@ -3483,6 +3498,7 @@ if (refs.headerLoginBtn) {
   refs.headerLoginBtn.addEventListener('click', () => {
     showPage('auth');
     switchAuthTab('login');
+    setOnboardingSlide(0);
   });
 }
 if (refs.headerCtaBtn) {
@@ -3502,10 +3518,10 @@ async function startDemoSession() {
     return;
   }
 
-  const originalText = refs.landingDemo?.textContent || 'Coba Demo (tanpa login)';
-  if (refs.landingDemo) {
-    refs.landingDemo.disabled = true;
-    refs.landingDemo.textContent = 'Menyiapkan Demo...';
+  const originalText = refs.landingWelcomeDemo?.textContent || 'Coba Demo';
+  if (refs.landingWelcomeDemo) {
+    refs.landingWelcomeDemo.disabled = true;
+    refs.landingWelcomeDemo.textContent = 'Menyiapkan Demo...';
   }
 
   const fallbackStart = async () => {
@@ -3575,17 +3591,11 @@ async function startDemoSession() {
       showToast(`Gagal masuk demo: ${fallbackError.message || error.message}`);
     }
   } finally {
-    if (refs.landingDemo) {
-      refs.landingDemo.disabled = false;
-      refs.landingDemo.textContent = originalText;
+    if (refs.landingWelcomeDemo) {
+      refs.landingWelcomeDemo.disabled = false;
+      refs.landingWelcomeDemo.textContent = originalText;
     }
   }
-}
-
-if (refs.landingDemo) {
-  refs.landingDemo.addEventListener('click', () => {
-    startDemoSession();
-  });
 }
 
 if (refs.landingWelcomeDemo) {
@@ -3596,7 +3606,7 @@ if (refs.landingWelcomeDemo) {
 
 if (refs.landingTryNowBtn) {
   refs.landingTryNowBtn.addEventListener('click', () => {
-    startDemoSession();
+    routePrimaryEntry({ authTab: 'register' });
   });
 }
 
@@ -3693,6 +3703,13 @@ refs.authTabs.addEventListener('click', (event) => {
     return;
   }
   switchAuthTab(button.dataset.authTab);
+  setOnboardingSlide(0);
+});
+
+refs.authOnboardingDots.forEach((button) => {
+  button.addEventListener('click', () => {
+    setOnboardingSlide(Number(button.dataset.onboardingDot || 0));
+  });
 });
 
 refs.loginForm.addEventListener('submit', async (event) => {
@@ -3869,6 +3886,7 @@ async function bootstrap() {
   setEditMode(false);
   bindHintTooltips();
   switchAuthTab('login');
+  setOnboardingSlide(0);
   setCanvasOpen(false);
   updateCanvasPagination();
   setAuth(state.token, null, {

@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   didDeleteActiveConversation,
-  getChatHeaderState,
   normalizeAppPath,
   normalizeConversationTitle,
   normalizeSettingsSection,
@@ -11,6 +10,8 @@ import {
   resolveAccessiblePage,
   resolveInitialConversationId,
   resolveNextConversationIdAfterDelete,
+  shouldCenterComposer,
+  shouldShowChatHeader,
 } from '../public/workspaceState.js';
 
 test('normalizeAppPath trims trailing slashes safely', () => {
@@ -81,11 +82,12 @@ test('normalizeConversationTitle trims whitespace and falls back cleanly', () =>
   assert.equal(normalizeConversationTitle(''), 'Percakapan baru');
 });
 
-test('getChatHeaderState returns the normalized active conversation title', () => {
-  const header = getChatHeaderState({
-    activeConversation: { title: '  Ringkas performa minggu ini ' },
-    fallbackTitle: 'Fallback',
-  });
+test('shouldCenterComposer only keeps the centered layout for empty conversations', () => {
+  assert.equal(shouldCenterComposer({ messageCount: 0 }), true);
+  assert.equal(shouldCenterComposer({ messageCount: 2 }), false);
+});
 
-  assert.equal(header.title, 'Ringkas performa minggu ini');
+test('shouldShowChatHeader only keeps the header when the dashboard action is available', () => {
+  assert.equal(shouldShowChatHeader({ hasCanvasWidgets: true }), true);
+  assert.equal(shouldShowChatHeader({ hasCanvasWidgets: false }), false);
 });
