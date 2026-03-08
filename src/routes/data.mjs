@@ -82,6 +82,22 @@ function repairErrorMeta(reason) {
   }
 }
 
+function datasetInspectionErrorMeta(error) {
+  if (['ENOENT', 'EACCES', 'EPERM', 'EISDIR'].includes(error?.code)) {
+    return {
+      statusCode: 500,
+      code: 'DATASET_INSPECTION_FAILED',
+      message: error.message,
+    };
+  }
+
+  return {
+    statusCode: 400,
+    code: 'DATASET_INSPECTION_FAILED',
+    message: error.message,
+  };
+}
+
 export function registerDataRoutes(router) {
   router.register(
     'POST',
@@ -224,7 +240,8 @@ export function registerDataRoutes(router) {
           ...inspection,
         });
       } catch (error) {
-        return sendError(ctx.res, 400, 'DATASET_INSPECTION_FAILED', error.message);
+        const errorMeta = datasetInspectionErrorMeta(error);
+        return sendError(ctx.res, errorMeta.statusCode, errorMeta.code, errorMeta.message);
       }
     },
     { auth: true },

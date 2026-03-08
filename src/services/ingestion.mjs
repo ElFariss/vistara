@@ -239,6 +239,10 @@ const PRODUCT_NAME_ALIASES = ['produk', 'product', 'item', 'menu', 'nama barang'
 const PRODUCT_VARIANT_ALIASES = ['type', 'model', 'variant', 'varian', 'sku'];
 const PRODUCT_BRAND_ALIASES = ['merk', 'merek', 'brand'];
 
+function hasAliasColumn(columns = [], aliases = []) {
+  return columns.some((column) => aliases.includes(toLowerSafe(column)));
+}
+
 function rowValueByAliases(row, aliases = []) {
   const entries = Object.entries(row || {});
   for (const [column, value] of entries) {
@@ -308,6 +312,23 @@ function deriveProductName(row, mapping) {
   }
 
   return mappedValue || variant || brand || null;
+}
+
+function mappingSupportsProductDimension(mapping = {}, columns = []) {
+  const mappedProductColumn = toLowerSafe(mapping?.product_name);
+  if (!mappedProductColumn) {
+    return false;
+  }
+
+  if (PRODUCT_NAME_ALIASES.includes(mappedProductColumn) || PRODUCT_VARIANT_ALIASES.includes(mappedProductColumn)) {
+    return true;
+  }
+
+  if (PRODUCT_BRAND_ALIASES.includes(mappedProductColumn)) {
+    return !hasAliasColumn(columns, PRODUCT_NAME_ALIASES) && !hasAliasColumn(columns, PRODUCT_VARIANT_ALIASES);
+  }
+
+  return true;
 }
 
 function ensureBranch(tenantId, branchName) {
@@ -885,8 +906,9 @@ export async function repairLatestSourceIfNeeded({ tenantId, userId, requiredCap
   });
 
   const columns = Array.isArray(parsed?.columns) ? parsed.columns : [];
-  const hasTypeColumn = columns.some((column) => ['type', 'model'].includes(toLowerSafe(column)));
-  const hasBrandColumn = columns.some((column) => ['merk', 'brand'].includes(toLowerSafe(column)));
+  const hasProductDimensionColumn = hasAliasColumn(columns, PRODUCT_NAME_ALIASES)
+    || hasAliasColumn(columns, PRODUCT_VARIANT_ALIASES)
+    || hasAliasColumn(columns, PRODUCT_BRAND_ALIASES);
 
   const productsCount = get(
     `
@@ -899,7 +921,7 @@ export async function repairLatestSourceIfNeeded({ tenantId, userId, requiredCap
 
   const alreadyHealthy = (() => {
     if (requiredCapability === 'product_dimension') {
-      return Boolean(mappingInfo.mapping?.product_name) && Number(productsCount.value || 0) > 0;
+      return mappingSupportsProductDimension(mappingInfo.mapping, columns) && Number(productsCount.value || 0) > 0;
     }
     return true;
   })();
@@ -912,7 +934,7 @@ export async function repairLatestSourceIfNeeded({ tenantId, userId, requiredCap
     };
   }
 
-  if (requiredCapability === 'product_dimension' && !hasTypeColumn && !hasBrandColumn) {
+  if (requiredCapability === 'product_dimension' && !hasProductDimensionColumn) {
     return {
       ok: false,
       repaired: false,
