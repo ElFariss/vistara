@@ -9,6 +9,37 @@ import { config } from '../config.mjs';
 import { generateReport } from './reports.mjs';
 import { createGoal } from './goals.mjs';
 import { logAudit } from './audit.mjs';
+import { inspectDatasetQuestion } from './dataProfile.mjs';
+
+const DEFAULT_CONVERSATION_TITLE = 'Percakapan baru';
+const AUTO_TITLE_MAX_LENGTH = 56;
+
+function isDefaultConversationTitle(title) {
+  return String(title || '').trim().toLowerCase() === DEFAULT_CONVERSATION_TITLE.toLowerCase();
+}
+
+function buildConversationTitle(input) {
+  const cleaned = String(input || '')
+    .replace(/\s+/g, ' ')
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .trim();
+
+  if (!cleaned) {
+    return DEFAULT_CONVERSATION_TITLE;
+  }
+
+  const withoutCommand = cleaned
+    .replace(/^(tolong|please|coba|bantu|bisa|mohon)\s+/i, '')
+    .trim();
+  const firstSentence = withoutCommand.split(/[.!?\n]/, 1)[0].trim() || withoutCommand;
+  const normalized = firstSentence.charAt(0).toUpperCase() + firstSentence.slice(1);
+
+  if (normalized.length <= AUTO_TITLE_MAX_LENGTH) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, AUTO_TITLE_MAX_LENGTH - 1).trimEnd()}…`;
+}
 
 function ensureConversation(tenantId, userId, conversationId = null) {
   if (conversationId) {
@@ -25,6 +56,35 @@ function ensureConversation(tenantId, userId, conversationId = null) {
     }
   }
 
+  const latest = get(
+    `
+      SELECT c.*
+      FROM conversations c
+      WHERE c.tenant_id = :tenant_id
+        AND c.user_id = :user_id
+      ORDER BY COALESCE(
+        (
+          SELECT m.created_at
+          FROM chat_messages m
+          WHERE m.conversation_id = c.id
+          ORDER BY m.created_at DESC
+          LIMIT 1
+        ),
+        c.created_at
+      ) DESC,
+      c.created_at DESC
+      LIMIT 1
+    `,
+    {
+      tenant_id: tenantId,
+      user_id: userId,
+    },
+  );
+
+  if (latest) {
+    return latest;
+  }
+
   const id = generateId();
   run(
     `
@@ -35,7 +95,7 @@ function ensureConversation(tenantId, userId, conversationId = null) {
       id,
       tenant_id: tenantId,
       user_id: userId,
-      title: 'Percakapan Baru',
+      title: DEFAULT_CONVERSATION_TITLE,
       created_at: new Date().toISOString(),
     },
   );
@@ -44,6 +104,40 @@ function ensureConversation(tenantId, userId, conversationId = null) {
     `SELECT * FROM conversations WHERE id = :id AND tenant_id = :tenant_id AND user_id = :user_id`,
     { id, tenant_id: tenantId, user_id: userId },
   );
+}
+
+function touchConversation(tenantId, userId, conversationId) {
+  const conversation = get(
+    `
+      SELECT c.id, c.title, c.created_at
+      FROM conversations c
+      WHERE c.id = :id AND c.tenant_id = :tenant_id AND c.user_id = :user_id
+      LIMIT 1
+    `,
+    {
+      id: conversationId,
+      tenant_id: tenantId,
+      user_id: userId,
+    },
+  );
+
+  if (!conversation) {
+    return null;
+  }
+
+  return {
+    ...conversation,
+    last_message_at: get(
+      `
+        SELECT created_at
+        FROM chat_messages
+        WHERE conversation_id = :conversation_id
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      { conversation_id: conversationId },
+    )?.created_at || conversation.created_at,
+  };
 }
 
 function createMessage({ conversationId, tenantId, userId, role, content, payload = null }) {
@@ -66,6 +160,122 @@ function createMessage({ conversationId, tenantId, userId, role, content, payloa
   );
 
   return id;
+}
+
+function maybeAutoTitleConversation({ tenantId, userId, conversationId, message }) {
+  const conversation = get(
+    `
+      SELECT id, title
+      FROM conversations
+      WHERE id = :id AND tenant_id = :tenant_id AND user_id = :user_id
+      LIMIT 1
+    `,
+    {
+      id: conversationId,
+      tenant_id: tenantId,
+      user_id: userId,
+    },
+  );
+
+  if (!conversation || !isDefaultConversationTitle(conversation.title)) {
+    return conversation;
+  }
+
+  const userMessageCount = get(
+    `
+      SELECT COUNT(*) AS value
+      FROM chat_messages
+      WHERE conversation_id = :conversation_id
+        AND tenant_id = :tenant_id
+        AND role = 'user'
+    `,
+    {
+      conversation_id: conversationId,
+      tenant_id: tenantId,
+    },
+  )?.value || 0;
+
+  if (Number(userMessageCount) !== 1) {
+    return conversation;
+  }
+
+  const nextTitle = buildConversationTitle(message);
+  run(
+    `
+      UPDATE conversations
+      SET title = :title
+      WHERE id = :id AND tenant_id = :tenant_id AND user_id = :user_id
+    `,
+    {
+      id: conversationId,
+      tenant_id: tenantId,
+      user_id: userId,
+      title: nextTitle,
+    },
+  );
+
+  return get(
+    `
+      SELECT id, title, created_at
+      FROM conversations
+      WHERE id = :id AND tenant_id = :tenant_id AND user_id = :user_id
+      LIMIT 1
+    `,
+    {
+      id: conversationId,
+      tenant_id: tenantId,
+      user_id: userId,
+    },
+  );
+}
+
+function getConversationWithStats(tenantId, userId, conversationId) {
+  const conversation = get(
+    `
+      SELECT c.id, c.title, c.created_at
+      FROM conversations c
+      WHERE c.id = :id AND c.tenant_id = :tenant_id AND c.user_id = :user_id
+      LIMIT 1
+    `,
+    {
+      id: conversationId,
+      tenant_id: tenantId,
+      user_id: userId,
+    },
+  );
+
+  if (!conversation) {
+    return null;
+  }
+
+  const lastMessage = get(
+    `
+      SELECT role, content, created_at
+      FROM chat_messages
+      WHERE conversation_id = :conversation_id
+      ORDER BY created_at DESC
+      LIMIT 1
+    `,
+    { conversation_id: conversationId },
+  );
+
+  const messageCount = get(
+    `
+      SELECT COUNT(*) AS value
+      FROM chat_messages
+      WHERE conversation_id = :conversation_id
+    `,
+    { conversation_id: conversationId },
+  )?.value || 0;
+
+  return {
+    ...conversation,
+    title: String(conversation.title || '').trim() || DEFAULT_CONVERSATION_TITLE,
+    message_count: Number(messageCount || 0),
+    last_message_at: lastMessage?.created_at || conversation.created_at,
+    last_message_preview: String(lastMessage?.content || '').replace(/\s+/g, ' ').trim(),
+    last_message_role: lastMessage?.role || null,
+  };
 }
 
 function historyForConversation(tenantId, userId, conversationId, limit = 50) {
@@ -332,7 +542,7 @@ export async function processChatMessage({
   dashboardId,
   stream = null,
 }) {
-  const conversation = ensureConversation(tenantId, userId, conversationId);
+  let conversation = ensureConversation(tenantId, userId, conversationId);
   createMessage({
     conversationId: conversation.id,
     tenantId,
@@ -340,6 +550,12 @@ export async function processChatMessage({
     role: 'user',
     content: message,
   });
+  conversation = maybeAutoTitleConversation({
+    tenantId,
+    userId,
+    conversationId: conversation.id,
+    message,
+  }) || conversation;
 
   const history = historyForConversation(tenantId, userId, conversation.id, 12).map((item) => ({
     role: item.role,
@@ -372,6 +588,7 @@ export async function processChatMessage({
 
     return {
       conversation_id: conversation.id,
+      conversation: getConversationWithStats(tenantId, userId, conversation.id),
       ...responsePayload,
     };
   }
@@ -390,6 +607,20 @@ export async function processChatMessage({
       widgets: [],
       artifacts: [],
       intent,
+      presentation_mode: 'chat',
+    };
+  } else if (intent.intent === 'dataset_inspection') {
+    const inspection = await inspectDatasetQuestion({
+      tenantId,
+      message,
+    });
+
+    responsePayload = {
+      answer: inspection.answer,
+      widgets: [],
+      artifacts: inspection.artifacts || [],
+      intent,
+      dataset_profile: inspection.profile,
       presentation_mode: 'chat',
     };
   } else if (intent.intent === 'modify_dashboard') {
@@ -618,6 +849,7 @@ export async function processChatMessage({
 
   return {
     conversation_id: conversation.id,
+    conversation: getConversationWithStats(tenantId, userId, conversation.id),
     ...responsePayload,
   };
 }
@@ -626,8 +858,193 @@ export function getChatHistory({ tenantId, userId, conversationId = null }) {
   const convo = ensureConversation(tenantId, userId, conversationId);
   return {
     conversation_id: convo.id,
+    conversation: getConversationWithStats(tenantId, userId, convo.id),
     messages: historyForConversation(tenantId, userId, convo.id, 200),
   };
+}
+
+export function listChatConversations({ tenantId, userId, limit = 100 }) {
+  return all(
+    `
+      SELECT
+        c.id,
+        c.title,
+        c.created_at,
+        COALESCE(
+          (
+            SELECT m.created_at
+            FROM chat_messages m
+            WHERE m.conversation_id = c.id
+            ORDER BY m.created_at DESC
+            LIMIT 1
+          ),
+          c.created_at
+        ) AS last_message_at,
+        COALESCE(
+          (
+            SELECT m.content
+            FROM chat_messages m
+            WHERE m.conversation_id = c.id
+            ORDER BY m.created_at DESC
+            LIMIT 1
+          ),
+          ''
+        ) AS last_message_preview,
+        COALESCE(
+          (
+            SELECT m.role
+            FROM chat_messages m
+            WHERE m.conversation_id = c.id
+            ORDER BY m.created_at DESC
+            LIMIT 1
+          ),
+          NULL
+        ) AS last_message_role,
+        (
+          SELECT COUNT(*)
+          FROM chat_messages m
+          WHERE m.conversation_id = c.id
+        ) AS message_count
+      FROM conversations c
+      WHERE c.tenant_id = :tenant_id
+        AND c.user_id = :user_id
+      ORDER BY datetime(last_message_at) DESC, datetime(c.created_at) DESC
+      LIMIT :limit
+    `,
+    {
+      tenant_id: tenantId,
+      user_id: userId,
+      limit,
+    },
+  ).map((item) => ({
+    ...item,
+    title: String(item.title || '').trim() || DEFAULT_CONVERSATION_TITLE,
+    message_count: Number(item.message_count || 0),
+    last_message_preview: String(item.last_message_preview || '').replace(/\s+/g, ' ').trim(),
+  }));
+}
+
+export function createConversation({ tenantId, userId, title = null }) {
+  const id = generateId();
+  const createdAt = new Date().toISOString();
+  run(
+    `
+      INSERT INTO conversations (id, tenant_id, user_id, title, created_at)
+      VALUES (:id, :tenant_id, :user_id, :title, :created_at)
+    `,
+    {
+      id,
+      tenant_id: tenantId,
+      user_id: userId,
+      title: DEFAULT_CONVERSATION_TITLE,
+      created_at: createdAt,
+    },
+  );
+
+  const conversation = get(
+    `
+      SELECT *
+      FROM conversations
+      WHERE id = :id AND tenant_id = :tenant_id AND user_id = :user_id
+      LIMIT 1
+    `,
+    {
+      id,
+      tenant_id: tenantId,
+      user_id: userId,
+    },
+  );
+  const nextTitle = String(title || '').trim();
+
+  if (nextTitle) {
+    run(
+      `
+        UPDATE conversations
+        SET title = :title
+        WHERE id = :id AND tenant_id = :tenant_id AND user_id = :user_id
+      `,
+      {
+        id: conversation.id,
+        tenant_id: tenantId,
+        user_id: userId,
+        title: buildConversationTitle(nextTitle),
+      },
+    );
+  }
+
+  const created = getConversationWithStats(tenantId, userId, conversation.id);
+  logAudit({
+    tenantId,
+    userId,
+    action: 'conversation_create',
+    resourceType: 'conversation',
+    resourceId: conversation.id,
+    metadata: { title: created?.title || DEFAULT_CONVERSATION_TITLE },
+  });
+  return created;
+}
+
+export function renameConversation({ tenantId, userId, conversationId, title }) {
+  const existing = getConversationWithStats(tenantId, userId, conversationId);
+  if (!existing) {
+    return null;
+  }
+
+  const nextTitle = buildConversationTitle(title);
+  run(
+    `
+      UPDATE conversations
+      SET title = :title
+      WHERE id = :id AND tenant_id = :tenant_id AND user_id = :user_id
+    `,
+    {
+      id: conversationId,
+      tenant_id: tenantId,
+      user_id: userId,
+      title: nextTitle,
+    },
+  );
+
+  logAudit({
+    tenantId,
+    userId,
+    action: 'conversation_rename',
+    resourceType: 'conversation',
+    resourceId: conversationId,
+    metadata: { title: nextTitle },
+  });
+
+  return getConversationWithStats(tenantId, userId, conversationId);
+}
+
+export function deleteConversation({ tenantId, userId, conversationId }) {
+  const existing = getConversationWithStats(tenantId, userId, conversationId);
+  if (!existing) {
+    return false;
+  }
+
+  run(
+    `
+      DELETE FROM conversations
+      WHERE id = :id AND tenant_id = :tenant_id AND user_id = :user_id
+    `,
+    {
+      id: conversationId,
+      tenant_id: tenantId,
+      user_id: userId,
+    },
+  );
+
+  logAudit({
+    tenantId,
+    userId,
+    action: 'conversation_delete',
+    resourceType: 'conversation',
+    resourceId: conversationId,
+    metadata: { title: existing.title },
+  });
+
+  return true;
 }
 
 export function setChatFeedback({ tenantId, userId, messageId, feedback }) {

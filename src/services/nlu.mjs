@@ -9,6 +9,7 @@ const INTENTS = [
   'explain',
   'filter',
   'smalltalk',
+  'dataset_inspection',
   'modify_dashboard',
   'set_goal',
   'generate_report',
@@ -94,25 +95,38 @@ function looksSmalltalkMessage(text) {
   return false;
 }
 
+function looksDatasetInspectionMessage(text) {
+  const lower = toLowerAlnum(text);
+  const schemaTerms = /\b(kolom|column|columns|schema|field|fields|struktur data|profil data|profil dataset|eda|korelasi|correlation)\b/i;
+  const qualityTerms = /\b(quality data|kualitas data|missing|null|kosong|duplikat|duplicate)\b/i;
+  const inspectionCommand = /\b(cek|check|periksa|inspect|review|lihat)\b.*\b(dataset|kolom|schema|field|struktur|profil|kualitas)\b/i;
+  return schemaTerms.test(lower) || qualityTerms.test(lower) || inspectionCommand.test(lower);
+}
+
 function fallbackIntent(message) {
   const lower = toLowerAlnum(message);
   const isSmalltalk = looksSmalltalkMessage(message);
+  const isDatasetInspection = looksDatasetInspectionMessage(message);
   const isAnalytics = looksAnalyticsMessage(message);
   let intent = isSmalltalk || !isAnalytics ? 'smalltalk' : 'show_metric';
 
-  if (intent !== 'smalltalk' && /(banding|vs|dibanding|compare)/i.test(lower)) {
+  if (isDatasetInspection) {
+    intent = 'dataset_inspection';
+  }
+
+  if (intent !== 'smalltalk' && intent !== 'dataset_inspection' && /(banding|vs|dibanding|compare)/i.test(lower)) {
     intent = 'compare';
-  } else if (intent !== 'smalltalk' && /(top|terlaris|paling|rank|ranking)/i.test(lower)) {
+  } else if (intent !== 'smalltalk' && intent !== 'dataset_inspection' && /(top|terlaris|paling|rank|ranking)/i.test(lower)) {
     intent = 'rank';
-  } else if (intent !== 'smalltalk' && /(kenapa|mengapa|penyebab|explain)/i.test(lower)) {
+  } else if (intent !== 'smalltalk' && intent !== 'dataset_inspection' && /(kenapa|mengapa|penyebab|explain)/i.test(lower)) {
     intent = 'explain';
-  } else if (intent !== 'smalltalk' && /(tambah|tambahkan|hilangkan|hapus|ganti|fokus|simpan dashboard|template)/i.test(lower)) {
+  } else if (intent !== 'smalltalk' && intent !== 'dataset_inspection' && /(tambah|tambahkan|hilangkan|hapus|ganti|fokus|simpan dashboard|template)/i.test(lower)) {
     intent = 'modify_dashboard';
-  } else if (intent !== 'smalltalk' && /(target|goal)/i.test(lower)) {
+  } else if (intent !== 'smalltalk' && intent !== 'dataset_inspection' && /(target|goal)/i.test(lower)) {
     intent = 'set_goal';
-  } else if (intent !== 'smalltalk' && /(laporan|report)/i.test(lower)) {
+  } else if (intent !== 'smalltalk' && intent !== 'dataset_inspection' && /(laporan|report)/i.test(lower)) {
     intent = 'generate_report';
-  } else if (intent !== 'smalltalk' && /(upload|gabung|hapus data|update hpp|mapping)/i.test(lower)) {
+  } else if (intent !== 'smalltalk' && intent !== 'dataset_inspection' && /(upload|gabung|hapus data|update hpp|mapping)/i.test(lower)) {
     intent = 'data_management';
   }
 
@@ -131,9 +145,15 @@ function fallbackIntent(message) {
 
   return {
     intent,
-    metric: intent === 'smalltalk' ? null : extractMetric(message),
-    visualization: intent === 'smalltalk' ? null : extractVisualization(message),
-    time_period: intent === 'smalltalk' ? null : extractTimePeriod(message),
+    metric: intent === 'show_metric' || intent === 'compare' || intent === 'rank' || intent === 'explain'
+      ? extractMetric(message)
+      : null,
+    visualization: intent === 'show_metric' || intent === 'compare' || intent === 'rank' || intent === 'explain'
+      ? extractVisualization(message)
+      : null,
+    time_period: intent === 'show_metric' || intent === 'compare' || intent === 'rank' || intent === 'explain'
+      ? extractTimePeriod(message)
+      : null,
     branch: extractBranch(message),
     channel: /tokopedia/i.test(lower)
       ? 'tokopedia'
@@ -178,6 +198,7 @@ function sanitizeIntent(raw, fallback) {
 export async function parseIntent(message, history = []) {
   const fallback = fallbackIntent(message);
   const hasExplicitSmalltalk = looksSmalltalkMessage(message);
+  const hasDatasetInspectionSignal = looksDatasetInspectionMessage(message);
   const hasAnalyticsSignal = looksAnalyticsMessage(message);
 
   // Fast-path untuk sapaan/smalltalk agar tidak salah klasifikasi oleh model.
@@ -191,6 +212,18 @@ export async function parseIntent(message, history = []) {
       time_period: null,
       limit: null,
       nlu_source: 'rule_smalltalk',
+    };
+  }
+
+  if (hasDatasetInspectionSignal) {
+    return {
+      ...fallback,
+      intent: 'dataset_inspection',
+      metric: null,
+      visualization: null,
+      time_period: null,
+      limit: null,
+      nlu_source: 'rule_dataset_inspection',
     };
   }
 

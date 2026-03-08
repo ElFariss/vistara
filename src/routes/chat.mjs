@@ -1,5 +1,13 @@
 import { sendError, sendJson } from '../http/response.mjs';
-import { getChatHistory, processChatMessage, setChatFeedback } from '../services/chat.mjs';
+import {
+  createConversation,
+  deleteConversation,
+  getChatHistory,
+  listChatConversations,
+  processChatMessage,
+  renameConversation,
+  setChatFeedback,
+} from '../services/chat.mjs';
 
 export function registerChatRoutes(router) {
   function writeStreamEvent(res, type, payload = {}) {
@@ -12,6 +20,85 @@ export function registerChatRoutes(router) {
       // Ignore stream write errors to avoid crashing handler.
     }
   }
+
+  router.register(
+    'GET',
+    '/api/chat/conversations',
+    async (ctx) => {
+      const conversations = listChatConversations({
+        tenantId: ctx.user.tenant_id,
+        userId: ctx.user.id,
+      });
+
+      return sendJson(ctx.res, 200, { ok: true, conversations });
+    },
+    { auth: true },
+  );
+
+  router.register(
+    'POST',
+    '/api/chat/conversations',
+    async (ctx) => {
+      const body = await ctx.getBody();
+
+      try {
+        const conversation = createConversation({
+          tenantId: ctx.user.tenant_id,
+          userId: ctx.user.id,
+          title: body.title || null,
+        });
+
+        return sendJson(ctx.res, 201, { ok: true, conversation });
+      } catch (error) {
+        return sendError(ctx.res, 500, 'CONVERSATION_CREATE_FAILED', error.message);
+      }
+    },
+    { auth: true },
+  );
+
+  router.register(
+    'PUT',
+    '/api/chat/conversations/:conversationId',
+    async (ctx) => {
+      const body = await ctx.getBody();
+      if (!body.title || typeof body.title !== 'string') {
+        return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'title wajib diisi.');
+      }
+
+      const conversation = renameConversation({
+        tenantId: ctx.user.tenant_id,
+        userId: ctx.user.id,
+        conversationId: ctx.params.conversationId,
+        title: body.title,
+      });
+
+      if (!conversation) {
+        return sendError(ctx.res, 404, 'CONVERSATION_NOT_FOUND', 'Percakapan tidak ditemukan.');
+      }
+
+      return sendJson(ctx.res, 200, { ok: true, conversation });
+    },
+    { auth: true },
+  );
+
+  router.register(
+    'DELETE',
+    '/api/chat/conversations/:conversationId',
+    async (ctx) => {
+      const removed = deleteConversation({
+        tenantId: ctx.user.tenant_id,
+        userId: ctx.user.id,
+        conversationId: ctx.params.conversationId,
+      });
+
+      if (!removed) {
+        return sendError(ctx.res, 404, 'CONVERSATION_NOT_FOUND', 'Percakapan tidak ditemukan.');
+      }
+
+      return sendJson(ctx.res, 200, { ok: true });
+    },
+    { auth: true },
+  );
 
   router.register(
     'POST',
