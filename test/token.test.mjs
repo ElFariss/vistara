@@ -20,3 +20,12 @@ test('token verification fails after expiry', () => {
   const payload = verifyToken(token, 'secret');
   assert.equal(payload, null);
 });
+
+test('token verification fails safely for malformed signature length', () => {
+  const token = createToken({ sub: 'user_1', tenant_id: 'tenant_1' }, 'secret', 3600);
+  const [header, payload] = token.split('.');
+  const malformed = `${header}.${payload}.x`;
+
+  const result = verifyToken(malformed, 'secret');
+  assert.equal(result, null);
+});

@@ -50,8 +50,14 @@ export function verifyToken(token, secret) {
   const [encodedHeader, encodedPayload, signature] = parts;
   const unsignedToken = `${encodedHeader}.${encodedPayload}`;
   const expected = sign(unsignedToken, secret);
+  const actualSignature = Buffer.from(signature);
+  const expectedSignature = Buffer.from(expected);
 
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+  if (actualSignature.length !== expectedSignature.length) {
+    return null;
+  }
+
+  if (!crypto.timingSafeEqual(actualSignature, expectedSignature)) {
     return null;
   }
 
