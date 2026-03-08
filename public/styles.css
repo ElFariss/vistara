@@ -2405,6 +2405,25 @@ label {
     padding-bottom: 0.8rem;
   }
 
+  .landing-page,
+  .landing-page > *,
+  .landing-page section,
+  .landing-page article,
+  .landing-page div {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .landing-page h2,
+  .landing-page h3,
+  .landing-page h4,
+  .landing-page p,
+  .landing-page li,
+  .landing-page span,
+  .landing-page button {
+    overflow-wrap: anywhere;
+  }
+
   .landing-welcome {
     min-height: auto;
     padding: 2.2rem 0.75rem 1.8rem;
@@ -2413,7 +2432,7 @@ label {
 
   .landing-welcome > div {
     width: 100%;
-    max-width: 340px;
+    max-width: 300px;
   }
 
   .landing-welcome-title {
@@ -2451,6 +2470,7 @@ label {
     margin-top: 0;
     gap: 1rem;
     justify-items: center;
+    width: 100%;
   }
 
   .landing-features,
@@ -2466,10 +2486,18 @@ label {
     min-width: 0;
   }
 
+  .hero-card {
+    width: 100%;
+  }
+
+  .hero-panel {
+    display: none;
+  }
+
   .hero-copy,
   .hero-panel {
     width: 100%;
-    max-width: 340px;
+    max-width: 300px;
   }
 
   .hero-copy h2 {
@@ -2478,6 +2506,13 @@ label {
     width: 100%;
     max-width: 100%;
     overflow-wrap: anywhere;
+  }
+
+  .hero-copy > .hero-eyebrow,
+  .hero-copy > h2,
+  .hero-copy > .hero-sentences,
+  .hero-copy > .hero-cta-notes {
+    display: none;
   }
 
   .landing-welcome-copy,
@@ -2493,6 +2528,7 @@ label {
   .hero-actions {
     display: grid;
     grid-template-columns: 1fr;
+    margin-top: 0;
   }
 
   .hero-actions button,
