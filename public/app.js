@@ -1,5 +1,10 @@
 import { renderArtifact } from './vendor/chart-lite.js?v=20260307c';
 import { createGridStackLite } from './vendor/gridstack-lite.js?v=20260307e';
+import {
+  getChatHeaderState,
+  resolveInitialConversationId,
+  resolveNextConversationIdAfterDelete,
+} from './workspaceState.mjs?v=20260308a';
 
 const GRID_COLS = 16;
 const GRID_ROWS = 9;
@@ -79,7 +84,7 @@ const state = {
   stageZoom: 1,
   settings: { ...DEFAULT_SETTINGS },
   settingsOpen: false,
-  dataPaneCollapsed: true,
+  dataPaneCollapsed: false,
   configPaneCollapsed: true,
   preChatTickerIndex: 0,
   preChatTickerInterval: null,
@@ -1212,6 +1217,15 @@ function renderThread() {
   if (state.messages.length > 0) {
     scrollToBottom();
   } else {
+    if (!state.conversationId) {
+      const empty = document.createElement('div');
+      empty.className = 'thread-empty';
+      empty.innerHTML = `
+        <strong>Belum ada percakapan aktif.</strong>
+        <span>Kirim pertanyaan pertama atau tekan "Chat Baru" kapan saja.</span>
+      `;
+      refs.chatMessages.append(empty);
+    }
     refs.chatMessages.scrollTo({ top: 0 });
   }
   updatePreChatTicker();
@@ -2000,17 +2014,38 @@ function formatConversationMeta(value) {
 
 function updateChatHeader() {
   const activeConversation = state.conversations.find((item) => item.id === state.conversationId) || null;
+  const headerState = getChatHeaderState({
+    activeConversation,
+    fallbackTitle: state.conversationTitle,
+    hasDatasetReady: state.datasetReady,
+    conversationCount: state.conversations.length,
+  });
   if (refs.chatTitle) {
-    refs.chatTitle.textContent = activeConversation?.title || state.conversationTitle || 'Percakapan baru';
+    refs.chatTitle.textContent = headerState.title;
   }
   if (refs.chatSubtitle) {
-    refs.chatSubtitle.textContent = state.datasetReady
-      ? 'Tanya dengan bahasa biasa. Saya akan jawab dengan insight yang bisa langsung dipakai.'
-      : 'Upload dataset sekali, lalu lanjut ngobrol seperti konsultasi bisnis.';
+    refs.chatSubtitle.textContent = headerState.subtitle;
   }
   if (refs.openCanvasBtn) {
     refs.openCanvasBtn.hidden = !(Array.isArray(state.canvasWidgets) && state.canvasWidgets.length > 0);
   }
+}
+
+function resetConversationWorkspaceState({ conversationId = null, conversationTitle = '' } = {}) {
+  state.conversationId = conversationId;
+  state.conversationTitle = conversationTitle;
+  state.messages = [];
+  state.timelineRunId = null;
+  state.timelineMessageId = null;
+  state.currentDashboard = null;
+  state.canvasWidgets = [];
+  state.canvasPage = 1;
+  state.canvasPagesCount = 1;
+  state.selectedWidgetId = null;
+  setCanvasOpen(false);
+  renderCanvas();
+  renderThread();
+  updateChatHeader();
 }
 
 function renderConversationList() {
@@ -2187,19 +2222,12 @@ async function startNewConversation() {
     body: JSON.stringify({}),
   });
 
-  state.conversationId = response.conversation?.id || null;
-  state.conversationTitle = response.conversation?.title || 'Percakapan baru';
-  state.messages = [];
-  state.timelineRunId = null;
-  state.timelineMessageId = null;
-  state.currentDashboard = null;
-  state.canvasWidgets = [];
-  state.canvasPage = 1;
-  state.canvasPagesCount = 1;
-  setCanvasOpen(false);
-  renderCanvas();
+  resetConversationWorkspaceState({
+    conversationId: response.conversation?.id || null,
+    conversationTitle: response.conversation?.title || 'Percakapan baru',
+  });
   upsertConversation(response.conversation);
-  renderThread();
+  ensureWelcomeMessage();
 }
 
 async function deleteConversationById(conversationId) {
@@ -2208,14 +2236,17 @@ async function deleteConversationById(conversationId) {
   });
 
   state.conversations = state.conversations.filter((item) => item.id !== conversationId);
+  const nextConversationId = resolveNextConversationIdAfterDelete({
+    activeConversationId: state.conversationId,
+    deletedConversationId: conversationId,
+    remainingConversations: state.conversations,
+  });
 
-  if (state.conversationId === conversationId) {
-    if (state.conversations[0]?.id) {
-      await loadConversation(state.conversations[0].id);
-    } else {
-      await startNewConversation();
-    }
+  if (nextConversationId) {
+    await loadConversation(nextConversationId);
   } else {
+    resetConversationWorkspaceState();
+    ensureWelcomeMessage();
     renderConversationList();
   }
 }
@@ -2908,10 +2939,11 @@ function bindHintTooltips() {
 
 async function loadWorkspace() {
   await Promise.allSettled([refreshProfile(), refreshSources(), refreshVerdict(), refreshDashboards(), refreshConversationList(), loadSchema()]);
-  if (state.conversations[0]?.id) {
-    await refreshChatHistory(state.conversations[0].id);
+  const initialConversationId = resolveInitialConversationId(state.conversations);
+  if (initialConversationId) {
+    await refreshChatHistory(initialConversationId);
   } else {
-    await startNewConversation();
+    resetConversationWorkspaceState();
   }
   ensureWelcomeMessage();
 }
@@ -3515,7 +3547,7 @@ refs.logoutBtn.addEventListener('click', () => {
   state.canvasPage = 1;
   state.canvasPagesCount = 1;
   state.datasetReady = false;
-  state.dataPaneCollapsed = true;
+  state.dataPaneCollapsed = false;
   state.configPaneCollapsed = true;
   state.timelineRunId = null;
   state.timelineMessageId = null;

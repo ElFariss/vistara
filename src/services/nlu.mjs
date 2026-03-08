@@ -97,7 +97,10 @@ function looksSmalltalkMessage(text) {
 
 function looksDatasetInspectionMessage(text) {
   const lower = toLowerAlnum(text);
-  return /(kolom|column|columns|schema|field|fields|struktur data|profil data|profil dataset|quality data|kualitas data|cek data|cek dataset|missing|null|kosong|duplikat|duplicate|korelasi|correlation|eda)/i.test(lower);
+  const schemaTerms = /\b(kolom|column|columns|schema|field|fields|struktur data|profil data|profil dataset|eda|korelasi|correlation)\b/i;
+  const qualityTerms = /\b(quality data|kualitas data|missing|null|kosong|duplikat|duplicate)\b/i;
+  const inspectionCommand = /\b(cek|check|periksa|inspect|review|lihat)\b.*\b(dataset|kolom|schema|field|struktur|profil|kualitas)\b/i;
+  return schemaTerms.test(lower) || qualityTerms.test(lower) || inspectionCommand.test(lower);
 }
 
 function fallbackIntent(message) {

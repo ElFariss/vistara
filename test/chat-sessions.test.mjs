@@ -7,6 +7,7 @@ import path from 'node:path';
 import { initializeDatabase, run } from '../src/db.mjs';
 import { ingestUploadedSource } from '../src/services/ingestion.mjs';
 import { createConversation, getChatHistory, listChatConversations, processChatMessage } from '../src/services/chat.mjs';
+import { parseIntent } from '../src/services/nlu.mjs';
 
 function uid(prefix) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
@@ -125,4 +126,11 @@ test('processChatMessage answers dataset inspection questions in chat', async ()
       fs.unlinkSync(filePath);
     }
   }
+});
+
+test('parseIntent keeps analytics prompts with "cek data" on the analytics path', async () => {
+  const intent = await parseIntent('cek data penjualan minggu ini');
+  assert.notEqual(intent.intent, 'dataset_inspection');
+  assert.equal(intent.intent, 'show_metric');
+  assert.equal(intent.time_period, 'minggu ini');
 });
