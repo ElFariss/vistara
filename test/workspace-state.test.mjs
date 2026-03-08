@@ -3,10 +3,47 @@ import assert from 'node:assert/strict';
 import {
   didDeleteActiveConversation,
   getChatHeaderState,
+  normalizeAppPath,
   normalizeConversationTitle,
+  normalizeSettingsSection,
+  pageFromPath,
+  pathFromPage,
+  resolveAccessiblePage,
   resolveInitialConversationId,
   resolveNextConversationIdAfterDelete,
 } from '../public/workspaceState.js';
+
+test('normalizeAppPath trims trailing slashes safely', () => {
+  assert.equal(normalizeAppPath('/chat/'), '/chat');
+  assert.equal(normalizeAppPath('auth///'), '/auth');
+  assert.equal(normalizeAppPath('/'), '/');
+});
+
+test('page/path helpers map clean workspace routes', () => {
+  assert.equal(pageFromPath('/'), 'landing');
+  assert.equal(pageFromPath('/auth'), 'auth');
+  assert.equal(pageFromPath('/context/'), 'context');
+  assert.equal(pageFromPath('/chat'), 'workspace');
+  assert.equal(pathFromPage('workspace'), '/chat');
+  assert.equal(pathFromPage('landing'), '/');
+});
+
+test('resolveAccessiblePage protects workspace routes behind auth and context', () => {
+  assert.equal(resolveAccessiblePage({ requestedPage: 'workspace', isAuthenticated: false, contextComplete: false }), 'auth');
+  assert.equal(resolveAccessiblePage({ requestedPage: 'workspace', isAuthenticated: true, contextComplete: false }), 'context');
+  assert.equal(resolveAccessiblePage({ requestedPage: 'workspace', isAuthenticated: true, contextComplete: true }), 'workspace');
+  assert.equal(resolveAccessiblePage({ requestedPage: 'context', isAuthenticated: false, contextComplete: false }), 'auth');
+  assert.equal(resolveAccessiblePage({ requestedPage: 'context', isAuthenticated: true, contextComplete: true }), 'workspace');
+  assert.equal(resolveAccessiblePage({ requestedPage: 'auth', isAuthenticated: true, contextComplete: false }), 'context');
+  assert.equal(resolveAccessiblePage({ requestedPage: 'auth', isAuthenticated: true, contextComplete: true }), 'workspace');
+  assert.equal(resolveAccessiblePage({ requestedPage: 'landing', isAuthenticated: true, contextComplete: true }), 'landing');
+});
+
+test('normalizeSettingsSection locks the modal into user or agent groups', () => {
+  assert.equal(normalizeSettingsSection('agent'), 'agent');
+  assert.equal(normalizeSettingsSection('USER'), 'user');
+  assert.equal(normalizeSettingsSection('other'), 'user');
+});
 
 test('resolveInitialConversationId keeps the empty session state reachable', () => {
   assert.equal(resolveInitialConversationId([]), null);

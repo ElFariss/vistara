@@ -9,6 +9,7 @@ import { authenticateRequest } from './http/auth.mjs';
 import { createRateLimiter } from './http/rateLimit.mjs';
 import { getClientIp, parseRequestBody, parseUrl } from './http/request.mjs';
 import { sendError, sendJson, sendMethodNotAllowed, sendNotFound } from './http/response.mjs';
+import { resolveStaticRelativePath, shouldDisableStaticCache } from './http/staticAssets.mjs';
 import { createLogger } from './utils/logger.mjs';
 import { registerAuthRoutes } from './routes/auth.mjs';
 import { registerBusinessRoutes } from './routes/business.mjs';
@@ -88,7 +89,7 @@ function applyCors(req, res) {
 }
 
 function serveStatic(pathname, res) {
-  const relativePath = pathname === '/' ? '/index.html' : pathname;
+  const relativePath = resolveStaticRelativePath(pathname);
   const normalized = path.normalize(relativePath).replace(/^([.]{2}[\/\\])+/, '');
   const target = path.join(publicDir, normalized);
 
@@ -101,8 +102,10 @@ function serveStatic(pathname, res) {
   }
 
   const content = fs.readFileSync(target);
-  const ext = path.extname(target).toLowerCase();
-  const disableCache = pathname === '/index.html' || ext === '.js' || ext === '.css';
+  const disableCache = shouldDisableStaticCache({
+    pathname,
+    filePath: target,
+  });
   res.writeHead(200, {
     'Content-Type': getContentType(target),
     'Cache-Control': disableCache ? 'no-store' : 'public, max-age=3600',

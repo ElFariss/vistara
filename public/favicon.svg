@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="vistaraMark" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f59e42"/>
+      <stop offset="1" stop-color="#c85b16"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="18" fill="#faf7f2"/>
+  <circle cx="32" cy="32" r="17" fill="url(#vistaraMark)"/>
+  <circle cx="32" cy="32" r="8" fill="#fff7ef" opacity="0.92"/>
+</svg>

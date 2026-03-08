@@ -1,9 +1,15 @@
 import { renderArtifact } from './vendor/chart-lite.js?v=20260308d';
 import { createGridStackLite } from './vendor/gridstack-lite.js?v=20260307e';
+import { resolveCanvasViewportTarget } from './canvasViewport.js';
 import {
   didDeleteActiveConversation,
   getChatHeaderState,
+  normalizeAppPath,
+  normalizeSettingsSection,
   normalizeConversationTitle,
+  pageFromPath,
+  pathFromPage,
+  resolveAccessiblePage,
   resolveInitialConversationId,
   resolveNextConversationIdAfterDelete,
 } from './workspaceState.js?v=20260308c';
@@ -74,6 +80,7 @@ const state = {
   messages: [],
   currentDashboard: null,
   canvasWidgets: [],
+  workspaceLoaded: false,
   datasetReady: false,
   schema: null,
   grid: null,
@@ -89,8 +96,9 @@ const state = {
   isResizingPanels: false,
   stageZoom: 1,
   settings: { ...DEFAULT_SETTINGS },
+  settingsGroup: 'user',
   settingsOpen: false,
-  sessionRailCollapsed: false,
+  sessionRailCollapsed: true,
   openConversationMenuId: null,
   dataPaneCollapsed: true,
   configPaneCollapsed: true,
@@ -101,10 +109,12 @@ const state = {
   isProgrammaticGridUpdate: false,
   isRenderingCanvas: false,
   landingRevealObserver: null,
+  currentPage: 'landing',
 };
 
 const refs = {
   appShell: document.querySelector('.app-shell'),
+  appHeader: document.querySelector('.app-header'),
   headerLoginBtn: document.getElementById('headerLoginBtn'),
   headerCtaBtn: document.getElementById('headerCtaBtn'),
   brandHomeLink: document.getElementById('brandHomeLink'),
@@ -117,6 +127,11 @@ const refs = {
   settingsCloseBtn: document.getElementById('settingsCloseBtn'),
   settingsForm: document.getElementById('settingsForm'),
   settingsResetBtn: document.getElementById('settingsResetBtn'),
+  settingsGroupTabs: document.getElementById('settingsGroupTabs'),
+  settingsGroupUserBtn: document.getElementById('settingsGroupUserBtn'),
+  settingsGroupAgentBtn: document.getElementById('settingsGroupAgentBtn'),
+  settingsUserGroup: document.getElementById('settingsUserGroup'),
+  settingsAgentGroup: document.getElementById('settingsAgentGroup'),
   settingsThemeMode: document.getElementById('settingsThemeMode'),
   settingsAccentColor: document.getElementById('settingsAccentColor'),
   settingsNickname: document.getElementById('settingsNickname'),
@@ -150,6 +165,7 @@ const refs = {
   contextForm: document.getElementById('contextForm'),
 
   sessionRail: document.getElementById('sessionRail'),
+  sessionRailPeekBtn: document.getElementById('sessionRailPeekBtn'),
   sessionRailToggleBtn: document.getElementById('sessionRailToggleBtn'),
   sessionRailToggleLabel: document.getElementById('sessionRailToggleLabel'),
   sessionList: document.getElementById('sessionList'),
@@ -306,6 +322,7 @@ function syncSettingsForm() {
   refs.settingsAssistantCharacter.value = state.settings.assistant_character;
   refs.settingsPersonalizationFocus.value = state.settings.personalization_focus;
   syncBusinessSettingsFields();
+  setSettingsGroup(state.settingsGroup);
 }
 
 function syncBusinessSettingsFields() {
@@ -350,8 +367,40 @@ function applySettings(nextSettings, options = {}) {
   }
 }
 
-function setSettingsOpen(open) {
+function syncSettingsGroupUi() {
+  const isUser = state.settingsGroup === 'user';
+  refs.settingsGroupUserBtn?.classList.toggle('is-active', isUser);
+  refs.settingsGroupUserBtn?.classList.toggle('active', isUser);
+  refs.settingsGroupUserBtn?.setAttribute('aria-pressed', String(isUser));
+  refs.settingsGroupUserBtn?.setAttribute('aria-selected', String(isUser));
+  refs.settingsGroupAgentBtn?.classList.toggle('is-active', !isUser);
+  refs.settingsGroupAgentBtn?.classList.toggle('active', !isUser);
+  refs.settingsGroupAgentBtn?.setAttribute('aria-pressed', String(!isUser));
+  refs.settingsGroupAgentBtn?.setAttribute('aria-selected', String(!isUser));
+  refs.settingsUserGroup?.classList.toggle('hidden', !isUser);
+  refs.settingsAgentGroup?.classList.toggle('hidden', isUser);
+}
+
+function setSettingsGroup(group = 'user') {
+  state.settingsGroup = normalizeSettingsSection(group);
+  syncSettingsGroupUi();
+}
+
+function syncBrowserRoute(page, options = {}) {
+  const targetPath = pathFromPage(page);
+  if (!window.history || normalizeAppPath(window.location.pathname) === targetPath) {
+    return;
+  }
+  const method = options.replace ? 'replaceState' : 'pushState';
+  window.history[method]({ page }, '', targetPath);
+}
+
+function setSettingsOpen(open, options = {}) {
   state.settingsOpen = Boolean(open);
+  if (state.settingsOpen) {
+    setSettingsGroup(options.group || state.settingsGroup || 'user');
+  }
+  document.body.classList.toggle('settings-open', state.settingsOpen);
   refs.settingsBackdrop?.classList.toggle('hidden', !state.settingsOpen);
   refs.settingsPanel?.classList.toggle('hidden', !state.settingsOpen);
 }
@@ -435,7 +484,8 @@ function updateQuickPromptsVisibility() {
   if (!refs.quickPrompts) {
     return;
   }
-  const shouldShow = state.messages.length === 0 && Boolean(state.token) && Boolean(state.datasetReady);
+  const workspaceVisible = Boolean(refs.workspacePage) && !refs.workspacePage.classList.contains('hidden');
+  const shouldShow = workspaceVisible && state.messages.length === 0 && Boolean(state.token) && Boolean(state.datasetReady);
   refs.quickPrompts.classList.toggle('hidden', !shouldShow);
 }
 
@@ -527,6 +577,7 @@ function setAuth(token, user = null, options = {}) {
   state.token = token || '';
   state.user = user;
   state.isDemoSession = state.token ? isDemo : false;
+  document.body.classList.toggle('is-authenticated', Boolean(state.token));
 
   if (state.token) {
     if (persist) {
@@ -535,7 +586,7 @@ function setAuth(token, user = null, options = {}) {
       localStorage.removeItem('umkm_token');
     }
     if (refs.logoutBtn) refs.logoutBtn.hidden = false;
-    if (refs.editProfileBtn) refs.editProfileBtn.hidden = false;
+    if (refs.editProfileBtn) refs.editProfileBtn.hidden = true;
     if (refs.headerSettingsBtn) refs.headerSettingsBtn.hidden = false;
     if (refs.headerLoginBtn) refs.headerLoginBtn.hidden = true;
     if (refs.headerCtaBtn) refs.headerCtaBtn.hidden = true;
@@ -547,6 +598,8 @@ function setAuth(token, user = null, options = {}) {
     if (refs.headerLoginBtn) refs.headerLoginBtn.hidden = false;
     if (refs.headerCtaBtn) refs.headerCtaBtn.hidden = false;
   }
+
+  syncAppHeaderOffset();
 }
 
 function escapeHtml(text) {
@@ -672,10 +725,36 @@ function syncLandingScrollCue() {
   refs.landingScrollCue.classList.toggle('is-hidden', hide);
 }
 
+function syncAppHeaderOffset() {
+  const headerHeight = refs.appHeader?.offsetHeight || 0;
+  document.documentElement.style.setProperty('--app-header-height', `${headerHeight}px`);
+}
+
+function routePrimaryEntry(options = {}) {
+  if (state.token) {
+    void handleRouteNavigation(pathFromPage('workspace'), {
+      replace: options.replace !== false,
+    });
+    return;
+  }
+
+  showPage('auth', {
+    replace: options.replace !== false,
+  });
+  switchAuthTab(options.authTab || 'register');
+}
+
 function setSessionRailCollapsed(collapsed) {
   state.sessionRailCollapsed = Boolean(collapsed);
   refs.sessionRail?.classList.toggle('collapsed', state.sessionRailCollapsed);
+  refs.sessionRail?.setAttribute('aria-hidden', String(state.sessionRailCollapsed));
+  if (refs.sessionRail && 'inert' in refs.sessionRail) {
+    refs.sessionRail.inert = state.sessionRailCollapsed;
+  }
   refs.workspaceShell?.classList.toggle('session-rail-collapsed', state.sessionRailCollapsed);
+  refs.sessionRailPeekBtn?.classList.toggle('is-active', !state.sessionRailCollapsed);
+  refs.sessionRailPeekBtn?.setAttribute('aria-expanded', String(!state.sessionRailCollapsed));
+  refs.sessionRailPeekBtn?.setAttribute('title', state.sessionRailCollapsed ? 'Buka riwayat' : 'Tutup riwayat');
   if (refs.sessionRailToggleBtn) {
     refs.sessionRailToggleBtn.setAttribute('aria-expanded', String(!state.sessionRailCollapsed));
     refs.sessionRailToggleBtn.setAttribute('title', state.sessionRailCollapsed ? 'Buka riwayat' : 'Ciutkan riwayat');
@@ -689,41 +768,66 @@ function setSessionRailCollapsed(collapsed) {
   }
 }
 
-function showPage(page) {
+function showPage(page, options = {}) {
+  if (state.settingsOpen && options.keepSettingsOpen !== true) {
+    setSettingsOpen(false);
+  }
   refs.landingPage.classList.add('hidden');
   refs.authPage.classList.add('hidden');
   refs.contextPage.classList.add('hidden');
   refs.workspacePage.classList.add('hidden');
-  refs.statusBar.classList.add('hidden');
+  refs.statusBar?.classList.add('hidden');
   if (refs.appShell) {
     refs.appShell.classList.remove('workspace-active');
   }
+  syncAppHeaderOffset();
   document.body.classList.remove('workspace-mode');
+  state.currentPage = page;
+  syncBrowserRoute(page, {
+    replace: options.replace === true,
+  });
+  if (page !== 'workspace') {
+    setSessionRailCollapsed(true);
+  }
 
   if (page === 'landing') {
     refs.landingPage.classList.remove('hidden');
     initLandingReveal();
     syncLandingScrollCue();
+    if (options.scrollTop !== false) {
+      window.scrollTo({ top: 0, behavior: options.smooth ? 'smooth' : 'auto' });
+    }
     return;
   }
 
   if (page === 'auth') {
     refs.authPage.classList.remove('hidden');
+    setSettingsOpen(false);
     return;
   }
 
   if (page === 'context') {
     refs.contextPage.classList.remove('hidden');
+    setSettingsOpen(false);
     return;
   }
 
   refs.workspacePage.classList.remove('hidden');
-  refs.statusBar.classList.remove('hidden');
+  refs.statusBar?.classList.remove('hidden');
   if (refs.appShell) {
     refs.appShell.classList.add('workspace-active');
   }
   document.body.classList.add('workspace-mode');
+  syncAppHeaderOffset();
   syncLandingScrollCue();
+}
+
+async function ensureWorkspaceLoaded(options = {}) {
+  if (state.workspaceLoaded && !options.force) {
+    return;
+  }
+  await loadWorkspace();
+  state.workspaceLoaded = true;
 }
 
 function switchAuthTab(tab) {
@@ -1000,17 +1104,52 @@ function centerCanvasStage() {
     return;
   }
 
-  const targetLeft = Math.max(
-    0,
-    refs.canvasStage.offsetLeft - Math.round((refs.canvasViewport.clientWidth - refs.canvasStage.clientWidth) / 2),
-  );
-  const targetTop = Math.max(
-    0,
-    refs.canvasStage.offsetTop - Math.round((refs.canvasViewport.clientHeight - refs.canvasStage.clientHeight) / 2),
-  );
+  const worldRect = refs.canvasWorld.getBoundingClientRect();
+  const viewportScrollLeft = refs.canvasViewport.scrollLeft;
+  const viewportScrollTop = refs.canvasViewport.scrollTop;
+  const stageRect = {
+    left: refs.canvasStage.offsetLeft,
+    top: refs.canvasStage.offsetTop,
+    width: refs.canvasStage.clientWidth,
+    height: refs.canvasStage.clientHeight,
+  };
 
-  refs.canvasViewport.scrollLeft = targetLeft;
-  refs.canvasViewport.scrollTop = targetTop;
+  let focusRect = null;
+  const widgetShells = Array.from(refs.canvasGrid?.querySelectorAll('.widget-shell') || []);
+  if (widgetShells.length > 0) {
+    let left = Number.POSITIVE_INFINITY;
+    let top = Number.POSITIVE_INFINITY;
+    let right = Number.NEGATIVE_INFINITY;
+    let bottom = Number.NEGATIVE_INFINITY;
+
+    widgetShells.forEach((shell) => {
+      const rect = shell.getBoundingClientRect();
+      left = Math.min(left, rect.left - worldRect.left + viewportScrollLeft);
+      top = Math.min(top, rect.top - worldRect.top + viewportScrollTop);
+      right = Math.max(right, rect.right - worldRect.left + viewportScrollLeft);
+      bottom = Math.max(bottom, rect.bottom - worldRect.top + viewportScrollTop);
+    });
+
+    if (Number.isFinite(left) && Number.isFinite(top) && Number.isFinite(right) && Number.isFinite(bottom)) {
+      focusRect = {
+        left,
+        top,
+        width: Math.max(0, right - left),
+        height: Math.max(0, bottom - top),
+      };
+    }
+  }
+
+  const target = resolveCanvasViewportTarget({
+    stageRect,
+    viewportRect: {
+      width: refs.canvasViewport.clientWidth,
+      height: refs.canvasViewport.clientHeight,
+    },
+    focusRect,
+  });
+
+  refs.canvasViewport.scrollTo(target.scrollLeft, target.scrollTop);
 }
 
 function queueCanvasStageCenter() {
@@ -1948,11 +2087,13 @@ async function refreshProfile() {
 }
 
 async function refreshVerdict() {
+  if (!refs.verdictBadge) {
+    return;
+  }
+
   if (!state.datasetReady) {
-    if (refs.verdictBadge) {
-      refs.verdictBadge.className = 'verdict-badge';
-      refs.verdictBadge.textContent = 'Verdict: menunggu dataset';
-    }
+    refs.verdictBadge.className = 'verdict-badge';
+    refs.verdictBadge.textContent = 'Verdict: menunggu dataset';
     return;
   }
 
@@ -1960,23 +2101,18 @@ async function refreshVerdict() {
     const response = await api('/api/insights/verdict');
     const verdict = response.verdict;
 
-    if (refs.verdictBadge) {
-      refs.verdictBadge.className = 'verdict-badge';
-      if (verdict.status === 'SEHAT') {
-        refs.verdictBadge.classList.add('ok');
-      } else if (verdict.status === 'WASPADA') {
-        refs.verdictBadge.classList.add('warn');
-      } else {
-        refs.verdictBadge.classList.add('critical');
-      }
-
-      refs.verdictBadge.textContent = `Verdict ${verdict.status}: ${verdict.sentence}`;
+    refs.verdictBadge.className = 'verdict-badge';
+    if (verdict.status === 'SEHAT') {
+      refs.verdictBadge.classList.add('ok');
+    } else if (verdict.status === 'WASPADA') {
+      refs.verdictBadge.classList.add('warn');
+    } else {
+      refs.verdictBadge.classList.add('critical');
     }
+    refs.verdictBadge.textContent = `Verdict ${verdict.status}: ${verdict.sentence}`;
   } catch {
-    if (refs.verdictBadge) {
-      refs.verdictBadge.className = 'verdict-badge';
-      refs.verdictBadge.textContent = 'Verdict: belum tersedia';
-    }
+    refs.verdictBadge.className = 'verdict-badge';
+    refs.verdictBadge.textContent = 'Verdict: belum tersedia';
   }
 }
 
@@ -2014,12 +2150,10 @@ function updateChatHeader() {
   }
   if (refs.openCanvasBtn) {
     const hasCanvasWidgets = Array.isArray(state.canvasWidgets) && state.canvasWidgets.length > 0;
-    const latestMessage = state.messages.at(-1) || null;
-    const summaryAlreadyOwnsOpenAction = !state.canvasOpen && latestMessage?.mode === 'canvas';
-    refs.openCanvasBtn.hidden = !hasCanvasWidgets || summaryAlreadyOwnsOpenAction;
+    refs.openCanvasBtn.hidden = !hasCanvasWidgets;
   }
   if (refs.chatPaneHead) {
-    refs.chatPaneHead.hidden = refs.openCanvasBtn?.hidden !== false;
+    refs.chatPaneHead.hidden = false;
   }
 }
 
@@ -2210,9 +2344,7 @@ async function refreshChatHistory(conversationId = state.conversationId) {
 async function loadConversation(conversationId) {
   setCanvasOpen(false);
   await refreshChatHistory(conversationId);
-  if (isMobileViewport()) {
-    setSessionRailCollapsed(true);
-  }
+  setSessionRailCollapsed(true);
 }
 
 async function startNewConversation() {
@@ -2226,9 +2358,7 @@ async function startNewConversation() {
     conversationTitle: response.conversation?.title || 'Percakapan baru',
   });
   upsertConversation(response.conversation);
-  if (isMobileViewport()) {
-    setSessionRailCollapsed(true);
-  }
+  setSessionRailCollapsed(true);
 }
 
 async function deleteConversationById(conversationId) {
@@ -2953,7 +3083,86 @@ async function loadWorkspace() {
   } else {
     resetConversationWorkspaceState();
   }
+  state.workspaceLoaded = true;
   ensureWelcomeMessage();
+}
+
+async function handleRouteNavigation(pathname = window.location.pathname, options = {}) {
+  const rawRequestedPage = pageFromPath(pathname);
+  let requestedPage = resolveAccessiblePage({
+    requestedPage: rawRequestedPage,
+    isAuthenticated: Boolean(state.token),
+    contextComplete: isContextComplete(state.profile),
+  });
+
+  if (!state.token) {
+    showPage(requestedPage, {
+      replace: options.replace === true || requestedPage !== rawRequestedPage,
+      scrollTop: requestedPage === 'landing',
+    });
+    if (requestedPage === 'auth' && options.preserveAuthTab !== true) {
+      switchAuthTab('login');
+    }
+    return;
+  }
+
+  if (!state.profile) {
+    try {
+      await refreshProfile();
+      requestedPage = resolveAccessiblePage({
+        requestedPage: rawRequestedPage,
+        isAuthenticated: true,
+        contextComplete: isContextComplete(state.profile),
+      });
+    } catch {
+      setAuth('', null, {
+        persist: false,
+        isDemo: false,
+      });
+      state.workspaceLoaded = false;
+      showPage('landing', { replace: true });
+      return;
+    }
+  }
+
+  if (requestedPage === 'landing') {
+    showPage('landing', {
+      replace: options.replace === true,
+      scrollTop: options.scrollTop !== false,
+    });
+    return;
+  }
+
+  if (requestedPage === 'auth') {
+    if (!isContextComplete(state.profile)) {
+      showPage('context', { replace: true });
+      return;
+    }
+    showPage('workspace', { replace: true });
+    await ensureWorkspaceLoaded();
+    setSessionRailCollapsed(true);
+    return;
+  }
+
+  if (requestedPage === 'context') {
+    showPage('context', {
+      replace: options.replace === true,
+    });
+    return;
+  }
+
+  if (!isContextComplete(state.profile)) {
+    showPage('context', { replace: true });
+    return;
+  }
+
+  showPage('workspace', {
+    replace: options.replace === true,
+  });
+  await ensureWorkspaceLoaded();
+  if (options.keepSessionRail !== true) {
+    setSessionRailCollapsed(true);
+  }
 }
 
 refs.chatInput.addEventListener('input', () => {
@@ -2986,12 +3195,22 @@ if (refs.sessionRailToggleBtn) {
   });
 }
 
+if (refs.sessionRailPeekBtn) {
+  refs.sessionRailPeekBtn.addEventListener('click', () => {
+    setSessionRailCollapsed(!state.sessionRailCollapsed);
+    if (!state.sessionRailCollapsed) {
+      refs.newSessionBtn?.focus();
+    }
+  });
+}
+
 if (refs.brandHomeLink) {
   refs.brandHomeLink.addEventListener('click', (event) => {
     event.preventDefault();
     setCanvasOpen(false);
-    showPage('landing');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    void handleRouteNavigation(pathFromPage('landing'), {
+      scrollTop: true,
+    });
   });
 }
 
@@ -3160,6 +3379,7 @@ if (refs.zoomResetBtn) {
 }
 
 window.addEventListener('resize', () => {
+  syncAppHeaderOffset();
   applyWorkspaceSplitState();
   applyStageDimensions();
   syncGridBounds();
@@ -3228,7 +3448,7 @@ document.querySelectorAll('[data-prompt]').forEach((button) => {
     if (!prompt) return;
 
     if (!state.token) {
-      showPage('auth');
+      showPage('auth', { replace: true });
       return showToast('Login dulu.');
     }
 
@@ -3251,14 +3471,12 @@ document.addEventListener('click', (event) => {
 
 if (refs.landingCta) {
   refs.landingCta.addEventListener('click', () => {
-    showPage('auth');
-    switchAuthTab('register');
+    routePrimaryEntry({ authTab: 'register' });
   });
 }
 if (refs.landingWelcomeCta) {
   refs.landingWelcomeCta.addEventListener('click', () => {
-    showPage('auth');
-    switchAuthTab('register');
+    routePrimaryEntry({ authTab: 'register' });
   });
 }
 if (refs.headerLoginBtn) {
@@ -3269,18 +3487,21 @@ if (refs.headerLoginBtn) {
 }
 if (refs.headerCtaBtn) {
   refs.headerCtaBtn.addEventListener('click', () => {
-    showPage('auth');
-    switchAuthTab('register');
+    routePrimaryEntry({ authTab: 'register' });
   });
 }
 if (refs.landingCtaBottom) {
   refs.landingCtaBottom.addEventListener('click', () => {
-    showPage('auth');
-    switchAuthTab('register');
+    routePrimaryEntry({ authTab: 'register' });
   });
 }
 
 async function startDemoSession() {
+  if (state.token) {
+    routePrimaryEntry({ replace: true });
+    return;
+  }
+
   const originalText = refs.landingDemo?.textContent || 'Coba Demo (tanpa login)';
   if (refs.landingDemo) {
     refs.landingDemo.disabled = true;
@@ -3335,16 +3556,20 @@ async function startDemoSession() {
       isDemo: true,
     });
 
-    showPage('workspace');
-    await loadWorkspace();
+    state.workspaceLoaded = false;
+    showPage('workspace', { replace: true });
+    await ensureWorkspaceLoaded({ force: true });
     setCanvasOpen(false);
+    setSessionRailCollapsed(true);
     showToast('Demo siap. Login jika ingin simpan histori permanen.');
   } catch (error) {
     try {
       await fallbackStart();
-      showPage('workspace');
-      await loadWorkspace();
+      state.workspaceLoaded = false;
+      showPage('workspace', { replace: true });
+      await ensureWorkspaceLoaded({ force: true });
       setCanvasOpen(false);
+      setSessionRailCollapsed(true);
       showToast('Demo siap. Login jika ingin simpan histori permanen.');
     } catch (fallbackError) {
       showToast(`Gagal masuk demo: ${fallbackError.message || error.message}`);
@@ -3382,7 +3607,7 @@ if (refs.themeToggle) {
 if (refs.headerSettingsBtn) {
   refs.headerSettingsBtn.addEventListener('click', () => {
     syncSettingsForm();
-    setSettingsOpen(true);
+    setSettingsOpen(true, { group: 'user' });
   });
 }
 
@@ -3401,6 +3626,7 @@ if (refs.settingsBackdrop) {
 if (refs.settingsResetBtn) {
   refs.settingsResetBtn.addEventListener('click', () => {
     applySettings({ ...DEFAULT_SETTINGS });
+    setSettingsGroup('user');
     refreshWelcomeGreeting();
     showToast('Pengaturan dikembalikan ke default.');
   });
@@ -3432,7 +3658,8 @@ if (refs.settingsForm) {
         fillContextForm(state.profile);
         syncBusinessSettingsFields();
       } catch (error) {
-        showToast(`Pengaturan visual tersimpan, update business context gagal: ${error.message}`);
+        showToast(`Gagal memperbarui business context: ${error.message}`);
+        return;
       }
     }
 
@@ -3442,9 +3669,21 @@ if (refs.settingsForm) {
   });
 }
 
+refs.settingsGroupUserBtn?.addEventListener('click', () => {
+  setSettingsGroup('user');
+});
+
+refs.settingsGroupAgentBtn?.addEventListener('click', () => {
+  setSettingsGroup('agent');
+});
+
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && state.settingsOpen) {
     setSettingsOpen(false);
+    return;
+  }
+  if (event.key === 'Escape' && !state.sessionRailCollapsed) {
+    setSessionRailCollapsed(true);
   }
 });
 
@@ -3473,6 +3712,7 @@ refs.loginForm.addEventListener('submit', async (event) => {
       persist: true,
       isDemo: false,
     });
+    state.workspaceLoaded = false;
 
     try {
       await refreshProfile();
@@ -3485,7 +3725,8 @@ refs.loginForm.addEventListener('submit', async (event) => {
       showToast('Lengkapi business context dulu.');
     } else {
       showPage('workspace');
-      await loadWorkspace();
+      await ensureWorkspaceLoaded();
+      setSessionRailCollapsed(true);
       setCanvasOpen(false);
       showToast('Workspace siap.');
     }
@@ -3518,7 +3759,7 @@ refs.registerForm.addEventListener('submit', async (event) => {
       morning_verdict_time: '07:00',
     });
 
-    showPage('context');
+    showPage('context', { replace: true });
     showToast('Akun dibuat. Lengkapi business context.');
   } catch (error) {
     showToast(error.message);
@@ -3542,8 +3783,10 @@ refs.contextForm.addEventListener('submit', async (event) => {
     });
 
     state.profile = response.profile;
+    state.workspaceLoaded = false;
     showPage('workspace');
-    await loadWorkspace();
+    await ensureWorkspaceLoaded();
+    setSessionRailCollapsed(true);
     setCanvasOpen(false);
     showToast('Workspace siap digunakan.');
   } catch (error) {
@@ -3551,19 +3794,20 @@ refs.contextForm.addEventListener('submit', async (event) => {
   }
 });
 
-refs.editProfileBtn.addEventListener('click', async () => {
-  if (!state.token) {
-    return showPage('auth');
-  }
-
-  try {
-    await refreshProfile();
-  } catch {
-    // continue manual
-  }
-
-  showPage('context');
-});
+if (refs.editProfileBtn) {
+  refs.editProfileBtn.addEventListener('click', async () => {
+    if (!state.token) {
+      return showPage('auth');
+    }
+    try {
+      await refreshProfile();
+    } catch {
+      // continue with current state
+    }
+    syncSettingsForm();
+    setSettingsOpen(true, { group: 'user' });
+  });
+}
 
 refs.logoutBtn.addEventListener('click', () => {
   setAuth('', null, {
@@ -3579,6 +3823,7 @@ refs.logoutBtn.addEventListener('click', () => {
   state.canvasWidgets = [];
   state.canvasPage = 1;
   state.canvasPagesCount = 1;
+  state.workspaceLoaded = false;
   state.datasetReady = false;
   state.dataPaneCollapsed = true;
   state.configPaneCollapsed = true;
@@ -3595,6 +3840,7 @@ refs.logoutBtn.addEventListener('click', () => {
 
   setSettingsOpen(false);
   setCanvasOpen(false);
+  setSessionRailCollapsed(true);
 
   renderThread();
   renderConversationList();
@@ -3604,18 +3850,20 @@ refs.logoutBtn.addEventListener('click', () => {
   if (refs.verdictBadge) {
     refs.verdictBadge.textContent = 'Verdict: belum tersedia';
   }
-  showPage('landing');
+  showPage('landing', { replace: true });
   stopPreChatTicker();
   showToast('Logout berhasil.');
 });
 
 async function bootstrap() {
   applySettings(readSettings(), { persist: false });
+  syncAppHeaderOffset();
   bindPanelDivider();
   bindCanvasViewportPan();
   applyStageDimensions();
   queueCanvasStageCenter();
-  setSessionRailCollapsed(false);
+  setSessionRailCollapsed(true);
+  syncSettingsGroupUi();
   updateCanvasPaneState();
   applyWorkspaceSplitState();
   setEditMode(false);
@@ -3627,32 +3875,12 @@ async function bootstrap() {
     persist: true,
     isDemo: false,
   });
-
-  if (!state.token) {
-    showPage('landing');
-    return;
-  }
-
-  try {
-    await refreshProfile();
-
-    if (!isContextComplete(state.profile)) {
-      showPage('context');
-      return;
-    }
-
-  showPage('workspace');
-  await loadWorkspace();
-  setCanvasOpen(false);
-  if (state.conversations.length > 0) {
+  await handleRouteNavigation(window.location.pathname, {
+    replace: pageFromPath(window.location.pathname) !== 'landing',
+    scrollTop: false,
+  });
+  if (state.token && state.workspaceLoaded && state.conversations.length > 0) {
     showToast('Session dipulihkan.');
-  }
-  } catch {
-    setAuth('', null, {
-      persist: false,
-      isDemo: false,
-    });
-    showPage('landing');
   }
 }
 
@@ -3667,5 +3895,14 @@ if (prefersDarkQuery && typeof prefersDarkQuery.addEventListener === 'function')
     }
   });
 }
+
+window.addEventListener('popstate', () => {
+  void handleRouteNavigation(window.location.pathname, {
+    replace: false,
+    scrollTop: false,
+    keepSessionRail: true,
+    preserveAuthTab: true,
+  });
+});
 
 bootstrap();
