@@ -2471,12 +2471,18 @@ label {
     gap: 1rem;
     justify-items: center;
     width: 100%;
+    padding-inline: 0.75rem;
   }
 
   .landing-features,
   .pain-strip,
   .faq-grid {
     grid-template-columns: 1fr;
+  }
+
+  .landing-features,
+  .pain-strip {
+    padding-inline: 0.75rem;
   }
 
   .hero-copy,
@@ -2529,6 +2535,10 @@ label {
     display: grid;
     grid-template-columns: 1fr;
     margin-top: 0;
+  }
+
+  .hero-copy > .hero-actions {
+    display: none;
   }
 
   .hero-actions button,
