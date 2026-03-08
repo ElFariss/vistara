@@ -1,4 +1,5 @@
 import { generateId } from '../utils/ids.mjs';
+import { parseIndonesianNumber } from '../utils/parse.mjs';
 import { executeAnalyticsIntent, executeBuilderQuery, getBuilderSchema } from './queryEngine.mjs';
 import { ensureDefaultDashboard, getDashboard } from './dashboards.mjs';
 import { runPythonSnippet } from './pythonRuntime.mjs';
@@ -103,6 +104,30 @@ const WORKER_TOOL_DECLARATIONS = [
       type: 'object',
       properties: {
         summary: { type: 'string' },
+        layout_plan: {
+          type: 'object',
+          properties: {
+            strategy: { type: 'string' },
+            pages: { type: 'number' },
+            placements: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  title: { type: 'string' },
+                  metric: { type: 'string' },
+                  template_id: { type: 'string' },
+                  kind: { type: 'string' },
+                  page: { type: 'number' },
+                  x: { type: 'number' },
+                  y: { type: 'number' },
+                  w: { type: 'number' },
+                  h: { type: 'number' },
+                },
+              },
+            },
+          },
+        },
       },
       required: ['summary'],
     },
@@ -630,8 +655,8 @@ function artifactLooksEmpty(artifact) {
     if (Number.isFinite(raw)) {
       return raw === 0;
     }
-    const cleaned = Number(String(artifact.value || '').replace(/[^0-9.-]/g, ''));
-    return !Number.isFinite(cleaned) || cleaned === 0;
+    const parsed = parseIndonesianNumber(artifact.value);
+    return !Number.isFinite(parsed) || parsed === 0;
   }
 
   if (artifact.kind === 'table') {
@@ -665,6 +690,43 @@ function normalizeLayoutTitle(value = '') {
   return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+function normalizePlacementMetricKey(rawPlacement = {}) {
+  return normalizeTemplateId(rawPlacement?.template_id || rawPlacement?.metric || '');
+}
+
+function normalizeLayoutPlan(rawPlan = null) {
+  if (!rawPlan || typeof rawPlan !== 'object') {
+    return null;
+  }
+
+  const placements = Array.isArray(rawPlan.placements)
+    ? rawPlan.placements
+      .map((placement) => {
+        if (!placement || typeof placement !== 'object') {
+          return null;
+        }
+        const kind = safeText(placement.kind, '', 24) || 'chart';
+        return {
+          title: safeText(placement.title || '', '', 120),
+          metric: safeText(placement.metric || '', '', 64),
+          template_id: safeText(placement.template_id || '', '', 64),
+          kind,
+          layout: normalizeDashboardLayout(placement, {
+            page: Number(placement.page || 1),
+            kind,
+          }),
+        };
+      })
+      .filter(Boolean)
+    : [];
+
+  return {
+    strategy: safeText(rawPlan.strategy || 'balanced', 'balanced', 40),
+    pages: Math.max(1, Math.min(Number(rawPlan.pages || 1), 4)),
+    placements,
+  };
+}
+
 function applyComponentLayouts(widgets = [], components = []) {
   const layoutPool = new Map();
   const titlePool = new Map();
@@ -694,6 +756,7 @@ function applyComponentLayouts(widgets = [], components = []) {
       return {
         ...widget,
         layout,
+        _layoutSource: 'component',
       };
     }
 
@@ -708,25 +771,275 @@ function applyComponentLayouts(widgets = [], components = []) {
     return {
       ...widget,
       layout,
+      _layoutSource: 'component',
     };
   });
 }
 
-function buildWidgetsFromArtifacts({ artifacts, calls, components = [] }) {
+function applyWorkerLayoutPlan(widgets = [], layoutPlan = null) {
+  if (!layoutPlan?.placements?.length) {
+    return widgets;
+  }
+
+  const titlePool = new Map();
+  const metricPool = new Map();
+
+  for (const placement of layoutPlan.placements) {
+    if (placement.title) {
+      const titleKey = normalizeLayoutTitle(placement.title);
+      if (titleKey) {
+        const list = titlePool.get(titleKey) || [];
+        list.push(placement.layout);
+        titlePool.set(titleKey, list);
+      }
+    }
+
+    const metricKey = normalizePlacementMetricKey(placement);
+    if (metricKey) {
+      const list = metricPool.get(metricKey) || [];
+      list.push(placement.layout);
+      metricPool.set(metricKey, list);
+    }
+  }
+
+  return widgets.map((widget) => {
+    const titleKey = normalizeLayoutTitle(widget?.title || widget?.artifact?.title);
+    const titleList = titlePool.get(titleKey);
+    if (Array.isArray(titleList) && titleList.length > 0) {
+      const [layout, ...rest] = titleList;
+      titlePool.set(titleKey, rest);
+      return {
+        ...widget,
+        layout,
+        _layoutSource: 'worker',
+      };
+    }
+
+    const metricKey = widgetLayoutKey(widget);
+    const metricList = metricPool.get(metricKey);
+    if (!Array.isArray(metricList) || metricList.length === 0) {
+      return widget;
+    }
+
+    const [layout, ...rest] = metricList;
+    metricPool.set(metricKey, rest);
+    return {
+      ...widget,
+      layout,
+      _layoutSource: 'worker',
+    };
+  });
+}
+
+function widgetCategory(widget = {}) {
+  const kind = String(widget?.artifact?.kind || '').toLowerCase();
+  if (kind === 'metric') {
+    return 'kpi';
+  }
+  if (kind === 'table') {
+    return 'ranking';
+  }
+  return 'trend';
+}
+
+function shouldKeepBalancedMultiPageLayout(widgets = [], layoutPlan = null) {
+  if (!widgets.length) {
+    return false;
+  }
+
+  if (widgets.length > 6) {
+    return true;
+  }
+
+  if (widgets.some((widget) => (
+    (widget._layoutSource === 'component' || widget._layoutSource === 'worker')
+      && Number(widget.layout?.page || 1) > 1
+  ))) {
+    return true;
+  }
+
+  const byPage = new Map();
+  widgets.forEach((widget) => {
+    const page = Number(widget.layout?.page || 1);
+    const list = byPage.get(page) || [];
+    list.push(widget);
+    byPage.set(page, list);
+  });
+
+  if (byPage.size < 2) {
+    return false;
+  }
+
+  const firstPageWidgets = byPage.get(1) || [];
+  const laterPageWidgets = Array.from(byPage.entries())
+    .filter(([page]) => Number(page) > 1)
+    .flatMap(([, items]) => items);
+
+  if (firstPageWidgets.length < 3 || laterPageWidgets.length < 2) {
+    return false;
+  }
+
+  const firstPageCategories = new Set(firstPageWidgets.map(widgetCategory));
+  const laterPageCategories = new Set(laterPageWidgets.map(widgetCategory));
+
+  if (firstPageCategories.has('kpi') && (laterPageCategories.has('trend') || laterPageCategories.has('ranking'))) {
+    return true;
+  }
+
+  return Boolean(layoutPlan && Number(layoutPlan.pages || 1) > 1 && laterPageWidgets.length >= 2);
+}
+
+function nonMetricSlots(startY, count) {
+  if (count <= 1) {
+    return [{ x: 0, y: startY, w: 16, h: 4, page: 1 }];
+  }
+
+  if (count === 2) {
+    return [
+      { x: 0, y: startY, w: 8, h: 4, page: 1 },
+      { x: 8, y: startY, w: 8, h: 4, page: 1 },
+    ];
+  }
+
+  if (count === 3) {
+    return [
+      { x: 0, y: startY, w: 5, h: 3, page: 1 },
+      { x: 5, y: startY, w: 5, h: 3, page: 1 },
+      { x: 10, y: startY, w: 6, h: 3, page: 1 },
+    ];
+  }
+
+  return [
+    { x: 0, y: startY, w: 8, h: 3, page: 1 },
+    { x: 8, y: startY, w: 8, h: 3, page: 1 },
+    { x: 0, y: startY + 3, w: 8, h: 3, page: 1 },
+    { x: 8, y: startY + 3, w: 8, h: 3, page: 1 },
+  ];
+}
+
+function applyBalancedSinglePageFallback(widgets = []) {
+  const metricIndexes = [];
+  const nonMetricIndexes = [];
+
+  widgets.forEach((widget, index) => {
+    if (widgetCategory(widget) === 'kpi') {
+      metricIndexes.push(index);
+      return;
+    }
+    nonMetricIndexes.push(index);
+  });
+
+  const metricSlots = metricIndexes.map((_, index) => ({
+    x: index * 4,
+    y: 0,
+    w: 4,
+    h: 2,
+    page: 1,
+  }));
+  const chartStartY = metricSlots.length > 0 ? 2 : 0;
+  const otherSlots = nonMetricSlots(chartStartY, nonMetricIndexes.length);
+  const nextWidgets = widgets.map((widget) => ({ ...widget }));
+
+  metricIndexes.forEach((widgetIndex, slotIndex) => {
+    nextWidgets[widgetIndex].layout = normalizeDashboardLayout(metricSlots[slotIndex], {
+      kind: nextWidgets[widgetIndex].artifact?.kind || 'metric',
+      page: 1,
+    });
+  });
+
+  nonMetricIndexes.forEach((widgetIndex, slotIndex) => {
+    nextWidgets[widgetIndex].layout = normalizeDashboardLayout(otherSlots[slotIndex], {
+      kind: nextWidgets[widgetIndex].artifact?.kind || 'chart',
+      page: 1,
+    });
+  });
+
+  return nextWidgets;
+}
+
+function finalizeBalancedWidgets(widgets = [], layoutPlan = null) {
+  const strongWidgets = widgets
+    .filter((widget) => !artifactLooksEmpty(widget.artifact))
+    .slice(0, MAX_WIDGETS);
+
+  if (strongWidgets.length === 0) {
+    return {
+      widgets: [],
+      artifacts: [],
+      nonEmptyCount: 0,
+      pageCount: 0,
+    };
+  }
+
+  const allowMultiPage = shouldKeepBalancedMultiPageLayout(strongWidgets, layoutPlan);
+  const seeded = allowMultiPage && strongWidgets.length > 6 && !strongWidgets.some((widget) => Number(widget.layout?.page || 1) > 1)
+    ? strongWidgets.map((widget, index) => {
+      if (widget._layoutSource === 'component') {
+        return widget;
+      }
+      return {
+        ...widget,
+        layout: normalizeDashboardLayout({
+          ...(widget.layout || {}),
+          page: index < 6 ? 1 : 2,
+        }, {
+          page: index < 6 ? 1 : 2,
+          kind: widget.artifact?.kind || 'chart',
+        }),
+      };
+    })
+    : strongWidgets;
+
+  const prepared = seeded.map((widget) => {
+    if (allowMultiPage || widget._layoutSource === 'component' || !widget.layout) {
+      return widget;
+    }
+    return {
+      ...widget,
+      layout: {
+        ...widget.layout,
+        page: 1,
+      },
+    };
+  });
+
+  const compactSinglePagePrepared = !allowMultiPage && !prepared.some((widget) => widget.layout)
+    ? applyBalancedSinglePageFallback(prepared)
+    : prepared;
+
+  const packedWidgets = packDashboardLayout(compactSinglePagePrepared.map((widget) => ({
+    ...widget,
+    kind: widget.artifact?.kind || 'chart',
+  }))).map((widget) => ({
+    ...widget,
+    layout: normalizeDashboardLayout(widget.layout || {}, {
+      page: Number(widget.layout?.page || 1),
+      kind: widget.artifact?.kind || 'chart',
+    }),
+  }));
+
+  return {
+    widgets: packedWidgets.map(({ _layoutSource, ...widget }) => widget),
+    artifacts: packedWidgets.map((widget) => widget.artifact),
+    nonEmptyCount: packedWidgets.length,
+    pageCount: packedWidgets.reduce((max, widget) => Math.max(max, Number(widget.layout?.page || 1)), 1),
+  };
+}
+
+function buildWidgetsFromArtifacts({ artifacts, calls, components = [], layoutPlan = null }) {
   const widgets = [];
-  const flatArtifacts = [];
 
   for (let i = 0; i < calls.length; i += 1) {
     const call = calls[i];
     const callArtifacts = artifacts[i] || [];
     for (const artifact of callArtifacts) {
-      flatArtifacts.push(artifact);
       widgets.push({
         id: generateId(),
         title: artifact.title || `Widget ${widgets.length + 1}`,
         artifact,
         query: call.query || null,
         layout: call?.component?.layout || null,
+        _layoutSource: call?.component?.layout ? 'component' : null,
       });
 
       if (widgets.length >= MAX_WIDGETS) {
@@ -739,21 +1052,8 @@ function buildWidgetsFromArtifacts({ artifacts, calls, components = [] }) {
   }
 
   const seededWidgets = applyComponentLayouts(widgets, components);
-  const packedWidgets = packDashboardLayout(seededWidgets.map((widget) => ({
-    ...widget,
-    kind: widget.artifact?.kind || 'chart',
-  }))).map((widget) => ({
-    ...widget,
-    layout: normalizeDashboardLayout(widget.layout || {}, {
-      page: Number(widget.layout?.page || 1),
-      kind: widget.artifact?.kind || 'chart',
-    }),
-  }));
-
-  return {
-    widgets: packedWidgets,
-    artifacts: flatArtifacts.slice(0, MAX_WIDGETS),
-  };
+  const plannedWidgets = applyWorkerLayoutPlan(seededWidgets, layoutPlan);
+  return finalizeBalancedWidgets(plannedWidgets, layoutPlan);
 }
 
 function normalizeTemplateComponents(dashboard) {
@@ -772,7 +1072,7 @@ function normalizeTemplateComponents(dashboard) {
 
 function isFullDashboardGoal(goal = '', intent = {}) {
   const text = `${goal || ''} ${intent?.intent || ''}`.toLowerCase();
-  return /(lengkap|kompleks|full|penuh|overview|ringkasan|dashboard)/.test(text);
+  return /(lengkap|kompleks|full|penuh|overview|ringkasan)/.test(text);
 }
 
 function mergeWithComplexDefaults(components) {
@@ -1127,7 +1427,6 @@ function runTemplateComponentsDeterministic({ tenantId, userId, components, scop
   }
 
   const built = buildWidgetsFromArtifacts({ artifacts: artifactGroups, calls, components });
-  const nonEmpty = built.artifacts.filter((artifact) => !artifactLooksEmpty(artifact));
 
   return {
     ok: true,
@@ -1135,7 +1434,8 @@ function runTemplateComponentsDeterministic({ tenantId, userId, components, scop
     ...built,
     calls,
     adjustedPeriodCount,
-    nonEmptyCount: nonEmpty.length,
+    nonEmptyCount: built.nonEmptyCount,
+    pageCount: built.pageCount || 0,
     summary: null,
   };
 }
@@ -1147,6 +1447,7 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
   const edaProfile = buildEdaProfile({ components, scope });
   let adjustedPeriodCount = 0;
   let finalSummary = null;
+  let finalLayoutPlan = null;
   let producedWidgets = 0;
   let noToolCallStreak = 0;
 
@@ -1175,6 +1476,8 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
         'Wajib menggunakan function call tools untuk mengambil data.',
         'Sebelum query, cocokkan dataset dengan mini-EDA: pilih measure numerik valid dan kolom tanggal untuk agregasi tren.',
         'Untuk line/bar/pie/table, jangan gunakan group_by=none; prioritaskan day/date bila relevan.',
+        'Gunakan kebijakan balanced dashboard: utamakan 1 halaman, gunakan halaman 2 hanya jika ada >6 widget kuat atau pemisahan KPI vs tren/ranking memang membuat dashboard lebih mudah dibaca.',
+        'Saat finalize_dashboard, sertakan layout_plan bila perlu. Layout_plan boleh menentukan page/x/y/w/h per widget, tetapi hanya untuk widget yang benar-benar kuat dan berguna.',
         'Panggil finalize_dashboard saat cukup data terkumpul.',
         'Utamakan komponen relevan dan hindari widget kosong.',
       ].join(' '),
@@ -1246,9 +1549,11 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
 
     if (call.name === 'finalize_dashboard') {
       finalSummary = safeText(call.args?.summary || response.text || '', 'Dashboard selesai dibuat.', 260);
+      finalLayoutPlan = normalizeLayoutPlan(call.args?.layout_plan);
       pushTrace(trace, {
         step: 'tool:finalize_dashboard',
         iteration: stepIndex + 1,
+        pages: finalLayoutPlan?.pages || 1,
       });
       emitTimelineEvent(hooks, {
         id: `worker_finalize_${Date.now()}`,
@@ -1376,15 +1681,15 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
     artifacts: artifactGroups,
     calls: callRecords,
     components,
+    layoutPlan: finalLayoutPlan,
   });
-
-  const nonEmpty = built.artifacts.filter((artifact) => !artifactLooksEmpty(artifact));
 
   memory.steps.push({
     agent: 'worker',
     source: 'gemini_tool_call',
     tools_executed: callRecords.length,
     produced_widgets: built.widgets.length,
+    pages: built.pageCount || 0,
   });
 
   return {
@@ -1395,7 +1700,9 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
     artifacts: built.artifacts,
     calls: callRecords,
     adjustedPeriodCount,
-    nonEmptyCount: nonEmpty.length,
+    nonEmptyCount: built.nonEmptyCount,
+    pageCount: built.pageCount || 0,
+    layoutPlan: finalLayoutPlan,
     summary: finalSummary,
   };
 }
@@ -1405,14 +1712,14 @@ function summarizeRun({ primary, fallbackUsed, scope }) {
   const nonEmpty = primary.nonEmptyCount;
 
   if (fallbackUsed) {
-    return `Saya pindahkan hasil ke Canvas Mode dan menyusun dashboard otomatis dari template. Rentang waktu disesuaikan ke data agar widget tidak kosong (${nonEmpty}/${total} komponen berisi data).`;
+    return `Saya pindahkan hasil ke Canvas Mode dan menyusun dashboard otomatis dari template. Rentang waktu disesuaikan ke data agar widget tidak kosong (${nonEmpty}/${total} komponen berisi data, ${Math.max(1, Number(primary.pageCount || 1))} halaman).`;
   }
 
   if (nonEmpty === 0) {
     return 'Saya pindahkan ke Canvas Mode, namun data untuk rentang waktu ini belum terisi. Coba ubah periode atau upload dataset lain.';
   }
 
-  return `Saya pindahkan ke Canvas Mode dan membuat dashboard dari template aktif (${nonEmpty}/${total} komponen berisi data, periode ${scope.time_period}).`;
+  return `Saya pindahkan ke Canvas Mode dan membuat dashboard dari template aktif (${nonEmpty}/${total} komponen berisi data, periode ${scope.time_period}, ${Math.max(1, Number(primary.pageCount || 1))} halaman).`;
 }
 
 async function reviewArtifactsWithPython(artifacts) {
@@ -1718,17 +2025,8 @@ export async function runDashboardAgent({
     });
   }
 
-  const reviewer = await runReviewerAgent({
-    goal,
-    scope,
-    artifacts: worker.artifacts,
-    trace,
-    memory,
-    hooks,
-  });
-
-  // If reviewer or worker shows low completeness, try to augment missing widgets deterministically
-  if ((worker.nonEmptyCount || 0) < 3) {
+  // Only broaden sparse output when the user asked for a fuller dashboard, not for focused custom layouts.
+  if ((worker.nonEmptyCount || 0) < 3 && isFullDashboardGoal(goal, intent) && components.length >= 3) {
     const augment = runTemplateComponentsDeterministic({
       tenantId,
       userId,
@@ -1748,20 +2046,82 @@ export async function runDashboardAgent({
     }
 
     const uniqueArtifacts = dedupeArtifacts(mergedArtifacts).slice(0, MAX_WIDGETS);
-    const mergedWidgets = buildWidgetsFromArtifacts({
+    const rebuilt = buildWidgetsFromArtifacts({
       artifacts: uniqueArtifacts.map((art) => [art]),
       calls: augment.calls.length ? augment.calls : worker.calls,
       components,
-    }).widgets.slice(0, MAX_WIDGETS);
+      layoutPlan: worker.layoutPlan,
+    });
 
     worker = {
       ...worker,
-      artifacts: uniqueArtifacts,
-      widgets: mergedWidgets,
-      nonEmptyCount: uniqueArtifacts.filter((artifact) => !artifactLooksEmpty(artifact)).length,
+      artifacts: rebuilt.artifacts,
+      widgets: rebuilt.widgets.slice(0, MAX_WIDGETS),
+      nonEmptyCount: rebuilt.nonEmptyCount,
+      pageCount: rebuilt.pageCount || worker.pageCount || 0,
       source: worker.source || 'augment',
     };
   }
+
+  if (!worker.widgets.length || !worker.artifacts.length || worker.nonEmptyCount === 0) {
+    const failureReason = worker.reason || 'dashboard_generation_empty';
+    pushTrace(trace, {
+      step: 'dashboard_empty',
+      reason: failureReason,
+    });
+    memory.steps.push({
+      agent: 'worker',
+      source: worker.source || 'unknown',
+      result: 'empty_dashboard_blocked',
+      reason: failureReason,
+    });
+
+    return {
+      answer: 'Saya belum bisa membuat dashboard yang valid dari data ini. Semua visual yang dihasilkan kosong atau tidak cukup kuat untuk ditampilkan. Coba ubah periode, tambahkan dataset yang lebih lengkap, atau minta insight chat biasa dulu.',
+      widgets: [],
+      artifacts: [],
+      dashboard,
+      presentation_mode: 'chat',
+      agent: {
+        mode: 'multi_agent_runtime',
+        trace,
+        memory,
+        fallback_used: fallbackUsed,
+        period_adjusted_steps: worker.adjustedPeriodCount,
+        tool_calls: worker.calls.length,
+        planner: {
+          ok: planner.ok,
+          reason: planner.reason || null,
+          source: planner.source,
+          steps: planner.steps,
+        },
+        worker: {
+          ok: false,
+          reason: failureReason,
+          source: worker.source,
+          pages: worker.pageCount || 0,
+        },
+        reviewer: null,
+        reviewer_meta: {
+          ok: false,
+          source: 'skipped_empty_dashboard',
+        },
+        python_tool: {
+          ok: false,
+          reason: 'skipped_empty_dashboard',
+        },
+      },
+    };
+  }
+
+  const reviewer = await runReviewerAgent({
+    goal,
+    scope,
+    artifacts: worker.artifacts,
+    trace,
+    memory,
+    hooks,
+  });
 
   const baseAnswer = worker.summary || summarizeRun({
     primary: worker,
@@ -1796,6 +2156,7 @@ export async function runDashboardAgent({
         ok: worker.ok,
         reason: worker.reason || null,
         source: worker.source,
+        pages: worker.pageCount || 0,
       },
       reviewer: reviewer.result || null,
       reviewer_meta: {

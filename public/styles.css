@@ -232,12 +232,8 @@ label {
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
-}
-
-.app-shell.workspace-active .status-bar {
-  padding: 0.5rem 1rem 0.75rem;
-  background: var(--surface);
-  border-top: 1px solid var(--line);
+  position: relative;
+  z-index: 32;
 }
 
 .page-view {
@@ -263,6 +259,18 @@ label {
   gap: 1rem;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .brand-home {
   display: inline-flex;
   align-items: center;
@@ -272,6 +280,7 @@ label {
   background: transparent;
   box-shadow: none;
   color: var(--ink);
+  text-decoration: none;
 }
 
 .brand-home:hover {
@@ -325,12 +334,12 @@ label {
 }
 
 .landing-welcome {
-  min-height: max(calc(100svh - 6.5rem), 44rem);
+  min-height: calc(100svh - var(--app-header-height, 0px) - 1.25rem);
   display: grid;
   place-items: center;
   text-align: center;
   gap: 1rem;
-  padding: clamp(3rem, 8vh, 6rem) 1rem 4.75rem;
+  padding: clamp(2rem, 6vh, 4.5rem) 1rem 3.75rem;
   position: relative;
   overflow: hidden;
 }
@@ -398,6 +407,30 @@ label {
   font-size: 1.05rem;
   line-height: 1;
   animation: landingArrowBounce 1.35s ease-in-out infinite;
+}
+
+@media (max-height: 760px) {
+  .landing-welcome {
+    min-height: calc(100svh - var(--app-header-height, 0px) - 0.75rem);
+    padding: 1.5rem 1rem 3rem;
+  }
+
+  .landing-welcome-title {
+    font-size: clamp(1.9rem, 8vw, 3.1rem);
+  }
+
+  .landing-welcome-copy {
+    margin-top: 0.75rem;
+    font-size: 0.93rem;
+  }
+
+  .landing-welcome-actions {
+    margin-top: 0.95rem;
+  }
+
+  .landing-scroll-cue {
+    bottom: 1.7rem;
+  }
 }
 
 @keyframes landingArrowBounce {
@@ -889,6 +922,11 @@ label {
   height: 100%;
 }
 
+.utility-context-trigger {
+  position: fixed;
+  inset: auto auto -999px -999px;
+}
+
 .session-rail {
   border-right: 1px solid var(--line);
   background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, transparent), color-mix(in srgb, var(--bg-warm) 78%, transparent));
@@ -897,7 +935,47 @@ label {
   grid-template-rows: auto minmax(0, 1fr);
   gap: 0.8rem;
   min-width: 0;
-  transition: width var(--transition), padding var(--transition);
+  overflow: hidden;
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+  transition:
+    width var(--transition),
+    padding var(--transition),
+    transform var(--transition),
+    opacity var(--transition),
+    border-color var(--transition),
+    visibility var(--transition);
+  visibility: visible;
+}
+
+.session-rail-handle {
+  position: absolute;
+  left: 1rem;
+  top: 1rem;
+  z-index: 18;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-10px);
+  transition: opacity var(--transition), transform var(--transition);
+}
+
+.session-rail-handle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.session-rail-handle svg path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .session-rail-head {
@@ -905,6 +983,17 @@ label {
   justify-content: space-between;
   gap: 0.75rem;
   align-items: center;
+}
+
+.session-rail-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.session-rail-title {
+  font-size: 0.94rem;
+  font-weight: 700;
 }
 
 .session-rail-head h2,
@@ -964,19 +1053,38 @@ label {
 }
 
 .session-rail.collapsed {
-  width: 72px;
-  padding-inline: 0.45rem;
+  width: 0;
+  min-width: 0;
+  padding-inline: 0;
+  border-color: transparent;
+  opacity: 0;
+  transform: translateX(-22px);
+  pointer-events: none;
+  visibility: hidden;
+  filter: blur(2px);
+}
+
+.session-rail[aria-hidden='true'] {
+  visibility: hidden;
 }
 
 .session-rail.collapsed .session-list,
-.session-rail.collapsed #sessionRailToggleLabel {
-  display: none;
+.session-rail.collapsed #sessionRailToggleLabel,
+.session-rail.collapsed .session-rail-new {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .session-rail.collapsed .session-rail-head {
   display: grid;
   justify-items: center;
   justify-content: center;
+}
+
+.workspace-shell.session-rail-collapsed .session-rail-handle {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
 }
 
 .session-list {
@@ -1131,6 +1239,7 @@ label {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto auto auto;
   position: relative;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, transparent), transparent 12%);
 }
 
 .data-gate {
@@ -1176,7 +1285,7 @@ label {
   flex-direction: column;
   gap: 0.9rem;
   align-items: center;
-  background: var(--bg);
+  background: radial-gradient(circle at top, color-mix(in srgb, var(--accent-light) 46%, transparent), transparent 46%), transparent;
 }
 
 .msg {
@@ -1391,7 +1500,16 @@ label {
   gap: 0.5rem;
   flex-wrap: wrap;
   align-items: flex-start;
-  padding: 0 1rem 0.7rem;
+  position: relative;
+  z-index: 2;
+  padding: 0.2rem 1rem 0.7rem;
+}
+
+.chat-compose-region {
+  display: grid;
+  gap: 0;
+  padding: 0 0.2rem 0.2rem;
+  background: transparent;
 }
 
 .quick-prompts.hidden {
@@ -1405,11 +1523,11 @@ label {
 }
 
 .composer {
-  border-top: 1px solid var(--line);
-  padding: 0.7rem 0.9rem;
+  padding: 0.8rem 0.9rem 1rem;
   display: grid;
   gap: 0.52rem;
-  background: var(--surface);
+  background: transparent;
+  border-top: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
 }
 
 .attach-btn {
@@ -1610,7 +1728,8 @@ label {
 /* --- New Workspace Layout (Chat + Slide-out Canvas) --- */
 .workspace-shell {
   display: grid;
-  grid-template-columns: minmax(240px, 292px) minmax(0, 1fr) 0 0;
+  position: relative;
+  grid-template-columns: minmax(248px, 292px) minmax(0, 1fr) 0 0;
   min-height: 0;
   height: 100%;
   transition: grid-template-columns var(--transition), cursor var(--transition);
@@ -1618,12 +1737,12 @@ label {
 }
 
 .workspace-shell.session-rail-collapsed {
-  grid-template-columns: 72px minmax(0, 1fr) 0 0;
+  grid-template-columns: 0 minmax(0, 1fr) 0 0;
 }
 
 .workspace-page.canvas-open .workspace-shell {
   grid-template-columns:
-    minmax(220px, 280px)
+    minmax(248px, 292px)
     minmax(300px, calc(100% - var(--canvas-pane-width-px) - 220px))
     10px
     minmax(360px, var(--canvas-pane-width-px));
@@ -1631,8 +1750,8 @@ label {
 
 .workspace-page.canvas-open .workspace-shell.session-rail-collapsed {
   grid-template-columns:
-    72px
-    minmax(300px, calc(100% - var(--canvas-pane-width-px) - 72px))
+    0
+    minmax(300px, calc(100% - var(--canvas-pane-width-px)))
     10px
     minmax(360px, var(--canvas-pane-width-px));
 }
@@ -1681,8 +1800,7 @@ label {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   position: relative;
-  border-right: 1px solid var(--line);
-  background: var(--surface);
+  background: transparent;
   box-shadow: none;
   overflow: hidden;
 }
@@ -1690,20 +1808,25 @@ label {
 .chat-pane-head {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 0.8rem;
   min-height: 56px;
   padding: 0.55rem 0.85rem;
   border-bottom: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  background: transparent;
 }
 
-.chat-pane-head[hidden] {
-  display: none;
+.chat-head-copy {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 
-.chat-pane-head.hidden {
-  display: none;
+.chat-head-copy h2 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-head-actions {
@@ -1848,9 +1971,8 @@ label {
   padding: 0.75rem 0.9rem;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
-  position: sticky;
-  top: 0;
-  z-index: 22;
+  position: relative;
+  z-index: 2;
 }
 
 .canvas-bar-copy h2 {
@@ -1985,7 +2107,8 @@ label {
 
 .thread-empty {
   width: min(100%, 640px);
-  margin: auto;
+  margin: auto auto 0;
+  padding: 0 1rem 0.35rem;
   display: grid;
   gap: 0.3rem;
   text-align: center;
@@ -2220,7 +2343,9 @@ label {
 }
 
 .quick-prompts {
-  padding: 0 1rem 0.85rem;
+  position: relative;
+  z-index: 2;
+  padding: 0.2rem 1rem 0.85rem;
 }
 
 .quick-prompts .pill {
@@ -2245,14 +2370,15 @@ label {
 }
 
 .chat-thread {
-  background: radial-gradient(circle at top, color-mix(in srgb, var(--accent-light) 46%, transparent), transparent 46%), var(--bg);
+  background: transparent;
 }
 
 .prechat-ticker {
   position: absolute;
   left: 50%;
-  top: 46%;
-  transform: translate(-50%, -50%);
+  top: auto;
+  bottom: 8.8rem;
+  transform: translateX(-50%);
   width: min(680px, calc(100% - 2rem));
   padding: 0;
   border: none;
@@ -2282,9 +2408,16 @@ label {
 }
 
 .status-bar {
-  display: flex;
-  gap: 0.55rem;
-  flex-wrap: wrap;
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .verdict-badge,
@@ -2327,24 +2460,53 @@ label {
 .settings-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(18, 24, 36, 0.44);
+  background: rgba(18, 24, 36, 0.38);
+  backdrop-filter: blur(10px);
   z-index: 70;
+  animation: settings-backdrop-fade 180ms ease;
+}
+
+@keyframes settings-backdrop-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 .settings-panel {
   position: fixed;
-  top: 0;
-  right: 0;
-  width: min(440px, 100vw);
-  height: 100dvh;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  width: min(760px, calc(100vw - 2rem));
+  max-height: min(86dvh, 760px);
+  height: auto;
   background: var(--surface);
-  border-left: 1px solid var(--line);
+  border: 1px solid var(--line);
+  border-radius: 24px;
   box-shadow: var(--shadow-lg);
   z-index: 71;
-  padding: 1rem;
+  padding: 1.1rem;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 0.85rem;
+  gap: 1rem;
+  transform: translate(-50%, -50%);
+  animation: settings-pop 220ms ease;
+}
+
+@keyframes settings-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -47%) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
 }
 
 .settings-head {
@@ -2366,20 +2528,60 @@ label {
 
 .settings-form {
   min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0.9rem;
+}
+
+.settings-group-switcher {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-warm) 72%, var(--surface));
+  border: 1px solid var(--line);
+  align-self: start;
+}
+
+.settings-group-tab {
+  min-height: 42px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ink-secondary);
+  box-shadow: none;
+}
+
+.settings-group-tab.is-active,
+.settings-group-tab[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--line));
+  box-shadow: var(--shadow-sm);
+}
+
+.settings-group-body {
+  min-height: 0;
   overflow: auto;
   display: grid;
+  gap: 0.85rem;
+  padding-right: 0.15rem;
+}
+
+.settings-group-panel {
+  display: grid;
   align-content: start;
-  gap: 0.72rem;
-  padding-right: 0.2rem;
+  gap: 0.85rem;
 }
 
 .settings-section {
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 0.75rem;
+  padding: 0.9rem;
   display: grid;
   gap: 0.65rem;
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--surface-hover) 78%, var(--surface));
 }
 
 .settings-section h4 {
@@ -2398,7 +2600,7 @@ label {
   display: flex;
   justify-content: space-between;
   gap: 0.5rem;
-  padding-top: 0.3rem;
+  padding-top: 0.2rem;
   position: sticky;
   bottom: 0;
   background: linear-gradient(180deg, transparent, var(--surface) 38%);
@@ -2437,28 +2639,20 @@ label {
   }
 
   .session-rail {
-    display: grid;
-    border-right: none;
-    border-bottom: 1px solid var(--line);
-    padding: 0.8rem 0.75rem;
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .session-rail-copy {
-    display: none;
+    position: absolute;
+    left: 0.75rem;
+    top: 0.75rem;
+    bottom: 0.75rem;
+    width: min(320px, calc(100vw - 1.5rem));
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 0.9rem 0.8rem;
+    box-shadow: var(--shadow-lg);
+    z-index: 28;
   }
 
   .session-list {
-    display: flex;
-    gap: 0.5rem;
-    overflow: auto;
-    padding-right: 0;
-  }
-
-  .session-card {
-    min-width: 220px;
-    max-width: 220px;
-    flex: 0 0 auto;
+    padding-right: 0.1rem;
   }
 
   .canvas-shell {
@@ -2472,7 +2666,7 @@ label {
 
   .canvas-pane {
     position: fixed;
-    inset: 0;
+    inset: var(--app-header-height, 0px) 0 0 0;
     z-index: 30;
     background: var(--bg-warm);
     display: none;
@@ -2554,6 +2748,11 @@ label {
   .workspace-page.canvas-open .workspace-shell.session-rail-collapsed {
     grid-template-columns: 1fr;
     grid-template-rows: minmax(0, 1fr);
+  }
+
+  .session-rail-handle {
+    left: 0.75rem;
+    top: 0.75rem;
   }
 
   .landing-page {
@@ -2729,28 +2928,10 @@ label {
   }
 
   .session-rail {
-    display: grid;
-    border-right: none;
-    border-bottom: 1px solid var(--line);
-    padding: 0.8rem 0.75rem;
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  .session-rail-copy {
-    display: none;
-  }
-
-  .session-list {
-    display: flex;
-    gap: 0.5rem;
-    overflow: auto;
-    padding-right: 0;
-  }
-
-  .session-card {
-    min-width: 220px;
-    max-width: 220px;
-    flex: 0 0 auto;
+    left: 0.6rem;
+    top: 0.6rem;
+    bottom: 0.6rem;
+    width: min(320px, calc(100vw - 1.2rem));
   }
 
   .chat-thread {
@@ -2759,11 +2940,10 @@ label {
 
   .chat-pane-head {
     padding: 0.85rem 0.75rem 0.75rem;
-    flex-direction: column;
-    align-items: stretch;
+    align-items: center;
   }
 
-  .chat-title-block h2 {
+  .chat-head-copy h2 {
     white-space: normal;
   }
 
@@ -2785,7 +2965,8 @@ label {
 
   .prechat-ticker {
     width: calc(100% - 1.2rem);
-    top: 40%;
+    top: auto;
+    bottom: 8.4rem;
     padding: 0;
     font-size: 0.9rem;
   }
@@ -2794,6 +2975,10 @@ label {
     padding: 0 0.75rem 0.75rem;
     display: grid;
     grid-template-columns: 1fr;
+  }
+
+  .chat-compose-region {
+    padding: 0;
   }
 
   .quick-prompts .pill {
@@ -2867,7 +3052,9 @@ label {
   }
 
   .settings-panel {
-    width: 100vw;
+    width: calc(100vw - 1rem);
+    max-height: calc(100dvh - 1rem);
+    padding: 1rem;
   }
 }
 

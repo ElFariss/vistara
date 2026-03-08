@@ -799,7 +799,7 @@ export async function processChatMessage({
           widgets: complex.widgets,
           artifacts: complex.artifacts,
           intent,
-          presentation_mode: 'canvas',
+          presentation_mode: complex.presentation_mode || 'canvas',
         };
       } catch (error) {
         if (stream && typeof stream.onTimelineStep === 'function') {

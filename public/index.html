@@ -22,10 +22,10 @@
 
   <div class="app-shell">
     <header class="app-header">
-      <button id="brandHomeLink" class="brand-home" type="button" aria-label="Kembali ke landing page">
+      <a id="brandHomeLink" class="brand-home" href="/" aria-label="Kembali ke landing page">
         <span class="brand-home-mark" aria-hidden="true"></span>
         <span class="brand-home-text">Vistara</span>
-      </button>
+      </a>
       <div class="header-actions">
         <button id="headerSettingsBtn" class="ghost icon-nav-btn" type="button" hidden aria-label="Pengaturan" title="Pengaturan">
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -34,7 +34,6 @@
         </button>
         <button id="headerCtaBtn" class="cta-nav" type="button">Mulai Gratis</button>
         <button id="headerLoginBtn" class="ghost">Masuk</button>
-        <button id="editProfileBtn" class="ghost" hidden>Business Context</button>
         <button id="logoutBtn" class="ghost" hidden>Logout</button>
       </div>
     </header>
@@ -299,10 +298,14 @@
     </section>
 
     <main id="workspacePage" class="page-view workspace-page hidden">
-      <div class="workspace-shell">
-        <aside id="sessionRail" class="workspace-pane session-rail" aria-label="Riwayat percakapan">
+      <div class="workspace-shell session-rail-collapsed">
+        <button id="sessionRailPeekBtn" type="button" class="ghost session-rail-handle" aria-controls="sessionRail" aria-expanded="false" title="Buka riwayat">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>
+          <span class="sr-only">Buka riwayat</span>
+        </button>
+        <aside id="sessionRail" class="workspace-pane session-rail collapsed" aria-label="Riwayat percakapan" aria-hidden="true" inert>
           <div class="session-rail-head">
-            <button id="sessionRailToggleBtn" type="button" class="ghost session-rail-toggle" aria-controls="sessionRail" aria-expanded="true" title="Ciutkan riwayat">
+            <button id="sessionRailToggleBtn" type="button" class="ghost session-rail-toggle" aria-controls="sessionRail" aria-expanded="false" title="Toggle riwayat">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>
               <span id="sessionRailToggleLabel">Riwayat</span>
             </button>
@@ -314,9 +317,10 @@
         </aside>
 
         <section id="chatPane" class="workspace-pane chat-pane">
-          <div id="chatPaneHead" class="chat-pane-head" hidden>
-            <h2 id="chatTitle" class="sr-only">Percakapan baru</h2>
-            <p id="chatSubtitle" class="sr-only" hidden></p>
+          <div id="chatPaneHead" class="chat-pane-head">
+            <div class="chat-head-copy">
+              <h2 id="chatTitle">Percakapan baru</h2>
+            </div>
             <div class="chat-head-actions">
               <button id="openCanvasBtn" type="button" class="ghost icon-nav-btn" hidden aria-label="Buka dashboard" title="Buka dashboard">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v5h-7zM13 11h7v9h-7zM4 13h7v7H4z"></path></svg>
@@ -346,23 +350,25 @@
             <span class="typing-dot"></span>
           </div>
 
-          <div id="quickPrompts" class="quick-prompts">
-            <button type="button" class="pill" data-prompt="Ringkas performa bisnis saya minggu ini">Ringkas minggu ini</button>
-            <button type="button" class="pill" data-prompt="Apa 3 insight terpenting dari data ini?">3 insight penting</button>
-            <button type="button" class="pill" data-prompt="Buat dashboard performa bulan ini">Buat dashboard</button>
-          </div>
-
-          <form id="chatForm" class="composer">
-            <label class="attach-btn">
-              <input id="chatFile" type="file" />
-              Tambah Dataset
-            </label>
-            <textarea id="chatInput" rows="1" placeholder='Contoh: "Omzet 7 hari terakhir" atau "Kenapa profit turun?"'></textarea>
-            <div class="composer-actions">
-              <span id="fileLabel" class="file-label">Tidak ada file</span>
-              <button id="sendBtn" type="submit">Kirim</button>
+          <div class="chat-compose-region">
+            <div id="quickPrompts" class="quick-prompts">
+              <button type="button" class="pill" data-prompt="Ringkas performa bisnis saya minggu ini">Ringkas minggu ini</button>
+              <button type="button" class="pill" data-prompt="Apa 3 insight terpenting dari data ini?">3 insight penting</button>
+              <button type="button" class="pill" data-prompt="Buat dashboard performa bulan ini">Buat dashboard</button>
             </div>
-          </form>
+
+            <form id="chatForm" class="composer">
+              <label class="attach-btn">
+                <input id="chatFile" type="file" />
+                Tambah Dataset
+              </label>
+              <textarea id="chatInput" rows="1" placeholder='Contoh: "Omzet 7 hari terakhir" atau "Kenapa profit turun?"'></textarea>
+              <div class="composer-actions">
+                <span id="fileLabel" class="file-label">Tidak ada file</span>
+                <button id="sendBtn" type="submit">Kirim</button>
+              </div>
+            </form>
+          </div>
         </section>
 
         <div id="panelDivider" class="panel-divider" role="separator" aria-orientation="vertical" aria-label="Ubah ukuran panel" tabindex="0"></div>
@@ -458,92 +464,105 @@
         </section>
       </div>
     </main>
-
-    <footer id="statusBar" class="status-bar hidden">
-      <div id="verdictBadge" class="verdict-badge">Verdict: belum tersedia</div>
-      <div id="sourceStats" class="source-stats">Data: 0 source</div>
-    </footer>
   </div>
 
   <aside id="toast" class="toast hidden"></aside>
+  <button id="editProfileBtn" class="hidden utility-context-trigger" type="button" aria-hidden="true" tabindex="-1">Business Context</button>
 
   <div id="settingsBackdrop" class="settings-backdrop hidden" aria-hidden="true"></div>
-  <aside id="settingsPanel" class="settings-panel hidden" aria-label="Panel Pengaturan">
+  <aside id="settingsPanel" class="settings-panel hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" aria-describedby="settingsDescription" aria-label="Panel Pengaturan">
     <div class="settings-head">
       <div>
-        <h3>Pengaturan</h3>
-        <p>Personalisasi tampilan dan karakter asisten.</p>
+        <h3 id="settingsTitle">Pengaturan</h3>
+        <p id="settingsDescription">Atur preferensi pribadi dan perilaku agent dari satu tempat.</p>
       </div>
       <button id="settingsCloseBtn" type="button" class="ghost" aria-label="Tutup Pengaturan">Tutup</button>
     </div>
 
     <form id="settingsForm" class="settings-form">
-      <label>Tema Tampilan
-        <select name="theme_mode" id="settingsThemeMode">
-          <option value="light">Terang</option>
-          <option value="dark">Gelap</option>
-          <option value="system">Ikuti Sistem</option>
-        </select>
-      </label>
+      <div id="settingsGroupTabs" class="settings-group-switcher" role="tablist" aria-label="Grup pengaturan">
+        <button id="settingsGroupUserBtn" type="button" class="settings-group-tab is-active" data-settings-group="user" role="tab" aria-selected="true" aria-pressed="true" aria-controls="settingsUserGroup">User</button>
+        <button id="settingsGroupAgentBtn" type="button" class="settings-group-tab" data-settings-group="agent" role="tab" aria-selected="false" aria-pressed="false" aria-controls="settingsAgentGroup">Agent</button>
+      </div>
 
-      <label>Warna Aksen
-        <select name="accent_color" id="settingsAccentColor">
-          <option value="orange">Oranye Vistara</option>
-          <option value="blue">Biru Profesional</option>
-          <option value="green">Hijau Pertumbuhan</option>
-          <option value="rose">Merah Muda Modern</option>
-        </select>
-      </label>
+      <div class="settings-group-body">
+        <section id="settingsUserGroup" class="settings-group-panel" data-settings-panel="user" role="tabpanel" aria-labelledby="settingsGroupUserBtn">
+          <div class="settings-section">
+            <h4>Tampilan & Identitas</h4>
+            <label>Tema Tampilan
+              <select name="theme_mode" id="settingsThemeMode">
+                <option value="light">Terang</option>
+                <option value="dark">Gelap</option>
+                <option value="system">Ikuti Sistem</option>
+              </select>
+            </label>
 
-      <label>Nama Panggilan
-        <input name="nickname" id="settingsNickname" maxlength="40" placeholder="Contoh: Kak Andi" />
-      </label>
+            <label>Warna Aksen
+              <select name="accent_color" id="settingsAccentColor">
+                <option value="orange">Oranye Vistara</option>
+                <option value="blue">Biru Profesional</option>
+                <option value="green">Hijau Pertumbuhan</option>
+                <option value="rose">Merah Muda Modern</option>
+              </select>
+            </label>
 
-      <label>Gaya Respons
-        <select name="response_style" id="settingsResponseStyle">
-          <option value="ringkas">Ringkas</option>
-          <option value="detail">Detail</option>
-          <option value="formal">Formal</option>
-          <option value="santai">Santai</option>
-        </select>
-      </label>
+            <label>Nama Panggilan
+              <input name="nickname" id="settingsNickname" maxlength="40" placeholder="Contoh: Kak Andi" />
+            </label>
+          </div>
 
-      <label>Karakter Asisten
-        <select name="assistant_character" id="settingsAssistantCharacter">
-          <option value="proaktif">Proaktif</option>
-          <option value="teliti">Teliti</option>
-          <option value="tegas">Tegas</option>
-          <option value="suportif">Suportif</option>
-        </select>
-      </label>
+          <div class="settings-section">
+            <h4>Business Context</h4>
+            <label>Nama Bisnis
+              <input name="business_name" id="settingsBusinessName" maxlength="120" placeholder="Contoh: Vistara Mart" />
+            </label>
+            <label>Industri
+              <input name="business_industry" id="settingsBusinessIndustry" maxlength="80" placeholder="Contoh: Retail" />
+            </label>
+            <label>Kota
+              <input name="business_city" id="settingsBusinessCity" maxlength="80" placeholder="Contoh: Jakarta" />
+            </label>
+            <div class="settings-inline-grid">
+              <label>Timezone
+                <input name="business_timezone" id="settingsBusinessTimezone" maxlength="60" placeholder="Asia/Jakarta" />
+              </label>
+              <label>Mata Uang
+                <input name="business_currency" id="settingsBusinessCurrency" maxlength="12" placeholder="IDR" />
+              </label>
+            </div>
+            <label>Waktu Verdict
+              <input name="business_verdict_time" id="settingsBusinessVerdictTime" maxlength="8" placeholder="07:00" />
+            </label>
+          </div>
+        </section>
 
-      <label>Fokus Personalisasi
-        <textarea name="personalization_focus" id="settingsPersonalizationFocus" rows="3"
-          placeholder="Contoh: fokus pada arus kas, margin, dan rekomendasi aksi mingguan."></textarea>
-      </label>
+        <section id="settingsAgentGroup" class="settings-group-panel hidden" data-settings-panel="agent" role="tabpanel" aria-labelledby="settingsGroupAgentBtn">
+          <div class="settings-section">
+            <h4>Gaya Jawaban</h4>
+            <label>Gaya Respons
+              <select name="response_style" id="settingsResponseStyle">
+                <option value="ringkas">Ringkas</option>
+                <option value="detail">Detail</option>
+                <option value="formal">Formal</option>
+                <option value="santai">Santai</option>
+              </select>
+            </label>
 
-      <div class="settings-section">
-        <h4>Business Context</h4>
-        <label>Nama Bisnis
-          <input name="business_name" id="settingsBusinessName" maxlength="120" placeholder="Contoh: Vistara Mart" />
-        </label>
-        <label>Industri
-          <input name="business_industry" id="settingsBusinessIndustry" maxlength="80" placeholder="Contoh: Retail" />
-        </label>
-        <label>Kota
-          <input name="business_city" id="settingsBusinessCity" maxlength="80" placeholder="Contoh: Jakarta" />
-        </label>
-        <div class="settings-inline-grid">
-          <label>Timezone
-            <input name="business_timezone" id="settingsBusinessTimezone" maxlength="60" placeholder="Asia/Jakarta" />
-          </label>
-          <label>Mata Uang
-            <input name="business_currency" id="settingsBusinessCurrency" maxlength="12" placeholder="IDR" />
-          </label>
-        </div>
-        <label>Waktu Verdict
-          <input name="business_verdict_time" id="settingsBusinessVerdictTime" maxlength="8" placeholder="07:00" />
-        </label>
+            <label>Karakter Asisten
+              <select name="assistant_character" id="settingsAssistantCharacter">
+                <option value="proaktif">Proaktif</option>
+                <option value="teliti">Teliti</option>
+                <option value="tegas">Tegas</option>
+                <option value="suportif">Suportif</option>
+              </select>
+            </label>
+
+            <label>Fokus Personalisasi
+              <textarea name="personalization_focus" id="settingsPersonalizationFocus" rows="4"
+                placeholder="Contoh: fokus pada arus kas, margin, dan rekomendasi aksi mingguan."></textarea>
+            </label>
+          </div>
+        </section>
       </div>
 
       <div class="settings-actions">
