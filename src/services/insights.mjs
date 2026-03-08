@@ -3,6 +3,8 @@ import { lastNDays } from '../utils/time.mjs';
 import { toRupiah } from '../utils/text.mjs';
 import { logAudit } from './audit.mjs';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 function mean(values) {
   if (!values.length) {
     return 0;
@@ -19,9 +21,101 @@ function stdDev(values) {
   return Math.sqrt(variance);
 }
 
+function toDateOrNull(value) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function addDays(date, days) {
+  const value = new Date(date);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value;
+}
+
+function startOfUtcDay(date) {
+  const value = new Date(date);
+  value.setUTCHours(0, 0, 0, 0);
+  return value;
+}
+
+function endOfUtcDay(date) {
+  const value = new Date(date);
+  value.setUTCHours(23, 59, 59, 999);
+  return value;
+}
+
+function latestTransactionDate(tenantId) {
+  const row = get(
+    `
+      SELECT MAX(transaction_date) AS latest
+      FROM transactions
+      WHERE tenant_id = :tenant_id
+    `,
+    { tenant_id: tenantId },
+  );
+
+  return toDateOrNull(row?.latest);
+}
+
+function transactionCoverage(tenantId) {
+  const row = get(
+    `
+      SELECT MIN(transaction_date) AS start_date,
+             MAX(transaction_date) AS end_date,
+             COUNT(*) AS count_rows
+      FROM transactions
+      WHERE tenant_id = :tenant_id
+    `,
+    { tenant_id: tenantId },
+  );
+
+  if (!row || Number(row.count_rows || 0) === 0 || !row.start_date || !row.end_date) {
+    return null;
+  }
+
+  return {
+    start: new Date(row.start_date).toISOString(),
+    end: new Date(row.end_date).toISOString(),
+    row_count: Number(row.count_rows || 0),
+  };
+}
+
+function resolveInsightAnchor(tenantId) {
+  const latest = latestTransactionDate(tenantId);
+  const now = new Date();
+  const staleByDays = latest ? Math.floor((now.getTime() - latest.getTime()) / DAY_MS) : 0;
+  const anchorDate = latest && staleByDays > 2 ? latest : now;
+  const anchored = Boolean(latest) && staleByDays > 2;
+
+  return {
+    anchorDate,
+    anchorDateIso: anchorDate.toISOString(),
+    anchorDay: anchorDate.toISOString().slice(0, 10),
+    anchored,
+    source: anchored ? 'latest_dataset_date' : 'system_now',
+    coverage: transactionCoverage(tenantId),
+  };
+}
+
 function queryDailyRevenue(tenantId, days = 30) {
-  const period = lastNDays(days);
-  return all(
+  const anchor = resolveInsightAnchor(tenantId);
+  const period = {
+    ...lastNDays(days, anchor.anchorDate),
+    anchor_date: anchor.anchorDateIso,
+    anchored: anchor.anchored,
+    source: anchor.source,
+    coverage: anchor.coverage,
+  };
+
+  const points = all(
     `
       SELECT DATE(transaction_date) AS day,
              ROUND(COALESCE(SUM(total_revenue), 0), 2) AS revenue,
@@ -38,6 +132,11 @@ function queryDailyRevenue(tenantId, days = 30) {
       end_date: period.end,
     },
   );
+
+  return {
+    points,
+    period,
+  };
 }
 
 function detectRevenueAnomalies(series) {
@@ -74,7 +173,13 @@ function detectRevenueAnomalies(series) {
   return anomalies;
 }
 
-function detectMarginCompression(tenantId) {
+function detectMarginCompression(tenantId, anchorDate) {
+  const currentPeriod = lastNDays(7, anchorDate);
+  const baselinePeriod = {
+    start: startOfUtcDay(addDays(anchorDate, -36)).toISOString(),
+    end: endOfUtcDay(addDays(anchorDate, -7)).toISOString(),
+  };
+
   const current = get(
     `
       SELECT
@@ -83,9 +188,13 @@ function detectMarginCompression(tenantId) {
         END AS margin
       FROM transactions
       WHERE tenant_id = :tenant_id
-        AND transaction_date BETWEEN datetime('now', '-7 day') AND datetime('now')
+        AND transaction_date BETWEEN :start_date AND :end_date
     `,
-    { tenant_id: tenantId },
+    {
+      tenant_id: tenantId,
+      start_date: currentPeriod.start,
+      end_date: currentPeriod.end,
+    },
   ) || { margin: 0 };
 
   const baseline = get(
@@ -96,9 +205,13 @@ function detectMarginCompression(tenantId) {
         END AS margin
       FROM transactions
       WHERE tenant_id = :tenant_id
-        AND transaction_date BETWEEN datetime('now', '-37 day') AND datetime('now', '-8 day')
+        AND transaction_date BETWEEN :start_date AND :end_date
     `,
-    { tenant_id: tenantId },
+    {
+      tenant_id: tenantId,
+      start_date: baselinePeriod.start,
+      end_date: baselinePeriod.end,
+    },
   ) || { margin: 0 };
 
   const currentMargin = Number(current.margin || 0);
@@ -117,9 +230,9 @@ function detectMarginCompression(tenantId) {
 }
 
 export function getAnomalies(tenantId, userId = null) {
-  const series = queryDailyRevenue(tenantId, 30);
-  const anomalies = detectRevenueAnomalies(series);
-  const margin = detectMarginCompression(tenantId);
+  const revenue = queryDailyRevenue(tenantId, 30);
+  const anomalies = detectRevenueAnomalies(revenue.points);
+  const margin = detectMarginCompression(tenantId, new Date(revenue.period.anchor_date));
 
   if (margin) {
     anomalies.push(margin);
@@ -140,13 +253,14 @@ export function getAnomalies(tenantId, userId = null) {
 }
 
 export function getTrends(tenantId, userId = null) {
-  const series = queryDailyRevenue(tenantId, 30);
-  const revenueValues = series.map((x) => Number(x.revenue || 0));
-  const profitValues = series.map((x) => Number(x.profit || 0));
+  const revenue = queryDailyRevenue(tenantId, 30);
+  const revenueValues = revenue.points.map((x) => Number(x.revenue || 0));
+  const profitValues = revenue.points.map((x) => Number(x.profit || 0));
 
   const payload = {
     period_days: 30,
-    points: series,
+    period: revenue.period,
+    points: revenue.points,
     summary: {
       revenue_avg: Number(mean(revenueValues).toFixed(2)),
       profit_avg: Number(mean(profitValues).toFixed(2)),
@@ -162,7 +276,7 @@ export function getTrends(tenantId, userId = null) {
       action: 'insight_trends_view',
       resourceType: 'insight',
       resourceId: 'trends',
-      metadata: { points: series.length },
+      metadata: { points: revenue.points.length, period: revenue.period },
     });
   }
 
@@ -186,15 +300,18 @@ function pickRecommendation(anomalies, latestRevenue, previousRevenue) {
 }
 
 export function getDailyVerdict(tenantId, userId = null) {
+  const anchor = resolveInsightAnchor(tenantId);
+  const previousAnchor = addDays(anchor.anchorDate, -1);
+
   const today = get(
     `
       SELECT COALESCE(SUM(total_revenue), 0) AS revenue,
              COALESCE(SUM(total_revenue - COALESCE(cogs, 0) - COALESCE(discount, 0)), 0) AS profit
       FROM transactions
       WHERE tenant_id = :tenant_id
-        AND DATE(transaction_date) = DATE('now')
+        AND DATE(transaction_date) = DATE(:anchor_date)
     `,
-    { tenant_id: tenantId },
+    { tenant_id: tenantId, anchor_date: anchor.anchorDateIso },
   ) || { revenue: 0, profit: 0 };
 
   const yesterday = get(
@@ -203,9 +320,9 @@ export function getDailyVerdict(tenantId, userId = null) {
              COALESCE(SUM(total_revenue - COALESCE(cogs, 0) - COALESCE(discount, 0)), 0) AS profit
       FROM transactions
       WHERE tenant_id = :tenant_id
-        AND DATE(transaction_date) = DATE('now', '-1 day')
+        AND DATE(transaction_date) = DATE(:anchor_date)
     `,
-    { tenant_id: tenantId },
+    { tenant_id: tenantId, anchor_date: previousAnchor.toISOString() },
   ) || { revenue: 0, profit: 0 };
 
   const anomalies = getAnomalies(tenantId, null);
@@ -227,23 +344,31 @@ export function getDailyVerdict(tenantId, userId = null) {
         ? 0
         : 100
       : ((todayRevenue - yesterdayRevenue) / yesterdayRevenue) * 100;
+  const dayLabel = anchor.anchored ? `pada ${anchor.anchorDay}` : 'hari ini';
 
   const sentence =
     status === 'SEHAT'
-      ? `Bisnis stabil. Omzet hari ini ${toRupiah(todayRevenue)} (${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)}% vs kemarin).`
+      ? `Bisnis stabil. Omzet ${dayLabel} ${toRupiah(todayRevenue)} (${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(1)}% vs hari sebelumnya).`
       : status === 'WASPADA'
-        ? `Perhatian: Omzet ${toRupiah(todayRevenue)} (${deltaPct.toFixed(1)}% vs kemarin). Ada ${anomalies.length} sinyal anomali.`
-        : `Peringatan: Kondisi kritis. Omzet ${toRupiah(todayRevenue)} (${deltaPct.toFixed(1)}% vs kemarin) dan margin tertekan.`;
+        ? `Perhatian: Omzet ${dayLabel} ${toRupiah(todayRevenue)} (${deltaPct.toFixed(1)}% vs hari sebelumnya). Ada ${anomalies.length} sinyal anomali.`
+        : `Peringatan: Kondisi kritis. Omzet ${dayLabel} ${toRupiah(todayRevenue)} (${deltaPct.toFixed(1)}% vs hari sebelumnya) dan margin tertekan.`;
 
   const verdict = {
     status,
     sentence,
+    period: {
+      reference_date: anchor.anchorDay,
+      anchored: anchor.anchored,
+      source: anchor.source,
+      coverage: anchor.coverage,
+    },
     metrics: {
       revenue_today: todayRevenue,
       revenue_yesterday: yesterdayRevenue,
       profit_today: Number(today.profit || 0),
       profit_yesterday: Number(yesterday.profit || 0),
       delta_pct: Number(deltaPct.toFixed(2)),
+      reference_date: anchor.anchorDay,
     },
     anomalies_count: anomalies.length,
     recommendation: pickRecommendation(anomalies, todayRevenue, yesterdayRevenue),

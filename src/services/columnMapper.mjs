@@ -26,7 +26,7 @@ const EXPENSE_FIELDS = [
 
 const keywordMap = new Map([
   ['transaction_date', ['tanggal', 'date', 'waktu', 'time']],
-  ['product_name', ['produk', 'product', 'item', 'menu', 'nama barang', 'barang']],
+  ['product_name', ['produk', 'product', 'item', 'menu', 'nama barang', 'nama produk', 'barang']],
   ['quantity', ['qty', 'jumlah', 'kuantitas', 'pcs', 'unit terjual']],
   ['unit_price', ['harga satuan', 'unit price', 'harga', 'price']],
   ['total_revenue', ['total', 'omzet', 'revenue', 'sales', 'pendapatan', 'subtotal']],
@@ -42,6 +42,10 @@ const keywordMap = new Map([
   ['description', ['deskripsi', 'keterangan', 'description', 'catatan']],
   ['recurring', ['berulang', 'recurring', 'langganan']],
 ]);
+
+const PRODUCT_NAME_KEYWORDS = ['produk', 'product', 'item', 'menu', 'nama barang', 'nama produk', 'barang'];
+const PRODUCT_VARIANT_KEYWORDS = ['type', 'model', 'variant', 'varian', 'sku'];
+const PRODUCT_BRAND_KEYWORDS = ['merk', 'merek', 'brand'];
 
 function detectDatasetType(columns) {
   const normalized = columns.map((column) => toLowerAlnum(column)).join(' ');
@@ -67,6 +71,65 @@ function scoreColumn(columnName, targetField) {
   return score;
 }
 
+function findBestColumnByKeywords(columns, keywords) {
+  let bestColumn = null;
+  let bestScore = 0;
+
+  for (const column of columns) {
+    const score = keywords.reduce((acc, keyword) => {
+      const normalizedColumn = toLowerAlnum(column);
+      const normalizedKeyword = toLowerAlnum(keyword);
+      if (normalizedColumn === normalizedKeyword) {
+        return acc + 20;
+      }
+      if (normalizedColumn.includes(normalizedKeyword)) {
+        return acc + 8;
+      }
+      return acc;
+    }, 0);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestColumn = column;
+    }
+  }
+
+  return bestScore > 0 ? bestColumn : null;
+}
+
+function inferProductDimensionColumn(columns) {
+  return findBestColumnByKeywords(columns, PRODUCT_NAME_KEYWORDS)
+    || findBestColumnByKeywords(columns, PRODUCT_VARIANT_KEYWORDS)
+    || findBestColumnByKeywords(columns, PRODUCT_BRAND_KEYWORDS);
+}
+
+function applyTransactionFallbacks(columns, mapping) {
+  const completed = { ...mapping };
+
+  if (!completed.product_name) {
+    const inferredProductColumn = inferProductDimensionColumn(columns);
+    if (inferredProductColumn) {
+      completed.product_name = inferredProductColumn;
+    }
+  }
+
+  if (!completed.unit_price) {
+    const inferredPriceColumn = columns.find((column) => {
+      const normalized = toLowerAlnum(column);
+      return normalized.includes('harga') || normalized.includes('price') || normalized.includes('nominal');
+    });
+    if (inferredPriceColumn) {
+      completed.unit_price = inferredPriceColumn;
+    }
+  }
+
+  if (!completed.total_revenue && completed.unit_price) {
+    completed.total_revenue = '__derived__';
+  }
+
+  return completed;
+}
+
 function heuristicMapping(columns, datasetType) {
   const fields = datasetType === 'expense' ? EXPENSE_FIELDS : TRANSACTION_FIELDS;
   const mapping = {};
@@ -89,19 +152,7 @@ function heuristicMapping(columns, datasetType) {
   }
 
   if (datasetType === 'transaction') {
-    if (!mapping.unit_price) {
-      const inferredPriceColumn = columns.find((column) => {
-        const normalized = toLowerAlnum(column);
-        return normalized.includes('harga') || normalized.includes('price') || normalized.includes('nominal');
-      });
-      if (inferredPriceColumn) {
-        mapping.unit_price = inferredPriceColumn;
-      }
-    }
-
-    if (!mapping.total_revenue && mapping.unit_price) {
-      mapping.total_revenue = '__derived__';
-    }
+    return applyTransactionFallbacks(columns, mapping);
   }
 
   return mapping;
@@ -164,9 +215,12 @@ async function aiMapping(columns, sampleRows, datasetType, fallbackMapping) {
 
   const mapping = sanitizeMapping(columns, result.data.mapping, datasetType);
   const confidence = Number(result.data.confidence);
+  const completedMapping = datasetType === 'transaction'
+    ? applyTransactionFallbacks(columns, mapping)
+    : mapping;
 
   return {
-    mapping,
+    mapping: completedMapping,
     confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0.7,
   };
 }

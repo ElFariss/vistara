@@ -19,6 +19,23 @@ test('column mapper derives revenue from Harga column for demo-like datasets', a
 
   assert.equal(result.datasetType, 'transaction');
   assert.equal(result.mapping.transaction_date, 'tanggal');
+  assert.equal(result.mapping.product_name, 'type');
   assert.equal(result.mapping.unit_price, 'Harga');
   assert.equal(result.mapping.total_revenue, '__derived__');
+});
+
+test('column mapper prefers type as product dimension when only brand and variant exist', async () => {
+  const result = await suggestColumnMapping(
+    ['tanggal', 'merk', 'type', 'Harga'],
+    [
+      {
+        tanggal: '01-01-2024',
+        merk: 'Oppo',
+        type: 'A18',
+        Harga: '1498000',
+      },
+    ],
+  );
+
+  assert.equal(result.mapping.product_name, 'type');
 });

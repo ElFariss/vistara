@@ -235,6 +235,68 @@ function normalizeText(value) {
   return text.length ? text : null;
 }
 
+const PRODUCT_NAME_ALIASES = ['produk', 'product', 'item', 'menu', 'nama barang', 'nama produk', 'barang'];
+const PRODUCT_VARIANT_ALIASES = ['type', 'model', 'variant', 'varian', 'sku'];
+const PRODUCT_BRAND_ALIASES = ['merk', 'merek', 'brand'];
+
+function rowValueByAliases(row, aliases = []) {
+  const entries = Object.entries(row || {});
+  for (const [column, value] of entries) {
+    const normalizedColumn = toLowerSafe(column);
+    if (!aliases.includes(normalizedColumn)) {
+      continue;
+    }
+    const text = normalizeText(value);
+    if (text) {
+      return text;
+    }
+  }
+  return null;
+}
+
+function joinUniqueText(parts = []) {
+  const seen = new Set();
+  const joined = [];
+
+  for (const part of parts) {
+    const text = normalizeText(part);
+    if (!text) {
+      continue;
+    }
+    const key = toLowerSafe(text);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    joined.push(text);
+  }
+
+  return joined.length > 0 ? joined.join(' ') : null;
+}
+
+function deriveProductName(row, mapping) {
+  const mappedColumn = mapping?.product_name;
+  const mappedValue = normalizeText(mappedColumn ? row?.[mappedColumn] : null);
+  const explicitProduct = rowValueByAliases(row, PRODUCT_NAME_ALIASES);
+  const variant = rowValueByAliases(row, PRODUCT_VARIANT_ALIASES);
+  const brand = rowValueByAliases(row, PRODUCT_BRAND_ALIASES);
+
+  if (mappedColumn && PRODUCT_NAME_ALIASES.includes(toLowerSafe(mappedColumn)) && mappedValue) {
+    return mappedValue;
+  }
+
+  if (explicitProduct) {
+    return explicitProduct;
+  }
+
+  const combined = joinUniqueText([brand, variant]);
+  if (combined) {
+    return combined;
+  }
+
+  return mappedValue || variant || brand || null;
+}
+
 function ensureBranch(tenantId, branchName) {
   if (!branchName) {
     return null;
@@ -323,7 +385,7 @@ function normalizeTransactionRow(row, mapping) {
 
   return {
     transaction_date: transactionDate,
-    product_name: normalizeText(row[mapping.product_name]),
+    product_name: deriveProductName(row, mapping),
     quantity,
     unit_price: unitPrice,
     total_revenue: totalRevenue,
