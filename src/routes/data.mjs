@@ -76,6 +76,12 @@ function repairErrorMeta(reason) {
         code: 'REPAIR_MAPPING_FAILED',
         message: 'Repair tidak berhasil menemukan mapping produk yang valid.',
       };
+    case 'repair_reingest_failed':
+      return {
+        statusCode: 500,
+        code: 'DATASET_REPAIR_FAILED',
+        message: 'Repair dataset gagal dijalankan. Dataset lama tetap dipertahankan.',
+      };
     default:
       return {
         statusCode: 400,
@@ -294,6 +300,7 @@ export function registerDataRoutes(router) {
           const errorMeta = repairErrorMeta(repair.reason);
           return sendError(ctx.res, errorMeta.statusCode, errorMeta.code, errorMeta.message, {
             reason: repair.reason,
+            preserved_dataset: Boolean(repair.preserved_dataset),
           });
         }
 
