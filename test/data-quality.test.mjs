@@ -780,6 +780,9 @@ test('data repair keeps the current dataset when replacement ingest fails mid-re
 
       assert.equal(response.statusCode, 500);
       assert.equal(response.payload.error.code, 'DATASET_REPAIR_FAILED');
+      assert.equal(response.payload.error.message, 'Repair dataset gagal dijalankan. Dataset lama tetap dipertahankan.');
+      assert.equal(response.payload.error.details.reason, 'repair_reingest_failed');
+      assert.equal(response.payload.error.details.preserved_dataset, true);
     } finally {
       fs.readFileSync = originalReadFileSync;
     }
