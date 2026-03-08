@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { run } from '../src/db.mjs';
+import { initializeDatabase, run } from '../src/db.mjs';
 import { executeAnalyticsIntent } from '../src/services/queryEngine.mjs';
 import { runDashboardAgent } from '../src/services/agentRuntime.mjs';
 
 function uid(prefix) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 }
+
+initializeDatabase();
 
 function seedTenantUser() {
   const tenantId = uid('tenant');

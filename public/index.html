@@ -44,6 +44,11 @@
         <div>
           <p class="hero-eyebrow">Selamat Datang di Vistara</p>
           <h2 class="landing-welcome-title">Ngobrol dengan data bisnis tanpa ribet teknis.</h2>
+          <p class="landing-welcome-copy">Upload Excel, CSV, atau JSON lalu tanya insight bisnis Anda dengan bahasa yang biasa dipakai sehari-hari.</p>
+          <div class="landing-welcome-actions">
+            <button id="landingWelcomeCta" type="button">Mulai Gratis</button>
+            <button id="landingWelcomeDemo" type="button" class="ghost">Coba Demo</button>
+          </div>
         </div>
         <button id="landingScrollCue" type="button" class="landing-scroll-cue" aria-label="Scroll ke bawah">
           <span>Scroll ke bawah</span>
@@ -295,7 +300,30 @@
 
     <main id="workspacePage" class="page-view workspace-page hidden">
       <div class="workspace-shell">
+        <aside id="sessionRail" class="workspace-pane session-rail" aria-label="Riwayat percakapan">
+          <div class="session-rail-head">
+            <div>
+              <p class="session-kicker">Percakapan</p>
+              <h2>Riwayat analisis</h2>
+            </div>
+            <button id="newSessionBtn" type="button" class="ghost">Chat Baru</button>
+          </div>
+          <p class="session-rail-copy">Setiap obrolan tersimpan otomatis, jadi Anda bisa lanjut dari konteks sebelumnya.</p>
+          <div id="sessionList" class="session-list" aria-live="polite"></div>
+        </aside>
+
         <section id="chatPane" class="workspace-pane chat-pane">
+          <div class="chat-pane-head">
+            <div class="chat-title-block">
+              <p class="chat-kicker">Asisten data</p>
+              <h2 id="chatTitle">Percakapan baru</h2>
+              <p id="chatSubtitle" class="chat-subtitle">Tanya dengan bahasa biasa. Saya urus analisis dan visualnya.</p>
+            </div>
+            <div class="chat-head-actions">
+              <button id="openCanvasBtn" type="button" class="ghost" hidden>Lihat Dashboard</button>
+            </div>
+          </div>
+
           <div id="dataGate" class="data-gate hidden">
             <h3>Upload Dataset Dulu</h3>
             <p>Workspace ini bekerja dari dataset statis yang kamu upload. Tidak ada stream data real-time.</p>
@@ -319,17 +347,17 @@
           </div>
 
           <div class="quick-prompts">
-            <button type="button" class="pill" data-prompt="Analisis tren penjualan">Analisis tren penjualan</button>
-            <button type="button" class="pill" data-prompt="Buat dashboard performa bulan ini">Buat dashboard performa bulan ini</button>
-            <button type="button" class="pill" data-prompt="Lihat produk terlaris minggu ini">Lihat produk terlaris minggu ini</button>
+            <button type="button" class="pill" data-prompt="Ringkas performa bisnis saya minggu ini">Ringkas minggu ini</button>
+            <button type="button" class="pill" data-prompt="Apa 3 insight terpenting dari data ini?">3 insight penting</button>
+            <button type="button" class="pill" data-prompt="Buat dashboard performa bulan ini">Buat dashboard</button>
           </div>
 
           <form id="chatForm" class="composer">
             <label class="attach-btn">
               <input id="chatFile" type="file" />
-              Upload Dataset
+              Tambah Dataset
             </label>
-            <textarea id="chatInput" rows="1" placeholder='Contoh: "Top produk 30 hari terakhir"'></textarea>
+            <textarea id="chatInput" rows="1" placeholder='Contoh: "Omzet 7 hari terakhir" atau "Kenapa profit turun?"'></textarea>
             <div class="composer-actions">
               <span id="fileLabel" class="file-label">Tidak ada file</span>
               <button id="sendBtn" type="submit">Kirim</button>

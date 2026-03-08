@@ -58,6 +58,8 @@ const state = {
   user: null,
   profile: null,
   conversationId: null,
+  conversationTitle: 'Percakapan baru',
+  conversations: [],
   messages: [],
   currentDashboard: null,
   canvasWidgets: [],
@@ -120,6 +122,8 @@ const refs = {
   workspacePage: document.getElementById('workspacePage'),
 
   landingCta: document.getElementById('landingCta'),
+  landingWelcomeCta: document.getElementById('landingWelcomeCta'),
+  landingWelcomeDemo: document.getElementById('landingWelcomeDemo'),
   landingCtaBottom: document.getElementById('landingCtaBottom'),
   landingDemo: document.getElementById('landingDemo'),
   landingTryNowBtn: document.getElementById('landingTryNowBtn'),
@@ -131,7 +135,14 @@ const refs = {
   registerForm: document.getElementById('registerForm'),
   contextForm: document.getElementById('contextForm'),
 
+  sessionRail: document.getElementById('sessionRail'),
+  sessionList: document.getElementById('sessionList'),
+  newSessionBtn: document.getElementById('newSessionBtn'),
+
   chatPane: document.getElementById('chatPane'),
+  chatTitle: document.getElementById('chatTitle'),
+  chatSubtitle: document.getElementById('chatSubtitle'),
+  openCanvasBtn: document.getElementById('openCanvasBtn'),
   workspaceShell: document.querySelector('.workspace-shell'),
   panelDivider: document.getElementById('panelDivider'),
   canvasPane: document.getElementById('canvasPane'),
@@ -185,6 +196,10 @@ const refs = {
   sourceStats: document.getElementById('sourceStats'),
   toast: document.getElementById('toast'),
 };
+
+function escapeAttribute(value) {
+  return escapeHtml(String(value || '')).replace(/"/g, '&quot;');
+}
 
 function showToast(message, timeout = 3000) {
   if (!refs.toast) {
@@ -664,6 +679,11 @@ function initLandingReveal() {
 
   nodes.forEach((node, index) => {
     node.style.transitionDelay = `${Math.min(index * 55, 240)}ms`;
+    const rect = node.getBoundingClientRect();
+    if (rect.top < window.innerHeight * 0.96) {
+      node.classList.add('is-visible');
+      return;
+    }
     observer.observe(node);
   });
   state.landingRevealObserver = observer;
@@ -1195,6 +1215,7 @@ function renderThread() {
     refs.chatMessages.scrollTo({ top: 0 });
   }
   updatePreChatTicker();
+  updateChatHeader();
 }
 
 function toMetricArtifact(widget) {
@@ -1932,18 +1953,191 @@ async function refreshSources() {
       refs.sourceStats.textContent = `Data: ${ready.length}/${sources.length} source • ${totalRows.toLocaleString('id-ID')} baris`;
     }
     setDatasetGateVisible(!state.datasetReady);
+    updateChatHeader();
   } catch {
     state.datasetReady = false;
     if (refs.sourceStats) {
       refs.sourceStats.textContent = 'Data: tidak dapat dimuat';
     }
     setDatasetGateVisible(true);
+    updateChatHeader();
   }
 }
 
-async function refreshChatHistory() {
-  const response = await api('/api/chat/history');
+function conversationPreviewText(conversation) {
+  const preview = String(conversation?.last_message_preview || '').trim();
+  if (preview) {
+    return preview.length > 72 ? `${preview.slice(0, 69).trimEnd()}...` : preview;
+  }
+  return 'Belum ada pesan. Mulai dengan pertanyaan sederhana.';
+}
+
+function formatConversationMeta(value) {
+  if (!value) {
+    return 'Baru saja';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Baru saja';
+  }
+  const diffMinutes = Math.max(0, Math.round((Date.now() - date.getTime()) / 60000));
+  if (diffMinutes < 1) {
+    return 'Baru saja';
+  }
+  if (diffMinutes < 60) {
+    return `${diffMinutes} menit lalu`;
+  }
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) {
+    return `${diffHours} jam lalu`;
+  }
+  const diffDays = Math.round(diffHours / 24);
+  if (diffDays <= 6) {
+    return `${diffDays} hari lalu`;
+  }
+  return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+}
+
+function updateChatHeader() {
+  const activeConversation = state.conversations.find((item) => item.id === state.conversationId) || null;
+  if (refs.chatTitle) {
+    refs.chatTitle.textContent = activeConversation?.title || state.conversationTitle || 'Percakapan baru';
+  }
+  if (refs.chatSubtitle) {
+    refs.chatSubtitle.textContent = state.datasetReady
+      ? 'Tanya dengan bahasa biasa. Saya akan jawab dengan insight yang bisa langsung dipakai.'
+      : 'Upload dataset sekali, lalu lanjut ngobrol seperti konsultasi bisnis.';
+  }
+  if (refs.openCanvasBtn) {
+    refs.openCanvasBtn.hidden = !(Array.isArray(state.canvasWidgets) && state.canvasWidgets.length > 0);
+  }
+}
+
+function renderConversationList() {
+  if (!refs.sessionList) {
+    return;
+  }
+
+  if (!state.conversations.length) {
+    refs.sessionList.innerHTML = `
+      <div class="session-empty">
+        <strong>Belum ada riwayat.</strong>
+        <span>Tekan "Chat Baru" lalu mulai bertanya.</span>
+      </div>
+    `;
+    updateChatHeader();
+    return;
+  }
+
+  refs.sessionList.innerHTML = '';
+  state.conversations.forEach((conversation) => {
+    const card = document.createElement('article');
+    card.className = 'session-card';
+    card.classList.toggle('active', conversation.id === state.conversationId);
+
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'session-card-open ghost';
+    openBtn.setAttribute('aria-pressed', String(conversation.id === state.conversationId));
+    openBtn.addEventListener('click', async () => {
+      if (conversation.id === state.conversationId) {
+        return;
+      }
+      try {
+        await loadConversation(conversation.id);
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
+
+    const titleRow = document.createElement('span');
+    titleRow.className = 'session-card-title-row';
+
+    const title = document.createElement('span');
+    title.className = 'session-card-title';
+    title.textContent = conversation.title || 'Percakapan baru';
+
+    const time = document.createElement('span');
+    time.className = 'session-card-time';
+    time.textContent = formatConversationMeta(conversation.last_message_at || conversation.created_at);
+
+    const preview = document.createElement('span');
+    preview.className = 'session-card-preview';
+    preview.textContent = conversationPreviewText(conversation);
+
+    const meta = document.createElement('div');
+    meta.className = 'session-card-meta';
+
+    const count = document.createElement('span');
+    count.className = 'session-card-count';
+    count.textContent = `${Number(conversation.message_count || 0)} pesan`;
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'ghost session-card-delete';
+    deleteBtn.textContent = 'Hapus';
+    deleteBtn.addEventListener('click', async () => {
+      const confirmed = window.confirm(`Hapus percakapan "${conversation.title || 'Percakapan baru'}"?`);
+      if (!confirmed) {
+        return;
+      }
+      try {
+        await deleteConversationById(conversation.id);
+      } catch (error) {
+        showToast(error.message);
+      }
+    });
+
+    titleRow.append(title, time);
+    openBtn.append(titleRow, preview);
+    meta.append(count, deleteBtn);
+    card.append(openBtn, meta);
+    refs.sessionList.append(card);
+  });
+
+  updateChatHeader();
+}
+
+function upsertConversation(conversation) {
+  if (!conversation?.id) {
+    return;
+  }
+  const nextConversation = {
+    ...conversation,
+    title: conversation.title || 'Percakapan baru',
+  };
+  const index = state.conversations.findIndex((item) => item.id === nextConversation.id);
+  if (index >= 0) {
+    state.conversations.splice(index, 1, { ...state.conversations[index], ...nextConversation });
+  } else {
+    state.conversations.unshift(nextConversation);
+  }
+
+  state.conversations.sort((a, b) => {
+    const aTime = new Date(a.last_message_at || a.created_at || 0).getTime();
+    const bTime = new Date(b.last_message_at || b.created_at || 0).getTime();
+    return bTime - aTime;
+  });
+
+  if (nextConversation.id === state.conversationId) {
+    state.conversationTitle = nextConversation.title;
+  }
+
+  renderConversationList();
+}
+
+async function refreshConversationList() {
+  const response = await api('/api/chat/conversations');
+  state.conversations = Array.isArray(response.conversations) ? response.conversations : [];
+  renderConversationList();
+}
+
+async function refreshChatHistory(conversationId = state.conversationId) {
+  const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : '';
+  const response = await api(`/api/chat/history${query}`);
   state.conversationId = response.conversation_id;
+  state.conversationTitle = response.conversation?.title || 'Percakapan baru';
+  upsertConversation(response.conversation);
 
   state.messages = (response.messages || [])
     .map((item) => {
@@ -1971,9 +2165,59 @@ async function refreshChatHistory() {
     );
     state.canvasPage = 1;
     renderCanvas();
+  } else {
+    state.canvasWidgets = [];
+    state.canvasPagesCount = 1;
+    state.canvasPage = 1;
+    renderCanvas();
   }
 
   renderThread();
+  updateChatHeader();
+}
+
+async function loadConversation(conversationId) {
+  setCanvasOpen(false);
+  await refreshChatHistory(conversationId);
+}
+
+async function startNewConversation() {
+  const response = await api('/api/chat/conversations', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+
+  state.conversationId = response.conversation?.id || null;
+  state.conversationTitle = response.conversation?.title || 'Percakapan baru';
+  state.messages = [];
+  state.timelineRunId = null;
+  state.timelineMessageId = null;
+  state.currentDashboard = null;
+  state.canvasWidgets = [];
+  state.canvasPage = 1;
+  state.canvasPagesCount = 1;
+  setCanvasOpen(false);
+  renderCanvas();
+  upsertConversation(response.conversation);
+  renderThread();
+}
+
+async function deleteConversationById(conversationId) {
+  await api(`/api/chat/conversations/${encodeURIComponent(conversationId)}`, {
+    method: 'DELETE',
+  });
+
+  state.conversations = state.conversations.filter((item) => item.id !== conversationId);
+
+  if (state.conversationId === conversationId) {
+    if (state.conversations[0]?.id) {
+      await loadConversation(state.conversations[0].id);
+    } else {
+      await startNewConversation();
+    }
+  } else {
+    renderConversationList();
+  }
 }
 
 function ensureWelcomeMessage() {
@@ -2189,6 +2433,8 @@ function hydrateTimelineFromTrace(agent) {
 
 function applyAssistantResponse(response, options = {}) {
   state.conversationId = response.conversation_id;
+  state.conversationTitle = response.conversation?.title || state.conversationTitle || 'Percakapan baru';
+  upsertConversation(response.conversation);
   if (response.dashboard) {
     state.currentDashboard = response.dashboard;
   }
@@ -2661,7 +2907,12 @@ function bindHintTooltips() {
 }
 
 async function loadWorkspace() {
-  await Promise.allSettled([refreshProfile(), refreshSources(), refreshVerdict(), refreshDashboards(), refreshChatHistory(), loadSchema()]);
+  await Promise.allSettled([refreshProfile(), refreshSources(), refreshVerdict(), refreshDashboards(), refreshConversationList(), loadSchema()]);
+  if (state.conversations[0]?.id) {
+    await refreshChatHistory(state.conversations[0].id);
+  } else {
+    await startNewConversation();
+  }
   ensureWelcomeMessage();
 }
 
@@ -2676,6 +2927,26 @@ refs.chatFile.addEventListener('change', () => {
     refs.fileLabel.textContent = file ? file.name : 'Tidak ada file';
   }
 });
+
+if (refs.newSessionBtn) {
+  refs.newSessionBtn.addEventListener('click', async () => {
+    try {
+      await startNewConversation();
+      showToast('Chat baru siap.');
+      refs.chatInput?.focus();
+    } catch (error) {
+      showToast(error.message);
+    }
+  });
+}
+
+if (refs.openCanvasBtn) {
+  refs.openCanvasBtn.addEventListener('click', () => {
+    if (Array.isArray(state.canvasWidgets) && state.canvasWidgets.length > 0) {
+      setCanvasOpen(true);
+    }
+  });
+}
 
 refs.gateUploadBtn.addEventListener('click', async () => {
   const file = refs.gateUploadInput.files[0];
@@ -2910,6 +3181,12 @@ if (refs.landingCta) {
     switchAuthTab('register');
   });
 }
+if (refs.landingWelcomeCta) {
+  refs.landingWelcomeCta.addEventListener('click', () => {
+    showPage('auth');
+    switchAuthTab('register');
+  });
+}
 if (refs.headerLoginBtn) {
   refs.headerLoginBtn.addEventListener('click', () => {
     showPage('auth');
@@ -3008,6 +3285,12 @@ async function startDemoSession() {
 
 if (refs.landingDemo) {
   refs.landingDemo.addEventListener('click', () => {
+    startDemoSession();
+  });
+}
+
+if (refs.landingWelcomeDemo) {
+  refs.landingWelcomeDemo.addEventListener('click', () => {
     startDemoSession();
   });
 }
@@ -3224,6 +3507,8 @@ refs.logoutBtn.addEventListener('click', () => {
   });
   state.profile = null;
   state.conversationId = null;
+  state.conversationTitle = 'Percakapan baru';
+  state.conversations = [];
   state.messages = [];
   state.currentDashboard = null;
   state.canvasWidgets = [];
@@ -3247,6 +3532,7 @@ refs.logoutBtn.addEventListener('click', () => {
   setCanvasOpen(false);
 
   renderThread();
+  renderConversationList();
   if (refs.sourceStats) {
     refs.sourceStats.textContent = 'Data: 0 source';
   }
