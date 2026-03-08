@@ -7,8 +7,10 @@ import {
   getSource,
   ingestUploadedSource,
   listSources,
+  repairLatestSourceIfNeeded,
   updateSourceMapping,
 } from '../services/ingestion.mjs';
+import { getDatasetProfile, inspectDatasetQuestion } from '../services/dataProfile.mjs';
 import { executeBuilderQuery, getBuilderSchema } from '../services/queryEngine.mjs';
 import { safeJsonParse } from '../utils/parse.mjs';
 import { generateId } from '../utils/ids.mjs';
@@ -48,6 +50,51 @@ async function ingestFromStoredFile({ tenantId, userId, storedPath, safeName, co
     source: ingested.source,
     analysis: ingested.analysis,
     result: ingested.result,
+  };
+}
+
+function repairErrorMeta(reason) {
+  switch (reason) {
+    case 'source_not_found':
+      return {
+        statusCode: 404,
+        code: 'SOURCE_NOT_FOUND',
+        message: 'Belum ada source data yang bisa diperbaiki.',
+      };
+    case 'product_columns_not_found':
+      return {
+        statusCode: 422,
+        code: 'REPAIR_NOT_SUPPORTED',
+        message: 'Source terbaru tidak punya kolom produk generik yang bisa dipakai untuk repair.',
+      };
+    case 'product_mapping_missing':
+      return {
+        statusCode: 422,
+        code: 'REPAIR_MAPPING_FAILED',
+        message: 'Repair tidak berhasil menemukan mapping produk yang valid.',
+      };
+    default:
+      return {
+        statusCode: 400,
+        code: 'DATASET_REPAIR_FAILED',
+        message: 'Repair dataset gagal dijalankan.',
+      };
+  }
+}
+
+function datasetInspectionErrorMeta(error) {
+  if (['ENOENT', 'EACCES', 'EPERM', 'EISDIR'].includes(error?.code)) {
+    return {
+      statusCode: 500,
+      code: 'DATASET_INSPECTION_FAILED',
+      message: error.message,
+    };
+  }
+
+  return {
+    statusCode: 400,
+    code: 'DATASET_INSPECTION_FAILED',
+    message: error.message,
   };
 }
 
@@ -146,6 +193,86 @@ export function registerDataRoutes(router) {
           fs.unlinkSync(storedPath);
         }
         return sendError(ctx.res, 400, 'DEMO_IMPORT_FAILED', error.message);
+      }
+    },
+    { auth: true },
+  );
+
+  router.register(
+    'GET',
+    '/api/data/profile',
+    async (ctx) => {
+      try {
+        const profile = await getDatasetProfile(ctx.user.tenant_id);
+        if (!profile) {
+          return sendError(ctx.res, 404, 'DATASET_PROFILE_NOT_FOUND', 'Belum ada dataset yang bisa diprofilkan.');
+        }
+
+        return sendJson(ctx.res, 200, {
+          ok: true,
+          profile,
+        });
+      } catch (error) {
+        return sendError(ctx.res, 500, 'DATASET_PROFILE_FAILED', error.message);
+      }
+    },
+    { auth: true },
+  );
+
+  router.register(
+    'POST',
+    '/api/data/profile/inspect',
+    async (ctx) => {
+      const body = await ctx.getBody();
+
+      try {
+        const inspection = await inspectDatasetQuestion({
+          tenantId: ctx.user.tenant_id,
+          message: body?.message || '',
+        });
+
+        if (!inspection.profile) {
+          return sendError(ctx.res, 404, 'DATASET_PROFILE_NOT_FOUND', 'Belum ada dataset yang bisa diprofilkan.');
+        }
+
+        return sendJson(ctx.res, 200, {
+          ok: true,
+          ...inspection,
+        });
+      } catch (error) {
+        const errorMeta = datasetInspectionErrorMeta(error);
+        return sendError(ctx.res, errorMeta.statusCode, errorMeta.code, errorMeta.message);
+      }
+    },
+    { auth: true },
+  );
+
+  router.register(
+    'POST',
+    '/api/data/repair',
+    async (ctx) => {
+      const body = await ctx.getBody();
+
+      try {
+        const repair = await repairLatestSourceIfNeeded({
+          tenantId: ctx.user.tenant_id,
+          userId: ctx.user.id,
+          requiredCapability: body?.required_capability || body?.requiredCapability || 'product_dimension',
+        });
+
+        if (!repair.ok) {
+          const errorMeta = repairErrorMeta(repair.reason);
+          return sendError(ctx.res, errorMeta.statusCode, errorMeta.code, errorMeta.message, {
+            reason: repair.reason,
+          });
+        }
+
+        return sendJson(ctx.res, 200, {
+          ok: true,
+          repair,
+        });
+      } catch (error) {
+        return sendError(ctx.res, 500, 'DATASET_REPAIR_FAILED', error.message);
       }
     },
     { auth: true },
