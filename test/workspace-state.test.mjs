@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  didDeleteActiveConversation,
   getChatHeaderState,
+  normalizeConversationTitle,
   resolveInitialConversationId,
   resolveNextConversationIdAfterDelete,
 } from '../public/workspaceState.js';
@@ -25,14 +27,28 @@ test('resolveNextConversationIdAfterDelete clears the active session when the la
   }), 'conv_2');
 });
 
-test('getChatHeaderState returns explicit empty-state copy when there is no conversation yet', () => {
-  const empty = getChatHeaderState({
-    activeConversation: null,
-    fallbackTitle: '',
-    hasDatasetReady: true,
-    conversationCount: 0,
+test('didDeleteActiveConversation only returns true for the active deleted session', () => {
+  assert.equal(didDeleteActiveConversation({
+    activeConversationId: 'conv_1',
+    deletedConversationId: 'conv_1',
+  }), true);
+
+  assert.equal(didDeleteActiveConversation({
+    activeConversationId: 'conv_1',
+    deletedConversationId: 'conv_2',
+  }), false);
+});
+
+test('normalizeConversationTitle trims whitespace and falls back cleanly', () => {
+  assert.equal(normalizeConversationTitle('  Buat dashboard omzet  '), 'Buat dashboard omzet');
+  assert.equal(normalizeConversationTitle(''), 'Percakapan baru');
+});
+
+test('getChatHeaderState returns the normalized active conversation title', () => {
+  const header = getChatHeaderState({
+    activeConversation: { title: '  Ringkas performa minggu ini ' },
+    fallbackTitle: 'Fallback',
   });
 
-  assert.equal(empty.title, 'Mulai analisis baru');
-  assert.match(empty.subtitle, /Kirim pertanyaan pertama/);
+  assert.equal(header.title, 'Ringkas performa minggu ini');
 });

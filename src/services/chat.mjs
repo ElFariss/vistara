@@ -736,7 +736,7 @@ export async function processChatMessage({
       if (stream && typeof stream.onTimelineStart === 'function') {
         stream.onTimelineStart({
           timeline_id: timelineId,
-          title: 'Agentic Thinking',
+          title: 'Proses analisis',
         });
       }
       const quotaState = getGeminiQuotaCooldownInfo();

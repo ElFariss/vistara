@@ -1,16 +1,22 @@
-import { renderArtifact } from './vendor/chart-lite.js?v=20260307c';
+import { renderArtifact } from './vendor/chart-lite.js?v=20260308d';
 import { createGridStackLite } from './vendor/gridstack-lite.js?v=20260307e';
 import {
+  didDeleteActiveConversation,
   getChatHeaderState,
+  normalizeConversationTitle,
   resolveInitialConversationId,
   resolveNextConversationIdAfterDelete,
-} from './workspaceState.js?v=20260308a';
+} from './workspaceState.js?v=20260308c';
+import {
+  normalizeDashboardLayout,
+  packDashboardLayout,
+  suggestDashboardLayout,
+} from './dashboard-layout.js?v=20260308c';
 
 const GRID_COLS = 16;
 const GRID_ROWS = 9;
 const GRID_GAP = 10;
 const MOBILE_BREAKPOINT = 768;
-const MAX_LAYOUT_ROWS = 240;
 const MIN_CANVAS_PCT = 28;
 const MAX_CANVAS_PCT = 92;
 const DEFAULT_CANVAS_PCT = 58;
@@ -84,7 +90,9 @@ const state = {
   stageZoom: 1,
   settings: { ...DEFAULT_SETTINGS },
   settingsOpen: false,
-  dataPaneCollapsed: false,
+  sessionRailCollapsed: false,
+  openConversationMenuId: null,
+  dataPaneCollapsed: true,
   configPaneCollapsed: true,
   preChatTickerIndex: 0,
   preChatTickerInterval: null,
@@ -99,6 +107,7 @@ const refs = {
   appShell: document.querySelector('.app-shell'),
   headerLoginBtn: document.getElementById('headerLoginBtn'),
   headerCtaBtn: document.getElementById('headerCtaBtn'),
+  brandHomeLink: document.getElementById('brandHomeLink'),
   headerSettingsBtn: document.getElementById('headerSettingsBtn'),
   editProfileBtn: document.getElementById('editProfileBtn'),
   logoutBtn: document.getElementById('logoutBtn'),
@@ -141,10 +150,13 @@ const refs = {
   contextForm: document.getElementById('contextForm'),
 
   sessionRail: document.getElementById('sessionRail'),
+  sessionRailToggleBtn: document.getElementById('sessionRailToggleBtn'),
+  sessionRailToggleLabel: document.getElementById('sessionRailToggleLabel'),
   sessionList: document.getElementById('sessionList'),
   newSessionBtn: document.getElementById('newSessionBtn'),
 
   chatPane: document.getElementById('chatPane'),
+  chatPaneHead: document.getElementById('chatPaneHead'),
   chatTitle: document.getElementById('chatTitle'),
   chatSubtitle: document.getElementById('chatSubtitle'),
   openCanvasBtn: document.getElementById('openCanvasBtn'),
@@ -163,6 +175,7 @@ const refs = {
   chatMessages: document.getElementById('chatMessages'),
   preChatTicker: document.getElementById('preChatTicker'),
   typingIndicator: document.getElementById('typingIndicator'),
+  quickPrompts: document.getElementById('quickPrompts'),
   chatForm: document.getElementById('chatForm'),
   chatInput: document.getElementById('chatInput'),
   chatFile: document.getElementById('chatFile'),
@@ -387,7 +400,10 @@ function updatePreChatTicker() {
     return;
   }
 
-  const shouldShow = Boolean(state.token) && Boolean(state.conversationId) && state.messages.length === 0;
+  const shouldShow = Boolean(state.token)
+    && Boolean(state.conversationId)
+    && state.messages.length === 0
+    && state.conversations.length > 0;
 
   if (!shouldShow) {
     stopPreChatTicker();
@@ -413,6 +429,14 @@ function updatePreChatTicker() {
       rotatePreChatTicker();
     }, PRECHAT_ROTATE_MS);
   }
+}
+
+function updateQuickPromptsVisibility() {
+  if (!refs.quickPrompts) {
+    return;
+  }
+  const shouldShow = state.messages.length === 0 && Boolean(state.token) && Boolean(state.datasetReady);
+  refs.quickPrompts.classList.toggle('hidden', !shouldShow);
 }
 
 function toggleTheme() {
@@ -542,20 +566,6 @@ function generateMessageId() {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
-const METRIC_SLOTS = [
-  { x: 0, y: 0, w: 4, h: 2, minW: 3, minH: 2 },
-  { x: 4, y: 0, w: 4, h: 2, minW: 3, minH: 2 },
-  { x: 8, y: 0, w: 4, h: 2, minW: 3, minH: 2 },
-  { x: 12, y: 0, w: 4, h: 2, minW: 3, minH: 2 },
-];
-
-const VISUAL_SLOTS = [
-  { x: 0, y: 2, w: 8, h: 3, minW: 5, minH: 3 },
-  { x: 8, y: 2, w: 8, h: 3, minW: 5, minH: 3 },
-  { x: 0, y: 5, w: 8, h: 4, minW: 5, minH: 3 },
-  { x: 8, y: 5, w: 8, h: 4, minW: 5, minH: 3 },
-];
-
 function isMobileViewport() {
   return window.innerWidth < MOBILE_BREAKPOINT;
 }
@@ -579,73 +589,32 @@ function getCanvasRowHeight() {
   return Math.max(40, next);
 }
 
-function maxRowsForViewport() {
-  return isMobileViewport() ? MAX_LAYOUT_ROWS : MAX_LAYOUT_ROWS;
+function normalizeLayout(layout = {}, fallbackPage = 1, kind = 'chart') {
+  return normalizeDashboardLayout(layout, {
+    page: fallbackPage,
+    kind,
+  });
 }
 
-function layoutIntersects(a, b) {
-  if ((a.page || 1) !== (b.page || 1)) return false;
-  return !(
-    a.x + a.w <= b.x ||
-    b.x + b.w <= a.x ||
-    a.y + a.h <= b.y ||
-    b.y + b.h <= a.y
-  );
-}
-
-function normalizeLayout(layout = {}, fallbackPage = 1) {
-  const page = Math.max(1, Number(layout.page || fallbackPage || 1));
-  const rowsLimit = maxRowsForViewport();
-  const w = Math.max(1, Math.min(Number(layout.w || 4), GRID_COLS));
-  const h = Math.max(1, Math.min(Number(layout.h || 4), rowsLimit));
-  const x = Math.max(0, Math.min(Number(layout.x || 0), GRID_COLS - w));
-  const y = Math.max(0, Math.min(Number(layout.y || 0), rowsLimit - h));
-  const minW = Math.max(1, Math.min(Number(layout.minW || 2), w));
-  const minH = Math.max(1, Math.min(Number(layout.minH || 2), h));
-  return { x, y, w, h, page, minW, minH };
-}
-
-function layoutCandidates(kind = 'chart') {
-  const metric = kind === 'metric';
-  return metric ? [...METRIC_SLOTS, ...VISUAL_SLOTS] : [...VISUAL_SLOTS, ...METRIC_SLOTS];
-}
-
-function findOpenLayoutPosition(occupied = [], template = {}, page = 1) {
-  const base = normalizeLayout({ ...template, page }, page);
-  for (let y = 0; y <= Math.max(0, MAX_LAYOUT_ROWS - base.h); y += 1) {
-    for (let x = 0; x <= Math.max(0, GRID_COLS - base.w); x += 1) {
-      const candidate = normalizeLayout({ ...base, x, y, page }, page);
-      if (!occupied.some((entry) => layoutIntersects(candidate, entry))) {
-        return candidate;
-      }
-    }
+function normalizeTimelineTitle(title = '') {
+  const value = String(title || '').trim();
+  if (!value || /^agentic thinking$/i.test(value)) {
+    return 'Proses analisis';
   }
-  return null;
+  return value;
 }
 
-function suggestedLayout(existingWidgets = [], kind = 'chart', preferredPage = 1) {
-  const occupied = existingWidgets
-    .map((item) => normalizeLayout(item.layout || {}, 1))
-    .filter(Boolean);
-
-  const maxPage = occupied.reduce((max, item) => Math.max(max, item.page || 1), preferredPage || 1);
-  const candidates = layoutCandidates(kind);
-  const page = Math.max(1, Number(preferredPage || 1));
-
-  for (const slot of candidates) {
-    const candidate = normalizeLayout({ ...slot, page }, page);
-    if (!occupied.some((entry) => layoutIntersects(candidate, entry))) {
-      return candidate;
-    }
+function summarizeDashboardText(content = '') {
+  const value = String(content || '').replace(/\s+/g, ' ').trim();
+  if (!value) {
+    return 'Ringkasan dashboard siap dibuka di panel kanan.';
   }
 
-  const fallbackTemplate = kind === 'metric' ? METRIC_SLOTS[0] : VISUAL_SLOTS[0];
-  const scanned = findOpenLayoutPosition(occupied, fallbackTemplate, page);
-  if (scanned) {
-    return scanned;
+  const firstSentence = value.match(/.+?[.!?](?:\s|$)/)?.[0]?.trim() || value;
+  if (firstSentence.length <= 148) {
+    return firstSentence;
   }
-
-  return normalizeLayout({ ...fallbackTemplate, page: maxPage + 1 }, maxPage + 1);
+  return `${firstSentence.slice(0, 145).trimEnd()}...`;
 }
 
 function isContextComplete(profile) {
@@ -694,6 +663,32 @@ function initLandingReveal() {
   state.landingRevealObserver = observer;
 }
 
+function syncLandingScrollCue() {
+  if (!refs.landingScrollCue) {
+    return;
+  }
+  const landingVisible = refs.landingPage && !refs.landingPage.classList.contains('hidden');
+  const hide = !landingVisible || window.scrollY > 40;
+  refs.landingScrollCue.classList.toggle('is-hidden', hide);
+}
+
+function setSessionRailCollapsed(collapsed) {
+  state.sessionRailCollapsed = Boolean(collapsed);
+  refs.sessionRail?.classList.toggle('collapsed', state.sessionRailCollapsed);
+  refs.workspaceShell?.classList.toggle('session-rail-collapsed', state.sessionRailCollapsed);
+  if (refs.sessionRailToggleBtn) {
+    refs.sessionRailToggleBtn.setAttribute('aria-expanded', String(!state.sessionRailCollapsed));
+    refs.sessionRailToggleBtn.setAttribute('title', state.sessionRailCollapsed ? 'Buka riwayat' : 'Ciutkan riwayat');
+  }
+  if (state.sessionRailCollapsed) {
+    const hadOpenMenu = Boolean(state.openConversationMenuId);
+    state.openConversationMenuId = null;
+    if (hadOpenMenu) {
+      renderConversationList();
+    }
+  }
+}
+
 function showPage(page) {
   refs.landingPage.classList.add('hidden');
   refs.authPage.classList.add('hidden');
@@ -708,6 +703,7 @@ function showPage(page) {
   if (page === 'landing') {
     refs.landingPage.classList.remove('hidden');
     initLandingReveal();
+    syncLandingScrollCue();
     return;
   }
 
@@ -727,6 +723,7 @@ function showPage(page) {
     refs.appShell.classList.add('workspace-active');
   }
   document.body.classList.add('workspace-mode');
+  syncLandingScrollCue();
 }
 
 function switchAuthTab(tab) {
@@ -756,9 +753,8 @@ function setCanvasOpen(open) {
   if (state.canvasOpen && state.grid) {
     applyStageDimensions();
     syncGridBounds();
-    window.requestAnimationFrame(() => {
-      centerCanvasStage();
-    });
+    queueCanvasStageCenter();
+    queueCanvasArtifactRefresh();
   }
 }
 
@@ -875,6 +871,7 @@ function updateCanvasPaneState() {
     refs.toggleDataPaneBtn.classList.toggle('is-active', !state.dataPaneCollapsed);
     refs.toggleDataPaneBtn.setAttribute('title', state.dataPaneCollapsed ? 'Buka Field Data' : 'Tutup Field Data');
     refs.toggleDataPaneBtn.setAttribute('data-tip', state.dataPaneCollapsed ? 'Buka Field Data' : 'Tutup Field Data');
+    refs.toggleDataPaneBtn.setAttribute('aria-label', state.dataPaneCollapsed ? 'Buka Field Data' : 'Tutup Field Data');
   }
 
   if (refs.toggleConfigPaneBtn) {
@@ -882,6 +879,7 @@ function updateCanvasPaneState() {
     refs.toggleConfigPaneBtn.classList.toggle('is-active', !state.configPaneCollapsed);
     refs.toggleConfigPaneBtn.setAttribute('title', state.configPaneCollapsed ? 'Buka Panel Konfigurasi' : 'Tutup Panel Konfigurasi');
     refs.toggleConfigPaneBtn.setAttribute('data-tip', state.configPaneCollapsed ? 'Buka Panel Konfigurasi' : 'Tutup Panel Konfigurasi');
+    refs.toggleConfigPaneBtn.setAttribute('aria-label', state.configPaneCollapsed ? 'Buka Panel Konfigurasi' : 'Tutup Panel Konfigurasi');
   }
   bindHintTooltips();
 }
@@ -890,12 +888,16 @@ function setDataPaneCollapsed(collapsed) {
   state.dataPaneCollapsed = Boolean(collapsed);
   updateCanvasPaneState();
   syncGridBounds();
+  queueCanvasStageCenter();
+  queueCanvasArtifactRefresh();
 }
 
 function setConfigPaneCollapsed(collapsed) {
   state.configPaneCollapsed = Boolean(collapsed);
   updateCanvasPaneState();
   syncGridBounds();
+  queueCanvasStageCenter();
+  queueCanvasArtifactRefresh();
 }
 
 function bindCanvasViewportPan() {
@@ -990,19 +992,50 @@ function applyStageDimensions() {
   syncStageZoomLabel();
 }
 
+let canvasStageCenterTimer = null;
+let canvasArtifactRefreshTimer = null;
+
 function centerCanvasStage() {
   if (!refs.canvasViewport || !refs.canvasWorld || !refs.canvasStage) {
     return;
   }
-  if (window.innerWidth <= 1180) {
-    refs.canvasViewport.scrollLeft = Math.max(0, refs.canvasStage.offsetLeft - 20);
-    refs.canvasViewport.scrollTop = Math.max(0, refs.canvasStage.offsetTop - 20);
-    return;
-  }
-  const centerX = Math.max(0, (refs.canvasWorld.clientWidth - refs.canvasViewport.clientWidth) / 2);
-  const centerY = Math.max(0, (refs.canvasWorld.clientHeight - refs.canvasViewport.clientHeight) / 2);
-  refs.canvasViewport.scrollLeft = centerX;
-  refs.canvasViewport.scrollTop = centerY;
+
+  const targetLeft = Math.max(
+    0,
+    refs.canvasStage.offsetLeft - Math.round((refs.canvasViewport.clientWidth - refs.canvasStage.clientWidth) / 2),
+  );
+  const targetTop = Math.max(
+    0,
+    refs.canvasStage.offsetTop - Math.round((refs.canvasViewport.clientHeight - refs.canvasStage.clientHeight) / 2),
+  );
+
+  refs.canvasViewport.scrollLeft = targetLeft;
+  refs.canvasViewport.scrollTop = targetTop;
+}
+
+function queueCanvasStageCenter() {
+  window.clearTimeout(canvasStageCenterTimer);
+  canvasStageCenterTimer = window.setTimeout(() => {
+    window.requestAnimationFrame(() => {
+      centerCanvasStage();
+    });
+  }, 50);
+}
+
+function queueCanvasArtifactRefresh() {
+  window.clearTimeout(canvasArtifactRefreshTimer);
+  canvasArtifactRefreshTimer = window.setTimeout(() => {
+    document.querySelectorAll('.artifact-chart-canvas').forEach((canvas) => {
+      const resize = () => {
+        const chart = window.Chart?.getChart?.(canvas);
+        if (chart) {
+          chart.resize();
+        }
+      };
+      window.requestAnimationFrame(resize);
+      window.setTimeout(resize, 90);
+    });
+  }, 40);
 }
 
 function setStageZoom(nextZoom, options = {}) {
@@ -1027,7 +1060,7 @@ function setStageZoom(nextZoom, options = {}) {
   }
 
   if (options.recenter) {
-    centerCanvasStage();
+    queueCanvasStageCenter();
   }
 }
 
@@ -1094,19 +1127,20 @@ function renderDashboardSummary(message) {
   const title = document.createElement('p');
   title.className = 'summary-title';
   const count = message.widgets?.length || 0;
-  title.textContent = count > 0 ? `Dashboard siap (${count} widget).` : 'Dashboard siap.';
+  title.textContent = count > 0 ? `${count} widget siap.` : 'Dashboard siap.';
   card.append(title);
 
   const meta = document.createElement('span');
   meta.className = 'summary-meta';
-  const detail = String(message.content || '').trim();
-  meta.textContent = detail || 'Klik untuk membuka Canvas dan melihat detail visual.';
+  meta.textContent = summarizeDashboardText(message.content);
   card.append(meta);
 
   const openBtn = document.createElement('button');
   openBtn.type = 'button';
-  openBtn.className = 'summary-btn';
-  openBtn.textContent = 'Buka Dashboard';
+  openBtn.className = 'summary-btn ghost icon-nav-btn';
+  openBtn.setAttribute('aria-label', 'Buka dashboard');
+  openBtn.setAttribute('title', 'Buka dashboard');
+  openBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v5h-7zM13 11h7v9h-7zM4 13h7v7H4z"></path></svg><span class="sr-only">Buka dashboard</span>';
   openBtn.addEventListener('click', () => {
     if (Array.isArray(message.widgets) && message.widgets.length > 0) {
       state.canvasWidgets = normalizeIncomingWidgets(message.widgets);
@@ -1128,7 +1162,7 @@ function renderTimeline(message) {
   const header = document.createElement('div');
   header.className = 'timeline-head';
   const title = document.createElement('strong');
-  title.textContent = message.content || 'Agentic Thinking';
+  title.textContent = normalizeTimelineTitle(message.content);
   const toggle = document.createElement('button');
   toggle.type = 'button';
   toggle.className = 'ghost timeline-toggle';
@@ -1217,18 +1251,22 @@ function renderThread() {
   if (state.messages.length > 0) {
     scrollToBottom();
   } else {
-    if (!state.conversationId) {
-      const empty = document.createElement('div');
-      empty.className = 'thread-empty';
-      empty.innerHTML = `
+    const empty = document.createElement('div');
+    empty.className = 'thread-empty';
+    empty.innerHTML = state.conversationId
+      ? `
+        <strong>Mulai dengan pertanyaan singkat.</strong>
+        <span>Pilih contoh di bawah atau ketik pertanyaan Anda sendiri.</span>
+      `
+      : `
         <strong>Tanya insight pertama Anda.</strong>
         <span>Saya akan membuat sesi otomatis saat pesan pertama dikirim.</span>
       `;
-      refs.chatMessages.append(empty);
-    }
+    refs.chatMessages.append(empty);
     refs.chatMessages.scrollTo({ top: 0 });
   }
   updatePreChatTicker();
+  updateQuickPromptsVisibility();
   updateChatHeader();
 }
 
@@ -1281,34 +1319,22 @@ function toMetricArtifact(widget) {
 }
 
 function normalizeIncomingWidgets(inputWidgets = []) {
-  const normalized = [];
-
-  for (let index = 0; index < inputWidgets.length; index += 1) {
-    const widget = inputWidgets[index];
-    if (widget.layout && widget.artifact) {
-      normalized.push({
-        id: widget.id || generateWidgetId(),
-        title: widget.title || widget.artifact.title || `Widget ${index + 1}`,
-        artifact: widget.artifact,
-        query: widget.query || null,
-        layout: normalizeLayout(widget.layout, Number(widget.layout.page || 1)),
-      });
-      continue;
-    }
-
-    const artifact = toMetricArtifact(widget);
-    const layout = suggestedLayout(normalized, artifact.kind);
-
-    normalized.push({
-      id: widget.id || generateWidgetId(),
-      title: widget.title || `Widget ${index + 1}`,
+  const prepared = inputWidgets.map((widget, index) => {
+    const artifact = widget.artifact || toMetricArtifact(widget);
+    return {
+      id: String(widget.id || generateWidgetId()),
+      title: normalizeConversationTitle(widget.title || artifact?.title || `Widget ${index + 1}`, `Widget ${index + 1}`),
       artifact,
-      query: null,
-      layout,
-    });
-  }
+      query: widget.query || null,
+      layout: widget.layout || artifact?.layout || null,
+      kind: artifact?.kind || 'chart',
+    };
+  });
 
-  return normalized;
+  return packDashboardLayout(prepared).map((widget) => ({
+    ...widget,
+    layout: normalizeLayout(widget.layout || {}, Number(widget.layout?.page || 1), widget.kind),
+  }));
 }
 
 function getCanvasConfig() {
@@ -1442,7 +1468,7 @@ function ensureGrid() {
       }
       const map = new Map(items.map((item) => [String(item.id), item.layout]));
       state.canvasWidgets = state.canvasWidgets.map((widget) => {
-        const currentLayout = normalizeLayout(widget.layout || {}, 1);
+        const currentLayout = normalizeLayout(widget.layout || {}, 1, widget.artifact?.kind);
         const widgetId = String(widget.id || '');
         if ((currentLayout.page || 1) !== state.canvasPage) {
           return {
@@ -1452,7 +1478,7 @@ function ensureGrid() {
         }
         return {
           ...widget,
-          layout: normalizeLayout(map.get(widgetId) || currentLayout, state.canvasPage),
+          layout: normalizeLayout(map.get(widgetId) || currentLayout, state.canvasPage, widget.artifact?.kind),
         };
       });
       scheduleCanvasSave();
@@ -1514,6 +1540,7 @@ function syncGridBounds() {
   } finally {
     state.isProgrammaticGridUpdate = false;
   }
+  queueCanvasArtifactRefresh();
 }
 
 function allPages() {
@@ -1533,9 +1560,7 @@ function setCanvasPage(page, rerender = true) {
     updateCanvasPagination();
   }
   if (state.canvasOpen) {
-    window.requestAnimationFrame(() => {
-      centerCanvasStage();
-    });
+    queueCanvasStageCenter();
   }
 }
 
@@ -1560,9 +1585,7 @@ function addCanvasPage() {
   state.selectedWidgetId = null;
   renderCanvas();
   if (state.canvasOpen) {
-    window.requestAnimationFrame(() => {
-      centerCanvasStage();
-    });
+    queueCanvasStageCenter();
   }
   scheduleCanvasSave();
   showToast(`Halaman ${state.canvasPage} siap.`);
@@ -1581,13 +1604,13 @@ function pageWidgets() {
       return {
         ...widget,
         id: widget.id,
-        layout: normalizeLayout(widget.layout || {}, state.canvasPage),
+        layout: normalizeLayout(widget.layout || {}, state.canvasPage, widget.artifact?.kind),
       };
     });
 }
 
 function nextWidgetLayout(kind = 'chart') {
-  return suggestedLayout(state.canvasWidgets, kind, state.canvasPage || 1);
+  return suggestDashboardLayout(state.canvasWidgets, kind, state.canvasPage || 1);
 }
 
 function selectWidget(widgetId) {
@@ -1650,7 +1673,7 @@ function selectWidget(widgetId) {
   renderCanvas();
 }
 
-function ensureTimeline(runId, title = 'Agentic Thinking') {
+function ensureTimeline(runId, title = 'Proses analisis') {
   if (!runId) return;
   const existing = state.messages.find((entry) => entry.mode === 'timeline' && entry.timelineRunId === runId);
   if (existing) {
@@ -1663,7 +1686,7 @@ function ensureTimeline(runId, title = 'Agentic Thinking') {
   appendMessage({
     id,
     role: 'assistant',
-    content: title,
+    content: normalizeTimelineTitle(title),
     mode: 'timeline',
     timeline: [],
     collapsed: false,
@@ -1748,6 +1771,7 @@ function finalizeTimeline(runId) {
     ...step,
     status: step.status === 'error' ? 'error' : 'done',
   }));
+  timeline.collapsed = true;
   state.timelineMessageId = null;
   state.timelineRunId = null;
   renderThread();
@@ -1869,6 +1893,7 @@ function renderCanvas() {
     state.isProgrammaticGridUpdate = true;
     state.grid.setItems(pageWidgets(), renderCanvasItem);
     syncGridBounds();
+    queueCanvasArtifactRefresh();
 
     if (state.selectedWidgetId && !state.canvasWidgets.find((w) => w.id === state.selectedWidgetId)) {
       selectWidget(null);
@@ -1978,62 +2003,30 @@ async function refreshSources() {
   }
 }
 
-function conversationPreviewText(conversation) {
-  const preview = String(conversation?.last_message_preview || '').trim();
-  if (preview) {
-    return preview.length > 72 ? `${preview.slice(0, 69).trimEnd()}...` : preview;
-  }
-  return 'Belum ada pesan. Mulai dengan pertanyaan sederhana.';
-}
-
-function formatConversationMeta(value) {
-  if (!value) {
-    return 'Baru saja';
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return 'Baru saja';
-  }
-  const diffMinutes = Math.max(0, Math.round((Date.now() - date.getTime()) / 60000));
-  if (diffMinutes < 1) {
-    return 'Baru saja';
-  }
-  if (diffMinutes < 60) {
-    return `${diffMinutes} menit lalu`;
-  }
-  const diffHours = Math.round(diffMinutes / 60);
-  if (diffHours < 24) {
-    return `${diffHours} jam lalu`;
-  }
-  const diffDays = Math.round(diffHours / 24);
-  if (diffDays <= 6) {
-    return `${diffDays} hari lalu`;
-  }
-  return date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
-}
-
 function updateChatHeader() {
   const activeConversation = state.conversations.find((item) => item.id === state.conversationId) || null;
   const headerState = getChatHeaderState({
     activeConversation,
     fallbackTitle: state.conversationTitle,
-    hasDatasetReady: state.datasetReady,
-    conversationCount: state.conversations.length,
   });
   if (refs.chatTitle) {
     refs.chatTitle.textContent = headerState.title;
   }
-  if (refs.chatSubtitle) {
-    refs.chatSubtitle.textContent = headerState.subtitle;
-  }
   if (refs.openCanvasBtn) {
-    refs.openCanvasBtn.hidden = !(Array.isArray(state.canvasWidgets) && state.canvasWidgets.length > 0);
+    const hasCanvasWidgets = Array.isArray(state.canvasWidgets) && state.canvasWidgets.length > 0;
+    const latestMessage = state.messages.at(-1) || null;
+    const summaryAlreadyOwnsOpenAction = !state.canvasOpen && latestMessage?.mode === 'canvas';
+    refs.openCanvasBtn.hidden = !hasCanvasWidgets || summaryAlreadyOwnsOpenAction;
+  }
+  if (refs.chatPaneHead) {
+    refs.chatPaneHead.hidden = refs.openCanvasBtn?.hidden !== false;
   }
 }
 
 function resetConversationWorkspaceState({ conversationId = null, conversationTitle = '' } = {}) {
   state.conversationId = conversationId;
-  state.conversationTitle = conversationTitle;
+  state.conversationTitle = normalizeConversationTitle(conversationTitle);
+  state.openConversationMenuId = null;
   state.messages = [];
   state.timelineRunId = null;
   state.timelineMessageId = null;
@@ -2056,8 +2049,8 @@ function renderConversationList() {
   if (!state.conversations.length) {
     refs.sessionList.innerHTML = `
       <div class="session-empty">
-        <strong>Belum ada riwayat.</strong>
-        <span>Tekan "Chat Baru" lalu mulai bertanya.</span>
+        <strong>Belum ada percakapan.</strong>
+        <span>Mulai chat baru untuk membuat riwayat pertama.</span>
       </div>
     `;
     updateChatHeader();
@@ -2075,6 +2068,7 @@ function renderConversationList() {
     openBtn.className = 'session-card-open ghost';
     openBtn.setAttribute('aria-pressed', String(conversation.id === state.conversationId));
     openBtn.addEventListener('click', async () => {
+      state.openConversationMenuId = null;
       if (conversation.id === state.conversationId) {
         return;
       }
@@ -2085,37 +2079,33 @@ function renderConversationList() {
       }
     });
 
-    const titleRow = document.createElement('span');
-    titleRow.className = 'session-card-title-row';
-
     const title = document.createElement('span');
     title.className = 'session-card-title';
-    title.textContent = conversation.title || 'Percakapan baru';
+    title.textContent = normalizeConversationTitle(conversation.title);
+    openBtn.append(title);
 
-    const time = document.createElement('span');
-    time.className = 'session-card-time';
-    time.textContent = formatConversationMeta(conversation.last_message_at || conversation.created_at);
+    const actions = document.createElement('div');
+    actions.className = 'session-card-actions';
 
-    const preview = document.createElement('span');
-    preview.className = 'session-card-preview';
-    preview.textContent = conversationPreviewText(conversation);
+    const menuBtn = document.createElement('button');
+    menuBtn.type = 'button';
+    menuBtn.className = 'ghost session-card-menu-btn';
+    menuBtn.setAttribute('aria-expanded', String(state.openConversationMenuId === conversation.id));
+    menuBtn.setAttribute('aria-label', `Aksi untuk ${title.textContent}`);
+    menuBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v.01M12 12v.01M12 19v.01"></path></svg>';
 
-    const meta = document.createElement('div');
-    meta.className = 'session-card-meta';
-
-    const count = document.createElement('span');
-    count.className = 'session-card-count';
-    count.textContent = `${Number(conversation.message_count || 0)} pesan`;
+    const menu = document.createElement('div');
+    menu.className = `session-card-menu${state.openConversationMenuId === conversation.id ? '' : ' hidden'}`;
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
-    deleteBtn.className = 'ghost session-card-delete';
+    deleteBtn.className = 'ghost';
     deleteBtn.textContent = 'Hapus';
     deleteBtn.addEventListener('click', async () => {
-      const confirmed = window.confirm(`Hapus percakapan "${conversation.title || 'Percakapan baru'}"?`);
-      if (!confirmed) {
+      if (typeof window.confirm === 'function' && !window.confirm('Hapus percakapan ini?')) {
         return;
       }
+      state.openConversationMenuId = null;
       try {
         await deleteConversationById(conversation.id);
       } catch (error) {
@@ -2123,10 +2113,16 @@ function renderConversationList() {
       }
     });
 
-    titleRow.append(title, time);
-    openBtn.append(titleRow, preview);
-    meta.append(count, deleteBtn);
-    card.append(openBtn, meta);
+    menuBtn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      state.openConversationMenuId = state.openConversationMenuId === conversation.id ? null : conversation.id;
+      renderConversationList();
+    });
+
+    menu.append(deleteBtn);
+    actions.append(menuBtn, menu);
+    card.append(openBtn, actions);
     refs.sessionList.append(card);
   });
 
@@ -2139,7 +2135,7 @@ function upsertConversation(conversation) {
   }
   const nextConversation = {
     ...conversation,
-    title: conversation.title || 'Percakapan baru',
+    title: normalizeConversationTitle(conversation.title || 'Percakapan baru'),
   };
   const index = state.conversations.findIndex((item) => item.id === nextConversation.id);
   if (index >= 0) {
@@ -2155,7 +2151,7 @@ function upsertConversation(conversation) {
   });
 
   if (nextConversation.id === state.conversationId) {
-    state.conversationTitle = nextConversation.title;
+    state.conversationTitle = normalizeConversationTitle(nextConversation.title);
   }
 
   renderConversationList();
@@ -2171,7 +2167,7 @@ async function refreshChatHistory(conversationId = state.conversationId) {
   const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : '';
   const response = await api(`/api/chat/history${query}`);
   state.conversationId = response.conversation_id;
-  state.conversationTitle = response.conversation?.title || 'Percakapan baru';
+  state.conversationTitle = normalizeConversationTitle(response.conversation?.title || 'Percakapan baru');
   upsertConversation(response.conversation);
 
   state.messages = (response.messages || [])
@@ -2214,6 +2210,9 @@ async function refreshChatHistory(conversationId = state.conversationId) {
 async function loadConversation(conversationId) {
   setCanvasOpen(false);
   await refreshChatHistory(conversationId);
+  if (isMobileViewport()) {
+    setSessionRailCollapsed(true);
+  }
 }
 
 async function startNewConversation() {
@@ -2227,7 +2226,9 @@ async function startNewConversation() {
     conversationTitle: response.conversation?.title || 'Percakapan baru',
   });
   upsertConversation(response.conversation);
-  ensureWelcomeMessage();
+  if (isMobileViewport()) {
+    setSessionRailCollapsed(true);
+  }
 }
 
 async function deleteConversationById(conversationId) {
@@ -2235,6 +2236,10 @@ async function deleteConversationById(conversationId) {
     method: 'DELETE',
   });
 
+  const removedActiveConversation = didDeleteActiveConversation({
+    activeConversationId: state.conversationId,
+    deletedConversationId: conversationId,
+  });
   state.conversations = state.conversations.filter((item) => item.id !== conversationId);
   const nextConversationId = resolveNextConversationIdAfterDelete({
     activeConversationId: state.conversationId,
@@ -2242,11 +2247,12 @@ async function deleteConversationById(conversationId) {
     remainingConversations: state.conversations,
   });
 
-  if (nextConversationId) {
+  if (removedActiveConversation && nextConversationId) {
     await loadConversation(nextConversationId);
-  } else {
+  } else if (removedActiveConversation) {
     resetConversationWorkspaceState();
-    ensureWelcomeMessage();
+    renderConversationList();
+  } else {
     renderConversationList();
   }
 }
@@ -2432,7 +2438,7 @@ function hydrateTimelineFromTrace(agent) {
     return;
   }
   const runId = state.timelineRunId || `trace_${Date.now()}`;
-  ensureTimeline(runId, 'Agentic Thinking');
+  ensureTimeline(runId, 'Proses analisis');
   const visualSteps = trace.filter((step) => {
     const key = String(step.step || '').toLowerCase();
     return key === 'tool:query_template' || key === 'tool:query_builder';
@@ -2519,6 +2525,7 @@ function applyAssistantResponse(response, options = {}) {
       state.canvasPagesCount = Math.max(1, configPages, maxWidgetPage);
       state.canvasPage = 1;
       renderCanvas();
+      updateChatHeader();
       scheduleCanvasSave();
     } catch (error) {
       console.warn('applyAssistantResponse_canvas_failed', error);
@@ -2584,7 +2591,7 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
         streamState.runId = runId;
         streamState.seenEventKeys.clear();
         streamState.visualStepKeys.clear();
-        ensureTimeline(runId, event.title || 'Agentic Thinking');
+        ensureTimeline(runId, normalizeTimelineTitle(event.title));
       } else if (event.type === 'timeline_step') {
         const step = event.step || {};
         const runId = step.timeline_id || streamState.runId || state.timelineRunId || `timeline_${Date.now()}`;
@@ -2595,7 +2602,7 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
           continue;
         }
         streamState.seenEventKeys.add(eventKey);
-        ensureTimeline(runId, 'Agentic Thinking');
+        ensureTimeline(runId, 'Proses analisis');
         if (isVisualTimelineStep(step)) {
           streamState.visualStepKeys.add(timelineStepId(step));
           upsertVisualAggregateTimeline(runId, streamState, step.status === 'error' ? 'error' : 'pending');
@@ -2866,7 +2873,7 @@ async function downloadCanvasAsJpg() {
     .filter((widget) => Number(widget.layout?.page || 1) === state.canvasPage)
     .map((widget) => ({
       ...widget,
-      layout: normalizeLayout(widget.layout || {}, state.canvasPage),
+      layout: normalizeLayout(widget.layout || {}, state.canvasPage, widget.artifact?.kind),
     }));
 
   if (!pageItems.length) {
@@ -2970,6 +2977,21 @@ if (refs.newSessionBtn) {
     } catch (error) {
       showToast(error.message);
     }
+  });
+}
+
+if (refs.sessionRailToggleBtn) {
+  refs.sessionRailToggleBtn.addEventListener('click', () => {
+    setSessionRailCollapsed(!state.sessionRailCollapsed);
+  });
+}
+
+if (refs.brandHomeLink) {
+  refs.brandHomeLink.addEventListener('click', (event) => {
+    event.preventDefault();
+    setCanvasOpen(false);
+    showPage('landing');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 }
 
@@ -3141,7 +3163,14 @@ window.addEventListener('resize', () => {
   applyWorkspaceSplitState();
   applyStageDimensions();
   syncGridBounds();
+  queueCanvasStageCenter();
+  queueCanvasArtifactRefresh();
+  syncLandingScrollCue();
 });
+
+window.addEventListener('scroll', () => {
+  syncLandingScrollCue();
+}, { passive: true });
 
 if (refs.configDataset) {
   refs.configDataset.addEventListener('change', () => {
@@ -3206,6 +3235,18 @@ document.querySelectorAll('[data-prompt]').forEach((button) => {
     appendMessage({ role: 'user', content: prompt, artifacts: [] });
     await sendChatMessage(prompt);
   });
+});
+
+document.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof Element) || target.closest('.session-card-actions')) {
+    return;
+  }
+  if (!state.openConversationMenuId) {
+    return;
+  }
+  state.openConversationMenuId = null;
+  renderConversationList();
 });
 
 if (refs.landingCta) {
@@ -3331,15 +3372,6 @@ if (refs.landingWelcomeDemo) {
 if (refs.landingTryNowBtn) {
   refs.landingTryNowBtn.addEventListener('click', () => {
     startDemoSession();
-  });
-}
-
-if (refs.landingScrollCue) {
-  refs.landingScrollCue.addEventListener('click', () => {
-    refs.landingHeroStart?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    });
   });
 }
 
@@ -3548,7 +3580,7 @@ refs.logoutBtn.addEventListener('click', () => {
   state.canvasPage = 1;
   state.canvasPagesCount = 1;
   state.datasetReady = false;
-  state.dataPaneCollapsed = false;
+  state.dataPaneCollapsed = true;
   state.configPaneCollapsed = true;
   state.timelineRunId = null;
   state.timelineMessageId = null;
@@ -3582,7 +3614,8 @@ async function bootstrap() {
   bindPanelDivider();
   bindCanvasViewportPan();
   applyStageDimensions();
-  centerCanvasStage();
+  queueCanvasStageCenter();
+  setSessionRailCollapsed(false);
   updateCanvasPaneState();
   applyWorkspaceSplitState();
   setEditMode(false);

@@ -101,17 +101,18 @@ function looksDatasetInspectionMessage(text) {
   const qualityTerms = /\b(quality data|kualitas data|missing|null|kosong|duplikat|duplicate)\b/i;
   const fieldInspectionQuestion = /\b(field|fields)\b.*\b(dataset|data|schema|kolom|profil|kualitas)\b/i;
   const inspectionCommand = /\b(cek|check|periksa|inspect|review|lihat|list|daftar|tampilkan)\b.*\b(dataset|kolom|schema|field|fields|struktur|profil|kualitas)\b/i;
+  const analyticsSignal = /\b(penjualan|sales|omzet|revenue|untung|profit|laba|margin|biaya|grafik|chart|dashboard|canvas|laporan|report|tren|trend)\b/i;
   const dashboardBuildSignal = /\b(buat|bikin|generate|susun|rangkai)\b.*\b(dashboard|grafik|chart|canvas|laporan|report)\b/i;
-
-  if (qualityTerms.test(lower) || fieldInspectionQuestion.test(lower) || inspectionCommand.test(lower)) {
-    return true;
-  }
 
   if (dashboardBuildSignal.test(lower)) {
     return false;
   }
 
-  return schemaTerms.test(lower);
+  if ((qualityTerms.test(lower) || fieldInspectionQuestion.test(lower) || inspectionCommand.test(lower)) && !analyticsSignal.test(lower)) {
+    return true;
+  }
+
+  return schemaTerms.test(lower) && !analyticsSignal.test(lower);
 }
 
 function fallbackIntent(message) {
