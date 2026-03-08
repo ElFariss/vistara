@@ -483,6 +483,140 @@ test('data repair endpoint repairs latest source and returns restored product di
   }
 });
 
+test('data repair endpoint accepts broader product aliases used by the mapper', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  const filePath = path.join(os.tmpdir(), `${uid('repair-alias')}.csv`);
+
+  fs.writeFileSync(filePath, [
+    'tanggal,merek,varian,Harga',
+    '01-01-2024,Oppo,A18,1498000',
+    '02-01-2024,Samsung,A15,2999000',
+  ].join('\n'));
+
+  try {
+    insertSourceFileRecord({
+      tenantId,
+      filePath,
+      mapping: {
+        transaction_date: 'tanggal',
+        unit_price: 'Harga',
+        total_revenue: '__derived__',
+      },
+      filename: 'phones-alias.csv',
+    });
+
+    const router = new Router();
+    registerDataRoutes(router);
+    const response = await invokeRoute(router, 'POST', '/api/data/repair', {
+      user: { id: userId, tenant_id: tenantId },
+      body: { required_capability: 'product_dimension' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.payload.ok, true);
+    assert.equal(response.payload.repair.repaired, true);
+    assert.equal(response.payload.repair.analysis.suggestion.mapping.product_name, 'varian');
+
+    const productNames = all(
+      `
+        SELECT name
+        FROM products
+        WHERE tenant_id = :tenant_id
+        ORDER BY name
+      `,
+      { tenant_id: tenantId },
+    ).map((row) => row.name);
+
+    assert.deepEqual(productNames, ['Oppo A18', 'Samsung A15']);
+  } finally {
+    cleanupTenant(tenantId);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  }
+});
+
+test('data repair endpoint reruns stale brand-only product mappings when richer columns exist', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  const filePath = path.join(os.tmpdir(), `${uid('repair-brand-only')}.csv`);
+
+  fs.writeFileSync(filePath, [
+    'tanggal,merk,type,Harga',
+    '01-01-2024,Oppo,A18,1498000',
+    '02-01-2024,Samsung,A15,2999000',
+  ].join('\n'));
+
+  try {
+    insertSourceFileRecord({
+      tenantId,
+      filePath,
+      mapping: {
+        transaction_date: 'tanggal',
+        product_name: 'merk',
+        unit_price: 'Harga',
+        total_revenue: '__derived__',
+      },
+    });
+
+    const source = get(
+      `
+        SELECT id
+        FROM source_files
+        WHERE tenant_id = :tenant_id
+        ORDER BY upload_date DESC
+        LIMIT 1
+      `,
+      { tenant_id: tenantId },
+    );
+
+    const { processSourceFile } = await import('../src/services/ingestion.mjs');
+    await processSourceFile({
+      tenantId,
+      userId,
+      sourceId: source.id,
+    });
+
+    let productNames = all(
+      `
+        SELECT name
+        FROM products
+        WHERE tenant_id = :tenant_id
+        ORDER BY name
+      `,
+      { tenant_id: tenantId },
+    ).map((row) => row.name);
+    assert.deepEqual(productNames, ['Oppo', 'Samsung']);
+
+    const router = new Router();
+    registerDataRoutes(router);
+    const response = await invokeRoute(router, 'POST', '/api/data/repair', {
+      user: { id: userId, tenant_id: tenantId },
+      body: { required_capability: 'product_dimension' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.payload.ok, true);
+    assert.equal(response.payload.repair.repaired, true);
+    assert.equal(response.payload.repair.analysis.suggestion.mapping.product_name, 'type');
+
+    productNames = all(
+      `
+        SELECT name
+        FROM products
+        WHERE tenant_id = :tenant_id
+        ORDER BY name
+      `,
+      { tenant_id: tenantId },
+    ).map((row) => row.name);
+    assert.deepEqual(productNames, ['Oppo A18', 'Samsung A15']);
+  } finally {
+    cleanupTenant(tenantId);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  }
+});
+
 test('data repair endpoint returns explicit 404 when no latest source exists', async () => {
   const { tenantId, userId } = seedTenantUser();
 
@@ -498,6 +632,38 @@ test('data repair endpoint returns explicit 404 when no latest source exists', a
     assert.equal(response.payload.ok, false);
     assert.equal(response.payload.error.code, 'SOURCE_NOT_FOUND');
     assert.equal(response.payload.error.details.reason, 'source_not_found');
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('data profile inspect endpoint returns 500 when dataset storage cannot be read', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  const missingPath = path.join(os.tmpdir(), `${uid('missing-profile')}.csv`);
+
+  try {
+    insertSourceFileRecord({
+      tenantId,
+      filePath: missingPath,
+      mapping: {
+        transaction_date: 'tanggal',
+        product_name: 'type',
+        unit_price: 'Harga',
+        total_revenue: '__derived__',
+      },
+      filename: 'missing.csv',
+    });
+
+    const router = new Router();
+    registerDataRoutes(router);
+    const response = await invokeRoute(router, 'POST', '/api/data/profile/inspect', {
+      user: { id: userId, tenant_id: tenantId },
+      body: { message: 'cek kolom dataset saya' },
+    });
+
+    assert.equal(response.statusCode, 500);
+    assert.equal(response.payload.ok, false);
+    assert.equal(response.payload.error.code, 'DATASET_INSPECTION_FAILED');
   } finally {
     cleanupTenant(tenantId);
   }
