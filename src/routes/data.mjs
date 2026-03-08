@@ -14,6 +14,9 @@ import { getDatasetProfile, inspectDatasetQuestion } from '../services/dataProfi
 import { executeBuilderQuery, getBuilderSchema } from '../services/queryEngine.mjs';
 import { safeJsonParse } from '../utils/parse.mjs';
 import { generateId } from '../utils/ids.mjs';
+import { createLogger } from '../utils/logger.mjs';
+
+const logger = createLogger('data-routes');
 
 function sanitizeFilename(filename) {
   return path
@@ -87,14 +90,30 @@ function datasetInspectionErrorMeta(error) {
     return {
       statusCode: 500,
       code: 'DATASET_INSPECTION_FAILED',
-      message: error.message,
+      message: 'File dataset tidak bisa dibaca dari storage server.',
     };
   }
 
   return {
     statusCode: 400,
     code: 'DATASET_INSPECTION_FAILED',
-    message: error.message,
+    message: 'Pertanyaan inspeksi dataset tidak bisa diproses.',
+  };
+}
+
+function datasetProfileErrorMeta(error) {
+  if (['ENOENT', 'EACCES', 'EPERM', 'EISDIR'].includes(error?.code)) {
+    return {
+      statusCode: 500,
+      code: 'DATASET_PROFILE_FAILED',
+      message: 'Profil dataset tidak bisa dibaca dari storage server.',
+    };
+  }
+
+  return {
+    statusCode: 500,
+    code: 'DATASET_PROFILE_FAILED',
+    message: 'Profil dataset tidak bisa diproses saat ini.',
   };
 }
 
@@ -213,7 +232,13 @@ export function registerDataRoutes(router) {
           profile,
         });
       } catch (error) {
-        return sendError(ctx.res, 500, 'DATASET_PROFILE_FAILED', error.message);
+        const errorMeta = datasetProfileErrorMeta(error);
+        logger.error('dataset_profile_failed', {
+          tenant_id: ctx.user.tenant_id,
+          code: error?.code || null,
+          error: error?.message || 'unknown_error',
+        });
+        return sendError(ctx.res, errorMeta.statusCode, errorMeta.code, errorMeta.message);
       }
     },
     { auth: true },
@@ -241,6 +266,11 @@ export function registerDataRoutes(router) {
         });
       } catch (error) {
         const errorMeta = datasetInspectionErrorMeta(error);
+        logger.error('dataset_inspection_failed', {
+          tenant_id: ctx.user.tenant_id,
+          code: error?.code || null,
+          error: error?.message || 'unknown_error',
+        });
         return sendError(ctx.res, errorMeta.statusCode, errorMeta.code, errorMeta.message);
       }
     },

@@ -1,5 +1,6 @@
 import { sendError, sendJson } from '../http/response.mjs';
 import {
+  ConversationNotFoundError,
   createConversation,
   deleteConversation,
   getChatHistory,
@@ -10,6 +11,19 @@ import {
 } from '../services/chat.mjs';
 
 export function registerChatRoutes(router) {
+  function handleChatError(res, error, fallbackCode, fallbackMessage) {
+    if (error instanceof ConversationNotFoundError || error?.statusCode === 404) {
+      return sendError(
+        res,
+        error.statusCode || 404,
+        error.code || 'CONVERSATION_NOT_FOUND',
+        error.message || 'Percakapan tidak ditemukan.',
+      );
+    }
+
+    return sendError(res, 500, fallbackCode, error?.message || fallbackMessage);
+  }
+
   function writeStreamEvent(res, type, payload = {}) {
     if (res.writableEnded || res.destroyed) {
       return;
@@ -120,7 +134,7 @@ export function registerChatRoutes(router) {
 
         return sendJson(ctx.res, 200, { ok: true, ...response });
       } catch (error) {
-        return sendError(ctx.res, 500, 'CHAT_FAILED', error.message);
+        return handleChatError(ctx.res, error, 'CHAT_FAILED', 'Gagal memproses chat.');
       }
     },
     { auth: true },
@@ -164,7 +178,11 @@ export function registerChatRoutes(router) {
         writeStreamEvent(ctx.res, 'final', { payload: response });
       } catch (error) {
         writeStreamEvent(ctx.res, 'error', {
-          message: error.message || 'Gagal memproses chat stream.',
+          code: error?.code || 'CHAT_STREAM_FAILED',
+          message:
+            error instanceof ConversationNotFoundError
+              ? error.message
+              : error.message || 'Gagal memproses chat stream.',
         });
       } finally {
         ctx.res.end();
@@ -177,13 +195,17 @@ export function registerChatRoutes(router) {
     'GET',
     '/api/chat/history',
     async (ctx) => {
-      const response = getChatHistory({
-        tenantId: ctx.user.tenant_id,
-        userId: ctx.user.id,
-        conversationId: ctx.query.get('conversation_id') || null,
-      });
+      try {
+        const response = getChatHistory({
+          tenantId: ctx.user.tenant_id,
+          userId: ctx.user.id,
+          conversationId: ctx.query.get('conversation_id') || null,
+        });
 
-      return sendJson(ctx.res, 200, { ok: true, ...response });
+        return sendJson(ctx.res, 200, { ok: true, ...response });
+      } catch (error) {
+        return handleChatError(ctx.res, error, 'CHAT_HISTORY_FAILED', 'Gagal memuat riwayat chat.');
+      }
     },
     { auth: true },
   );

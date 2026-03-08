@@ -13,6 +13,7 @@ db.exec('PRAGMA foreign_keys = ON;');
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA synchronous = NORMAL;');
 const namedParamCache = new Map();
+let databaseClosed = false;
 
 const schema = `
 CREATE TABLE IF NOT EXISTS tenants (
@@ -232,8 +233,20 @@ CREATE INDEX IF NOT EXISTS idx_goals_tenant_status ON goals(tenant_id, status);
 `;
 
 export function initializeDatabase() {
+  if (databaseClosed) {
+    throw new Error('Database sudah ditutup dan tidak bisa diinisialisasi ulang pada proses ini.');
+  }
   db.exec(schema);
   logger.info('database initialized', { dbPath: config.dbPath });
+}
+
+export function closeDatabase() {
+  if (databaseClosed) {
+    return;
+  }
+  db.close();
+  databaseClosed = true;
+  logger.info('database closed', { dbPath: config.dbPath });
 }
 
 function namedParamsForSql(sql) {

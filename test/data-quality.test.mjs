@@ -617,6 +617,202 @@ test('data repair endpoint reruns stale brand-only product mappings when richer 
   }
 });
 
+test('data repair endpoint does not treat channel mappings as a healthy product dimension', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  const filePath = path.join(os.tmpdir(), `${uid('repair-channel')}.csv`);
+
+  fs.writeFileSync(filePath, [
+    'tanggal,channel,merk,type,Harga',
+    '01-01-2024,offline,Oppo,A18,1498000',
+    '02-01-2024,online,Samsung,A15,2999000',
+  ].join('\n'));
+
+  try {
+    insertSourceFileRecord({
+      tenantId,
+      filePath,
+      mapping: {
+        transaction_date: 'tanggal',
+        product_name: 'channel',
+        unit_price: 'Harga',
+        total_revenue: '__derived__',
+      },
+    });
+
+    const source = get(
+      `
+        SELECT id
+        FROM source_files
+        WHERE tenant_id = :tenant_id
+        ORDER BY upload_date DESC
+        LIMIT 1
+      `,
+      { tenant_id: tenantId },
+    );
+
+    const { processSourceFile } = await import('../src/services/ingestion.mjs');
+    await processSourceFile({
+      tenantId,
+      userId,
+      sourceId: source.id,
+    });
+
+    let productNames = all(
+      `
+        SELECT name
+        FROM products
+        WHERE tenant_id = :tenant_id
+        ORDER BY name
+      `,
+      { tenant_id: tenantId },
+    ).map((row) => row.name);
+    assert.deepEqual(productNames, ['offline', 'online']);
+
+    const router = new Router();
+    registerDataRoutes(router);
+    const response = await invokeRoute(router, 'POST', '/api/data/repair', {
+      user: { id: userId, tenant_id: tenantId },
+      body: { required_capability: 'product_dimension' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.payload.ok, true);
+    assert.equal(response.payload.repair.repaired, true);
+    assert.equal(response.payload.repair.analysis.suggestion.mapping.product_name, 'type');
+
+    productNames = all(
+      `
+        SELECT name
+        FROM products
+        WHERE tenant_id = :tenant_id
+        ORDER BY name
+      `,
+      { tenant_id: tenantId },
+    ).map((row) => row.name);
+    assert.deepEqual(productNames, ['Oppo A18', 'Samsung A15']);
+  } finally {
+    cleanupTenant(tenantId);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  }
+});
+
+test('data repair keeps the current dataset when replacement ingest fails mid-repair', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  const filePath = path.join(os.tmpdir(), `${uid('repair-rollback')}.csv`);
+
+  fs.writeFileSync(filePath, [
+    'tanggal,merk,type,Harga',
+    '01-01-2024,Oppo,A18,1498000',
+    '02-01-2024,Samsung,A15,2999000',
+  ].join('\n'));
+
+  try {
+    insertSourceFileRecord({
+      tenantId,
+      filePath,
+      mapping: {
+        transaction_date: 'tanggal',
+        product_name: 'merk',
+        unit_price: 'Harga',
+        total_revenue: '__derived__',
+      },
+    });
+
+    const source = get(
+      `
+        SELECT id
+        FROM source_files
+        WHERE tenant_id = :tenant_id
+        ORDER BY upload_date DESC
+        LIMIT 1
+      `,
+      { tenant_id: tenantId },
+    );
+
+    const { processSourceFile } = await import('../src/services/ingestion.mjs');
+    await processSourceFile({
+      tenantId,
+      userId,
+      sourceId: source.id,
+    });
+
+    const originalProducts = all(
+      `
+        SELECT name
+        FROM products
+        WHERE tenant_id = :tenant_id
+        ORDER BY name
+      `,
+      { tenant_id: tenantId },
+    ).map((row) => row.name);
+    assert.deepEqual(originalProducts, ['Oppo', 'Samsung']);
+
+    const originalTransactionCount = Number(get(
+      `SELECT COUNT(*) AS value FROM transactions WHERE tenant_id = :tenant_id`,
+      { tenant_id: tenantId },
+    )?.value || 0);
+    assert.equal(originalTransactionCount, 2);
+
+    const originalReadFileSync = fs.readFileSync;
+    let fileReadCount = 0;
+    const router = new Router();
+    registerDataRoutes(router);
+
+    fs.readFileSync = function patchedReadFileSync(targetPath, ...args) {
+      if (targetPath === filePath) {
+        fileReadCount += 1;
+        if (fileReadCount === 4) {
+          const error = new Error('simulated_repair_failure');
+          error.code = 'EIO';
+          throw error;
+        }
+      }
+      return originalReadFileSync.call(this, targetPath, ...args);
+    };
+
+    try {
+      const response = await invokeRoute(router, 'POST', '/api/data/repair', {
+        user: { id: userId, tenant_id: tenantId },
+        body: { required_capability: 'product_dimension' },
+      });
+
+      assert.equal(response.statusCode, 500);
+      assert.equal(response.payload.error.code, 'DATASET_REPAIR_FAILED');
+    } finally {
+      fs.readFileSync = originalReadFileSync;
+    }
+
+    const remainingProducts = all(
+      `
+        SELECT name
+        FROM products
+        WHERE tenant_id = :tenant_id
+        ORDER BY name
+      `,
+      { tenant_id: tenantId },
+    ).map((row) => row.name);
+    const remainingTransactionCount = Number(get(
+      `SELECT COUNT(*) AS value FROM transactions WHERE tenant_id = :tenant_id`,
+      { tenant_id: tenantId },
+    )?.value || 0);
+    const sourceCount = Number(get(
+      `SELECT COUNT(*) AS value FROM source_files WHERE tenant_id = :tenant_id`,
+      { tenant_id: tenantId },
+    )?.value || 0);
+
+    assert.deepEqual(remainingProducts, originalProducts);
+    assert.equal(remainingTransactionCount, originalTransactionCount);
+    assert.equal(sourceCount, 1);
+  } finally {
+    cleanupTenant(tenantId);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  }
+});
+
 test('data repair endpoint returns explicit 404 when no latest source exists', async () => {
   const { tenantId, userId } = seedTenantUser();
 
@@ -664,6 +860,41 @@ test('data profile inspect endpoint returns 500 when dataset storage cannot be r
     assert.equal(response.statusCode, 500);
     assert.equal(response.payload.ok, false);
     assert.equal(response.payload.error.code, 'DATASET_INSPECTION_FAILED');
+    assert.equal(response.payload.error.message, 'File dataset tidak bisa dibaca dari storage server.');
+    assert.ok(!response.payload.error.message.includes(missingPath));
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('data profile endpoint sanitizes storage errors instead of leaking file paths', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  const missingPath = path.join(os.tmpdir(), `${uid('missing-profile-direct')}.csv`);
+
+  try {
+    insertSourceFileRecord({
+      tenantId,
+      filePath: missingPath,
+      mapping: {
+        transaction_date: 'tanggal',
+        product_name: 'type',
+        unit_price: 'Harga',
+        total_revenue: '__derived__',
+      },
+      filename: 'missing-direct.csv',
+    });
+
+    const router = new Router();
+    registerDataRoutes(router);
+    const response = await invokeRoute(router, 'GET', '/api/data/profile', {
+      user: { id: userId, tenant_id: tenantId },
+    });
+
+    assert.equal(response.statusCode, 500);
+    assert.equal(response.payload.ok, false);
+    assert.equal(response.payload.error.code, 'DATASET_PROFILE_FAILED');
+    assert.equal(response.payload.error.message, 'Profil dataset tidak bisa dibaca dari storage server.');
+    assert.ok(!response.payload.error.message.includes(missingPath));
   } finally {
     cleanupTenant(tenantId);
   }

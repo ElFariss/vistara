@@ -7,6 +7,8 @@
   "scripts": {
     "start": "node src/server.mjs",
     "dev": "node --watch src/server.mjs",
+    "backup": "node scripts/backup.mjs",
+    "restore": "node scripts/restore.mjs",
     "test": "node --test --test-concurrency=1",
     "check": "node --test --test-concurrency=1"
   },

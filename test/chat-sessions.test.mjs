@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { initializeDatabase, run } from '../src/db.mjs';
+import { Router } from '../src/router.mjs';
+import { registerChatRoutes } from '../src/routes/chat.mjs';
 import { ingestUploadedSource } from '../src/services/ingestion.mjs';
 import { createConversation, getChatHistory, listChatConversations, processChatMessage } from '../src/services/chat.mjs';
 import { parseIntent } from '../src/services/nlu.mjs';
@@ -58,6 +60,41 @@ function cleanupTenant(tenantId) {
   run(`DELETE FROM tenants WHERE id = :id`, { id: tenantId });
 }
 
+function createMockResponse() {
+  return {
+    statusCode: 200,
+    headers: {},
+    body: '',
+    writeHead(statusCode, headers = {}) {
+      this.statusCode = statusCode;
+      this.headers = headers;
+    },
+    end(chunk = '') {
+      this.body += chunk ? String(chunk) : '';
+    },
+  };
+}
+
+async function invokeRoute(router, method, routePath, { user, body, query } = {}) {
+  const match = router.match(method, routePath);
+  assert.ok(match, `Route ${method} ${routePath} should exist`);
+
+  const res = createMockResponse();
+  await match.route.handler({
+    req: {},
+    res,
+    params: match.params,
+    query: new URLSearchParams(query || ''),
+    user,
+    getBody: async () => body || {},
+  });
+
+  return {
+    statusCode: res.statusCode,
+    payload: res.body ? JSON.parse(res.body) : null,
+  };
+}
+
 test('getChatHistory resumes the latest conversation instead of creating another blank one', async () => {
   const { tenantId, userId } = seedTenantUser();
   try {
@@ -72,6 +109,31 @@ test('getChatHistory resumes the latest conversation instead of creating another
     const history = getChatHistory({ tenantId, userId });
     assert.equal(history.conversation_id, conversation.id);
     assert.equal(listChatConversations({ tenantId, userId }).length, 1);
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('getChatHistory rejects an explicit stale conversation id instead of rebinding to latest', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    const conversation = createConversation({ tenantId, userId });
+    await processChatMessage({
+      tenantId,
+      userId,
+      conversationId: conversation.id,
+      message: 'tes koneksi',
+    });
+
+    assert.throws(
+      () =>
+        getChatHistory({
+          tenantId,
+          userId,
+          conversationId: 'conversation_does_not_exist',
+        }),
+      (error) => error?.code === 'CONVERSATION_NOT_FOUND',
+    );
   } finally {
     cleanupTenant(tenantId);
   }
@@ -128,9 +190,90 @@ test('processChatMessage answers dataset inspection questions in chat', async ()
   }
 });
 
+test('processChatMessage rejects an explicit stale conversation id instead of writing into latest', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    const conversation = createConversation({ tenantId, userId });
+    await processChatMessage({
+      tenantId,
+      userId,
+      conversationId: conversation.id,
+      message: 'tes koneksi',
+    });
+
+    const before = getChatHistory({
+      tenantId,
+      userId,
+      conversationId: conversation.id,
+    });
+
+    await assert.rejects(
+      () =>
+        processChatMessage({
+          tenantId,
+          userId,
+          conversationId: 'conversation_does_not_exist',
+          message: 'berapa omzet hari ini?',
+        }),
+      (error) => error?.code === 'CONVERSATION_NOT_FOUND',
+    );
+
+    const after = getChatHistory({
+      tenantId,
+      userId,
+      conversationId: conversation.id,
+    });
+
+    assert.equal(after.messages.length, before.messages.length);
+    assert.equal(listChatConversations({ tenantId, userId }).length, 1);
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('chat routes return 404 for explicit stale conversation ids', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    const conversation = createConversation({ tenantId, userId });
+    await processChatMessage({
+      tenantId,
+      userId,
+      conversationId: conversation.id,
+      message: 'tes koneksi',
+    });
+
+    const router = new Router();
+    registerChatRoutes(router);
+
+    const historyResponse = await invokeRoute(router, 'GET', '/api/chat/history', {
+      user: { id: userId, tenant_id: tenantId },
+      query: 'conversation_id=conversation_does_not_exist',
+    });
+    assert.equal(historyResponse.statusCode, 404);
+    assert.equal(historyResponse.payload.error.code, 'CONVERSATION_NOT_FOUND');
+
+    const chatResponse = await invokeRoute(router, 'POST', '/api/chat', {
+      user: { id: userId, tenant_id: tenantId },
+      body: {
+        conversation_id: 'conversation_does_not_exist',
+        message: 'berapa omzet hari ini?',
+      },
+    });
+    assert.equal(chatResponse.statusCode, 404);
+    assert.equal(chatResponse.payload.error.code, 'CONVERSATION_NOT_FOUND');
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
 test('parseIntent keeps analytics prompts with "cek data" on the analytics path', async () => {
   const intent = await parseIntent('cek data penjualan minggu ini');
   assert.notEqual(intent.intent, 'dataset_inspection');
   assert.equal(intent.intent, 'show_metric');
   assert.equal(intent.time_period, 'minggu ini');
+});
+
+test('parseIntent keeps dashboard prompts with field selections on the dashboard path', async () => {
+  const intent = await parseIntent('buat dashboard field omzet dan laba');
+  assert.notEqual(intent.intent, 'dataset_inspection');
 });

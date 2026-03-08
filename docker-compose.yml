@@ -2,6 +2,7 @@ services:
   python-agent:
     build: ./tools/python-agent
     container_name: umkm-python-agent
+    restart: unless-stopped
     environment:
       PY_AGENT_HOST: 0.0.0.0
       PY_AGENT_PORT: 8091
@@ -16,12 +17,18 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8091/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   app:
     build: .
     container_name: umkm-intelligence
     depends_on:
       - python-agent
+    restart: unless-stopped
     env_file:
       - .env
     ports:
@@ -41,3 +48,9 @@ services:
       PYTHON_AGENT_TIMEOUT_MS: 3500
     volumes:
       - ./data:/app/data
+      - ./backups:/app/backups
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

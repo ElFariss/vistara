@@ -97,10 +97,21 @@ function looksSmalltalkMessage(text) {
 
 function looksDatasetInspectionMessage(text) {
   const lower = toLowerAlnum(text);
-  const schemaTerms = /\b(kolom|column|columns|schema|field|fields|struktur data|profil data|profil dataset|eda|korelasi|correlation)\b/i;
+  const schemaTerms = /\b(kolom|column|columns|schema|struktur data|profil data|profil dataset|eda|korelasi|correlation)\b/i;
   const qualityTerms = /\b(quality data|kualitas data|missing|null|kosong|duplikat|duplicate)\b/i;
-  const inspectionCommand = /\b(cek|check|periksa|inspect|review|lihat)\b.*\b(dataset|kolom|schema|field|struktur|profil|kualitas)\b/i;
-  return schemaTerms.test(lower) || qualityTerms.test(lower) || inspectionCommand.test(lower);
+  const fieldInspectionQuestion = /\b(field|fields)\b.*\b(dataset|data|schema|kolom|profil|kualitas)\b/i;
+  const inspectionCommand = /\b(cek|check|periksa|inspect|review|lihat|list|daftar|tampilkan)\b.*\b(dataset|kolom|schema|field|fields|struktur|profil|kualitas)\b/i;
+  const dashboardBuildSignal = /\b(buat|bikin|generate|susun|rangkai)\b.*\b(dashboard|grafik|chart|canvas|laporan|report)\b/i;
+
+  if (qualityTerms.test(lower) || fieldInspectionQuestion.test(lower) || inspectionCommand.test(lower)) {
+    return true;
+  }
+
+  if (dashboardBuildSignal.test(lower)) {
+    return false;
+  }
+
+  return schemaTerms.test(lower);
 }
 
 function fallbackIntent(message) {

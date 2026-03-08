@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { initializeDatabase } from './db.mjs';
+import { closeDatabase, initializeDatabase } from './db.mjs';
 import { config } from './config.mjs';
 import { Router } from './router.mjs';
 import { authenticateRequest } from './http/auth.mjs';
@@ -26,6 +26,7 @@ const publicDir = path.resolve(__dirname, '../public');
 
 const router = new Router();
 const rateLimit = createRateLimiter(config.rateLimitPerMinute);
+let shuttingDown = false;
 
 registerAuthRoutes(router);
 registerBusinessRoutes(router);
@@ -129,6 +130,10 @@ const server = http.createServer(async (req, res) => {
       return sendMethodNotAllowed(res);
     }
     return serveStatic(pathname, res);
+  }
+
+  if (shuttingDown) {
+    return sendError(res, 503, 'SERVER_SHUTTING_DOWN', 'Server sedang dimatikan. Coba lagi sebentar.');
   }
 
   const ip = getClientIp(req);
@@ -248,3 +253,41 @@ listenWithRetry(config.port).catch((error) => {
   logger.error('server_start_failed', { error: error.message });
   process.exit(1);
 });
+
+function shutdown(signal) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  logger.info('server_shutdown_started', { signal });
+
+  const forceTimer = setTimeout(() => {
+    logger.error('server_shutdown_forced', { signal });
+    process.exit(1);
+  }, 10000);
+  forceTimer.unref();
+
+  server.close((error) => {
+    clearTimeout(forceTimer);
+
+    if (error) {
+      logger.error('server_shutdown_failed', { signal, error: error.message });
+      process.exit(1);
+      return;
+    }
+
+    try {
+      closeDatabase();
+    } catch (closeError) {
+      logger.error('database_close_failed', { signal, error: closeError.message });
+      process.exit(1);
+      return;
+    }
+
+    logger.info('server_shutdown_complete', { signal });
+    process.exit(0);
+  });
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

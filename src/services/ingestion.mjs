@@ -238,9 +238,48 @@ function normalizeText(value) {
 const PRODUCT_NAME_ALIASES = ['produk', 'product', 'item', 'menu', 'nama barang', 'nama produk', 'barang'];
 const PRODUCT_VARIANT_ALIASES = ['type', 'model', 'variant', 'varian', 'sku'];
 const PRODUCT_BRAND_ALIASES = ['merk', 'merek', 'brand'];
+const PRODUCT_NAME_PATTERNS = [/\b(nama produk|nama barang|produk|product|item|menu|barang)\b/];
+const PRODUCT_VARIANT_PATTERNS = [/\b(type|model|variant|varian|sku)\b/];
+const PRODUCT_BRAND_PATTERNS = [/\b(merk|merek|brand)\b/];
 
 function hasAliasColumn(columns = [], aliases = []) {
   return columns.some((column) => aliases.includes(toLowerSafe(column)));
+}
+
+function normalizeColumnLabel(column) {
+  return toLowerSafe(column).replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function columnMatchesProductSignal(column, aliases = [], patterns = []) {
+  const normalized = normalizeColumnLabel(column);
+  if (!normalized) {
+    return false;
+  }
+  return aliases.includes(normalized) || patterns.some((pattern) => pattern.test(normalized));
+}
+
+function isProductNameColumn(column) {
+  return columnMatchesProductSignal(column, PRODUCT_NAME_ALIASES, PRODUCT_NAME_PATTERNS);
+}
+
+function isProductVariantColumn(column) {
+  return columnMatchesProductSignal(column, PRODUCT_VARIANT_ALIASES, PRODUCT_VARIANT_PATTERNS);
+}
+
+function isProductBrandColumn(column) {
+  return columnMatchesProductSignal(column, PRODUCT_BRAND_ALIASES, PRODUCT_BRAND_PATTERNS);
+}
+
+function hasProductNameColumn(columns = []) {
+  return columns.some((column) => isProductNameColumn(column));
+}
+
+function hasProductVariantColumn(columns = []) {
+  return columns.some((column) => isProductVariantColumn(column));
+}
+
+function hasProductBrandColumn(columns = []) {
+  return columns.some((column) => isProductBrandColumn(column));
 }
 
 function rowValueByAliases(row, aliases = []) {
@@ -315,20 +354,20 @@ function deriveProductName(row, mapping) {
 }
 
 function mappingSupportsProductDimension(mapping = {}, columns = []) {
-  const mappedProductColumn = toLowerSafe(mapping?.product_name);
-  if (!mappedProductColumn) {
+  const mappedProductColumn = mapping?.product_name;
+  if (!normalizeText(mappedProductColumn)) {
     return false;
   }
 
-  if (PRODUCT_NAME_ALIASES.includes(mappedProductColumn) || PRODUCT_VARIANT_ALIASES.includes(mappedProductColumn)) {
+  if (isProductNameColumn(mappedProductColumn) || isProductVariantColumn(mappedProductColumn)) {
     return true;
   }
 
-  if (PRODUCT_BRAND_ALIASES.includes(mappedProductColumn)) {
-    return !hasAliasColumn(columns, PRODUCT_NAME_ALIASES) && !hasAliasColumn(columns, PRODUCT_VARIANT_ALIASES);
+  if (isProductBrandColumn(mappedProductColumn)) {
+    return !hasProductNameColumn(columns) && !hasProductVariantColumn(columns);
   }
 
-  return true;
+  return false;
 }
 
 function ensureBranch(tenantId, branchName) {
@@ -747,22 +786,35 @@ export function replaceTenantDataset(tenantId, { keepFilePaths = [] } = {}) {
   const sources = all(`SELECT file_path FROM source_files WHERE tenant_id = :tenant_id`, {
     tenant_id: tenantId,
   });
+
+  withTransaction(() => {
+    deleteTenantDatasetRecords(tenantId);
+  });
+
+  cleanupSourceFiles(sources, keepFilePaths);
+}
+
+function deleteTenantDatasetRecords(tenantId) {
+  run(`DELETE FROM transactions WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
+  run(`DELETE FROM expenses WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
+  run(`DELETE FROM products WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
+  run(`DELETE FROM branches WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
+  run(`DELETE FROM customers WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
+  run(`DELETE FROM source_files WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
+}
+
+function cleanupSourceFiles(sources = [], keepFilePaths = []) {
   const preserved = new Set((Array.isArray(keepFilePaths) ? keepFilePaths : [])
     .map((item) => String(item || ''))
     .filter(Boolean));
 
-  withTransaction(() => {
-    run(`DELETE FROM transactions WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
-    run(`DELETE FROM expenses WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
-    run(`DELETE FROM products WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
-    run(`DELETE FROM branches WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
-    run(`DELETE FROM customers WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
-    run(`DELETE FROM source_files WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
-  });
-
   for (const source of sources) {
     if (source.file_path && !preserved.has(source.file_path) && fs.existsSync(source.file_path)) {
-      fs.unlinkSync(source.file_path);
+      try {
+        fs.unlinkSync(source.file_path);
+      } catch {
+        // Best-effort cleanup after the replacement transaction has committed.
+      }
     }
   }
 }
@@ -852,7 +904,42 @@ export async function ingestUploadedSource({
   const analysis = await analyzeUploadedFile(filePath, filename, contentType);
 
   if (replaceExisting) {
-    replaceTenantDataset(tenantId, { keepFilePaths });
+    const parsed = await parseDataset(filePath, analysis.fileType, filename);
+    const previousSources = all(`SELECT file_path FROM source_files WHERE tenant_id = :tenant_id`, {
+      tenant_id: tenantId,
+    });
+    let sourceId = null;
+    let result = null;
+
+    withTransaction(() => {
+      deleteTenantDatasetRecords(tenantId);
+      sourceId = storeSourceFileRecord({
+        tenantId,
+        filename,
+        fileType: analysis.fileType,
+        filePath,
+        rowCount: analysis.rowCount,
+        suggestion: analysis.suggestion,
+        sampleRows: analysis.sampleRows,
+      });
+
+      result = processParsedRows({
+        tenantId,
+        userId,
+        sourceId,
+        parsed,
+        datasetType: analysis.suggestion?.datasetType,
+        mapping: analysis.suggestion?.mapping,
+      });
+    });
+
+    cleanupSourceFiles(previousSources, [...keepFilePaths, filePath]);
+
+    return {
+      analysis,
+      result,
+      source: getSource(tenantId, sourceId),
+    };
   }
 
   const sourceId = storeSourceFileRecord({
@@ -878,7 +965,45 @@ export async function ingestUploadedSource({
   };
 }
 
-export async function repairLatestSourceIfNeeded({ tenantId, userId, requiredCapability = 'product_dimension' } = {}) {
+function processParsedRows({ tenantId, userId, sourceId, parsed, datasetType, mapping }) {
+  validateMapping(datasetType, mapping);
+
+  const summary = datasetType === 'expense'
+    ? insertExpenses({
+      tenantId,
+      userId,
+      sourceId,
+      rows: parsed.rows,
+      mapping,
+    })
+    : insertTransactions({
+      tenantId,
+      userId,
+      sourceId,
+      rows: parsed.rows,
+      mapping,
+    });
+
+  updateSourceSummary(sourceId, {
+    rowCount: summary.inserted,
+    startDate: summary.minDate,
+    endDate: summary.maxDate,
+    status: 'ready',
+  });
+
+  return {
+    sourceId,
+    datasetType,
+    ...summary,
+  };
+}
+
+export async function repairLatestSourceIfNeeded({
+  tenantId,
+  userId,
+  requiredCapability = 'product_dimension',
+  reingestSource = ingestUploadedSource,
+} = {}) {
   const latest = get(
     `
       SELECT *
@@ -906,9 +1031,9 @@ export async function repairLatestSourceIfNeeded({ tenantId, userId, requiredCap
   });
 
   const columns = Array.isArray(parsed?.columns) ? parsed.columns : [];
-  const hasProductDimensionColumn = hasAliasColumn(columns, PRODUCT_NAME_ALIASES)
-    || hasAliasColumn(columns, PRODUCT_VARIANT_ALIASES)
-    || hasAliasColumn(columns, PRODUCT_BRAND_ALIASES);
+  const hasProductDimensionColumn = hasProductNameColumn(columns)
+    || hasProductVariantColumn(columns)
+    || hasProductBrandColumn(columns);
 
   const productsCount = get(
     `
@@ -956,15 +1081,34 @@ export async function repairLatestSourceIfNeeded({ tenantId, userId, requiredCap
     };
   }
 
-  const repaired = await ingestUploadedSource({
-    tenantId,
-    userId,
-    filePath: latest.file_path,
-    filename: latest.filename,
-    contentType: latest.file_type,
-    replaceExisting: true,
-    keepFilePaths: [latest.file_path],
-  });
+  if (requiredCapability === 'product_dimension' && !mappingSupportsProductDimension(mappingInfo.mapping, columns)) {
+    return {
+      ok: false,
+      repaired: false,
+      reason: 'product_mapping_missing',
+    };
+  }
+
+  let repaired = null;
+  try {
+    repaired = await reingestSource({
+      tenantId,
+      userId,
+      filePath: latest.file_path,
+      filename: latest.filename,
+      contentType: latest.file_type,
+      replaceExisting: true,
+      keepFilePaths: [latest.file_path],
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      repaired: false,
+      reason: 'repair_reingest_failed',
+      preserved_dataset: true,
+      error_message: error?.message || 'repair_reingest_failed',
+    };
+  }
 
   return {
     ok: true,

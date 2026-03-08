@@ -24,7 +24,7 @@ This build now focuses on a linear, production-ready MVP flow:
 - Runtime: Node.js 24+
 - Database: SQLite (`node:sqlite`, WAL mode)
 - API: native HTTP server + custom router
-- AI: Gemini API using model **`gemini-3.1-pro-preview`** (configurable)
+- AI: Gemini API using model **`gemini-2.5-pro`** by default (configurable)
 - Frontend: vanilla JS + GridStack + Chart.js (self-hosted vendor assets)
 
 ## Environment Variables
@@ -34,10 +34,12 @@ Copy `.env.example` to `.env` and set values.
 Key fields:
 
 - `GEMINI_API` or `GEMINI_API_KEY` (required for AI mapping/NLU)
-- `GEMINI_MODEL=gemini-3.1-pro-preview`
+- `GEMINI_MODEL=gemini-2.5-pro`
+- `API_BASE_URL` (optional frontend runtime override)
 - `PYTHON_AGENT_URL` (optional, enables Python execution tool)
 - `PYTHON_AGENT_TOKEN` (recommended when Python tool is enabled)
 - `PYTHON_AGENT_TIMEOUT_MS=3500`
+- `DASHBOARD_AGENT_TIMEOUT_MS=180000`
 - `JWT_SECRET` (required in production)
 
 Existing `.env` is already supported directly by the app.
@@ -96,6 +98,9 @@ Current automated tests cover:
 - Token signing/verification
 - Query-template registry and SQL-injection safety via parameterization
 - Agentic runtime fallback on stale dataset periods and canvas dashboard generation
+- Data-quality profiling, repair, and alias regressions
+- Session onboarding, empty-state, and NLU routing regressions
+- Backup/restore filesystem operations
 - CSV wrapped-row recovery regression (`test.csv`)
 - JSON dataset normalization
 
@@ -111,6 +116,10 @@ Services started:
 
 - `app` on `8080`
 - `python-agent` internal on `8091` (used by app when configured)
+
+## Operations
+
+Operational runbook, backup/restore flow, and rollback notes live in [OPERATIONS.md](./OPERATIONS.md).
 
 ## Notes
 

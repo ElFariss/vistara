@@ -14,6 +14,16 @@ import { inspectDatasetQuestion } from './dataProfile.mjs';
 const DEFAULT_CONVERSATION_TITLE = 'Percakapan baru';
 const AUTO_TITLE_MAX_LENGTH = 56;
 
+export class ConversationNotFoundError extends Error {
+  constructor(conversationId = null) {
+    super('Percakapan tidak ditemukan.');
+    this.name = 'ConversationNotFoundError';
+    this.code = 'CONVERSATION_NOT_FOUND';
+    this.statusCode = 404;
+    this.conversationId = conversationId;
+  }
+}
+
 function isDefaultConversationTitle(title) {
   return String(title || '').trim().toLowerCase() === DEFAULT_CONVERSATION_TITLE.toLowerCase();
 }
@@ -54,6 +64,8 @@ function ensureConversation(tenantId, userId, conversationId = null) {
     if (existing) {
       return existing;
     }
+
+    throw new ConversationNotFoundError(conversationId);
   }
 
   const latest = get(
@@ -862,6 +874,7 @@ export function getChatHistory({ tenantId, userId, conversationId = null }) {
     messages: historyForConversation(tenantId, userId, convo.id, 200),
   };
 }
+
 
 export function listChatConversations({ tenantId, userId, limit = 100 }) {
   return all(
