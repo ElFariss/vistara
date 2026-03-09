@@ -9,9 +9,9 @@ export function parseUrl(req) {
   };
 }
 
-export function getClientIp(req) {
+export function getClientIp(req, { trustProxy = config.trustProxy } = {}) {
   const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.length > 0) {
+  if (trustProxy && typeof forwarded === 'string' && forwarded.length > 0) {
     return forwarded.split(',')[0].trim();
   }
   return req.socket.remoteAddress || 'unknown';
