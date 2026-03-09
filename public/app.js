@@ -23,7 +23,7 @@ import {
   normalizeDashboardLayout,
   packDashboardLayout,
   suggestDashboardLayout,
-} from './dashboard-layout.js?v=20260308c';
+} from './dashboard-layout.js?v=20260310a';
 
 const GRID_COLS = 16;
 const GRID_ROWS = 9;

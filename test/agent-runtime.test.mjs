@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { config } from '../src/config.mjs';
 import { initializeDatabase, run } from '../src/db.mjs';
-import { layoutsIntersect } from '../public/dashboard-layout.js';
+import { layoutsIntersect } from '../shared/dashboard-layout.mjs';
 import { executeAnalyticsIntent } from '../src/services/queryEngine.mjs';
 import { DashboardAgentError, runDashboardAgent } from '../src/services/agentRuntime.mjs';
 

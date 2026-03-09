@@ -24,6 +24,7 @@ const logger = createLogger('server');
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.resolve(__dirname, '../public');
+const sharedDir = path.resolve(__dirname, '../shared');
 
 const router = new Router();
 const rateLimit = createRateLimiter(config.rateLimitPerMinute);
@@ -91,9 +92,10 @@ function applyCors(req, res) {
 function serveStatic(pathname, res) {
   const relativePath = resolveStaticRelativePath(pathname);
   const normalized = path.normalize(relativePath).replace(/^([.]{2}[\/\\])+/, '');
-  const target = path.join(publicDir, normalized);
+  const staticRoot = pathname.startsWith('/shared/') ? sharedDir : publicDir;
+  const target = path.join(staticRoot, normalized);
 
-  if (!target.startsWith(publicDir)) {
+  if (!target.startsWith(staticRoot)) {
     return sendNotFound(res);
   }
 

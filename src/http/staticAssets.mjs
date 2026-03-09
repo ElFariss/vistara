@@ -16,8 +16,18 @@ export function isSpaAppRoute(pathname = '') {
     || normalized === '/chat';
 }
 
+export function isSharedStaticPath(pathname = '') {
+  return normalizeStaticPathname(pathname).startsWith('/shared/');
+}
+
 export function resolveStaticRelativePath(pathname = '') {
-  return isSpaAppRoute(pathname) ? '/index.html' : pathname;
+  if (isSpaAppRoute(pathname)) {
+    return '/index.html';
+  }
+  if (isSharedStaticPath(pathname)) {
+    return normalizeStaticPathname(pathname).replace(/^\/shared/, '') || '/';
+  }
+  return pathname;
 }
 
 export function shouldDisableStaticCache({
@@ -28,5 +38,6 @@ export function shouldDisableStaticCache({
   return isSpaAppRoute(pathname)
     || pathname === '/index.html'
     || requestedExt === '.js'
+    || requestedExt === '.mjs'
     || requestedExt === '.css';
 }

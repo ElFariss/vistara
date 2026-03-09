@@ -7,7 +7,7 @@ import {
   normalizeDashboardLayout,
   packDashboardLayout,
   suggestDashboardLayout,
-} from '../public/dashboard-layout.js';
+} from '../shared/dashboard-layout.mjs';
 
 test('normalizeDashboardLayout clamps values into the supported grid', () => {
   const layout = normalizeDashboardLayout({
