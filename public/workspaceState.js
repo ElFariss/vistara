@@ -173,7 +173,7 @@ export function resolveDashboardResetState({
 
   const widgets = Array.isArray(canvasWidgets) ? canvasWidgets : [];
   const maxWidgetPage = widgets.reduce((max, widget) => Math.max(max, Number(widget?.layout?.page || 1)), 1);
-  const pagesCount = Math.max(1, Number(canvasPagesCount || 1), maxWidgetPage);
+  const pagesCount = widgets.length > 0 ? Math.max(1, maxWidgetPage) : 1;
   const page = Math.min(Math.max(1, Number(canvasPage || 1)), pagesCount);
 
   return {
@@ -195,7 +195,7 @@ export function resolveCanvasState({
     : (Array.isArray(dashboardWidgets) ? dashboardWidgets : []);
   const maxWidgetPage = preferredWidgets.reduce((max, widget) => Math.max(max, Number(widget?.layout?.page || 1)), 1);
   const pagesCount = preferredWidgets.length > 0
-    ? Math.max(1, Number(canvasPagesCount || 1), maxWidgetPage)
+    ? Math.max(1, maxWidgetPage)
     : 1;
 
   return {

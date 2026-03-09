@@ -487,3 +487,191 @@ test('runDashboardAgent falls back to deterministic planner steps when submit_pl
     cleanupTenant(tenantId);
   }
 });
+
+test('runDashboardAgent dedupes repeated worker outputs and collapses unused second pages', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
+    seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
+
+    const response = await withMockGeminiToolResponses(
+      [
+        geminiToolPayload({
+          functionCalls: [
+            {
+              name: 'submit_plan',
+              args: {
+                steps: [
+                  'Baca template dashboard.',
+                  'Ambil KPI utama.',
+                  'Finalisasi layout yang ringkas.',
+                ],
+              },
+            },
+          ],
+        }),
+        geminiToolPayload({
+          functionCalls: [
+            {
+              name: 'query_template',
+              args: {
+                template_id: 'total_revenue',
+                time_period: '7 hari terakhir',
+              },
+            },
+          ],
+        }),
+        geminiToolPayload({
+          functionCalls: [
+            {
+              name: 'query_template',
+              args: {
+                template_id: 'total_revenue',
+                time_period: '7 hari terakhir',
+              },
+            },
+          ],
+        }),
+        geminiToolPayload({
+          functionCalls: [
+            {
+              name: 'finalize_dashboard',
+              args: {
+                summary: 'Fokus utama tetap pada omzet inti.',
+                layout_plan: {
+                  strategy: 'balanced',
+                  pages: 2,
+                  placements: [
+                    { title: 'Omzet', template_id: 'total_revenue', page: 1, x: 0, y: 0, w: 4, h: 2, kind: 'metric' },
+                    { title: 'Omzet', template_id: 'total_revenue', page: 2, x: 0, y: 0, w: 4, h: 2, kind: 'metric' },
+                  ],
+                },
+              },
+            },
+          ],
+        }),
+        geminiToolPayload({
+          functionCalls: [
+            {
+              name: 'submit_review',
+              args: {
+                verdict: 'good',
+                completeness_pct: 100,
+                summary: 'Satu KPI kuat sudah cukup untuk ringkasan ini.',
+              },
+            },
+          ],
+        }),
+      ],
+      () => runDashboardAgent({
+        tenantId,
+        userId,
+        goal: 'Buat dashboard ringkas omzet',
+        intent: {
+          intent: 'show_metric',
+          time_period: '7 hari terakhir',
+        },
+      }),
+    );
+
+    assert.equal(response.widgets.length, 1);
+    assert.equal(response.artifacts.length, 1);
+    assert.equal(response.widgets[0]?.title, 'Omzet');
+    assert.equal(response.widgets[0]?.layout?.page, 1);
+    assert.equal(response.agent.worker.pages, 1);
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('runDashboardAgent stops after repeated duplicate worker calls instead of inflating latency', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
+    seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
+
+    const response = await withMockGeminiToolResponses(
+      [
+        geminiToolPayload({
+          functionCalls: [
+            {
+              name: 'submit_plan',
+              args: {
+                steps: [
+                  'Ambil KPI utama.',
+                  'Hindari query berulang.',
+                  'Selesaikan dashboard.',
+                ],
+              },
+            },
+          ],
+        }),
+        geminiToolPayload({
+          functionCalls: [
+            {
+              name: 'query_template',
+              args: {
+                template_id: 'total_revenue',
+                time_period: '7 hari terakhir',
+              },
+            },
+          ],
+        }),
+        geminiToolPayload({
+          functionCalls: [
+            {
+              name: 'query_template',
+              args: {
+                template_id: 'total_revenue',
+                time_period: '7 hari terakhir',
+              },
+            },
+          ],
+        }),
+        geminiToolPayload({
+          functionCalls: [
+            {
+              name: 'query_template',
+              args: {
+                template_id: 'total_revenue',
+                time_period: '7 hari terakhir',
+              },
+            },
+          ],
+        }),
+        geminiToolPayload({
+          functionCalls: [
+            {
+              name: 'submit_review',
+              args: {
+                verdict: 'good',
+                completeness_pct: 100,
+                summary: 'Tidak perlu tool tambahan.',
+              },
+            },
+          ],
+        }),
+      ],
+      async ({ requests }) => {
+        const result = await runDashboardAgent({
+          tenantId,
+          userId,
+          goal: 'Buat dashboard omzet singkat',
+          intent: {
+            intent: 'show_metric',
+            time_period: '7 hari terakhir',
+          },
+        });
+
+        assert.equal(result.widgets.length, 1);
+        assert.equal(result.agent.tool_calls, 1);
+        assert.ok(requests.length <= 5);
+        return result;
+      },
+    );
+
+    assert.equal(response.widgets[0]?.title, 'Omzet');
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});

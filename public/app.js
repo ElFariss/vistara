@@ -1445,6 +1445,7 @@ function renderDashboardSummary(message) {
   openBtn.addEventListener('click', () => {
     if (Array.isArray(message.widgets) && message.widgets.length > 0) {
       state.canvasWidgets = normalizeIncomingWidgets(message.widgets);
+      state.canvasPagesCount = pageCountForWidgets(state.canvasWidgets);
       state.canvasPage = Math.max(1, Number(state.canvasWidgets[0]?.layout?.page || 1));
       renderCanvas();
       scheduleCanvasSave();
@@ -1624,6 +1625,14 @@ function normalizeIncomingWidgets(inputWidgets = []) {
     ...widget,
     layout: normalizeLayout(widget.layout || {}, Number(widget.layout?.page || 1), widget.kind),
   }));
+}
+
+function pageCountForWidgets(widgets = []) {
+  if (!Array.isArray(widgets) || widgets.length === 0) {
+    return 1;
+  }
+
+  return widgets.reduce((max, widget) => Math.max(max, Number(widget?.layout?.page || 1)), 1);
 }
 
 function getCanvasConfig() {
@@ -2200,23 +2209,22 @@ async function refreshDashboards() {
   try {
     const response = await api('/api/dashboards');
     state.currentDashboard = (response.dashboards || [])[0] || null;
-    state.canvasPagesCount = Math.max(1, Number(state.currentDashboard?.config?.pages || 1));
 
     const components = state.currentDashboard?.config?.components;
     if (Array.isArray(components) && components.length > 0) {
       state.canvasWidgets = normalizeIncomingWidgets(components);
-      const maxWidgetPage = state.canvasWidgets.reduce((max, widget) => Math.max(max, Number(widget.layout?.page || 1)), 1);
-      state.canvasPagesCount = Math.max(state.canvasPagesCount, maxWidgetPage);
+      state.canvasPagesCount = pageCountForWidgets(state.canvasWidgets);
       state.canvasPage = Math.min(Math.max(1, state.canvasPage), state.canvasPagesCount);
       renderCanvas();
     } else {
       state.canvasWidgets = [];
-      state.canvasPage = Math.min(Math.max(1, state.canvasPage), state.canvasPagesCount);
+      state.canvasPagesCount = 1;
+      state.canvasPage = 1;
       renderCanvas();
     }
   } catch {
     state.currentDashboard = null;
-    state.canvasPagesCount = Math.max(1, state.canvasPagesCount || 1);
+    state.canvasPagesCount = 1;
   }
 }
 
@@ -2821,9 +2829,7 @@ function applyAssistantResponse(response, options = {}) {
   if (mode === 'canvas' && Array.isArray(widgets) && widgets.length > 0) {
     try {
       state.canvasWidgets = normalizeIncomingWidgets(widgets);
-      const maxWidgetPage = state.canvasWidgets.reduce((max, widget) => Math.max(max, Number(widget.layout?.page || 1)), 1);
-      const configPages = Number(response.dashboard?.config?.pages || 1);
-      state.canvasPagesCount = Math.max(1, configPages, maxWidgetPage);
+      state.canvasPagesCount = pageCountForWidgets(state.canvasWidgets);
       state.canvasPage = 1;
       renderCanvas();
       updateChatHeader();
