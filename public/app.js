@@ -11,12 +11,14 @@ import {
   pageFromPath,
   pathFromPage,
   resolveAccessiblePage,
+  resolveCanvasState,
+  resolveDashboardResetState,
   resolveInitialConversationId,
   resolveNextConversationIdAfterDelete,
   shouldCenterComposer,
   shouldDockLandingFinalCta,
   shouldShowChatHeader,
-} from './workspaceState.js?v=20260309a';
+} from './workspaceState.js?v=20260310a';
 import {
   normalizeDashboardLayout,
   packDashboardLayout,
@@ -2296,7 +2298,11 @@ function updateChatHeader() {
   }
 }
 
-function resetConversationWorkspaceState({ conversationId = null, conversationTitle = '' } = {}) {
+function resetConversationWorkspaceState({
+  conversationId = null,
+  conversationTitle = '',
+  preserveDashboard = false,
+} = {}) {
   state.conversationId = conversationId;
   state.conversationTitle = normalizeConversationTitle(conversationTitle);
   state.conversationMessageCount = 0;
@@ -2304,10 +2310,17 @@ function resetConversationWorkspaceState({ conversationId = null, conversationTi
   state.messages = [];
   state.timelineRunId = null;
   state.timelineMessageId = null;
-  state.currentDashboard = null;
-  state.canvasWidgets = [];
-  state.canvasPage = 1;
-  state.canvasPagesCount = 1;
+  const dashboardState = resolveDashboardResetState({
+    preserveDashboard,
+    currentDashboard: state.currentDashboard,
+    canvasWidgets: state.canvasWidgets,
+    canvasPage: state.canvasPage,
+    canvasPagesCount: state.canvasPagesCount,
+  });
+  state.currentDashboard = dashboardState.currentDashboard;
+  state.canvasWidgets = dashboardState.canvasWidgets;
+  state.canvasPage = dashboardState.canvasPage;
+  state.canvasPagesCount = dashboardState.canvasPagesCount;
   state.selectedWidgetId = null;
   state.isLoadingConversation = false;
   state.isSendingMessage = false;
@@ -2471,20 +2484,18 @@ async function refreshChatHistory(conversationId = state.conversationId) {
       .reverse()
       .find((item) => item.mode === 'canvas' && Array.isArray(item.widgets) && item.widgets.length > 0);
 
-    if (lastCanvas) {
-      state.canvasWidgets = normalizeIncomingWidgets(lastCanvas.widgets);
-      state.canvasPagesCount = Math.max(
-        state.canvasPagesCount,
-        state.canvasWidgets.reduce((max, widget) => Math.max(max, Number(widget.layout?.page || 1)), 1),
-      );
-      state.canvasPage = 1;
-      renderCanvas();
-    } else {
-      state.canvasWidgets = [];
-      state.canvasPagesCount = 1;
-      state.canvasPage = 1;
-      renderCanvas();
-    }
+    const nextCanvasState = resolveCanvasState({
+      messageWidgets: lastCanvas ? normalizeIncomingWidgets(lastCanvas.widgets) : [],
+      dashboardWidgets: Array.isArray(state.currentDashboard?.config?.components)
+        ? normalizeIncomingWidgets(state.currentDashboard.config.components)
+        : [],
+      canvasPage: 1,
+      canvasPagesCount: state.canvasPagesCount,
+    });
+    state.canvasWidgets = nextCanvasState.canvasWidgets;
+    state.canvasPagesCount = nextCanvasState.canvasPagesCount;
+    state.canvasPage = nextCanvasState.canvasPage;
+    renderCanvas();
 
     renderThread();
   } finally {
@@ -2508,6 +2519,7 @@ async function startNewConversation() {
   resetConversationWorkspaceState({
     conversationId: response.conversation?.id || null,
     conversationTitle: response.conversation?.title || 'Percakapan baru',
+    preserveDashboard: true,
   });
   upsertConversation(response.conversation);
   setSessionRailCollapsed(true);
@@ -2532,7 +2544,7 @@ async function deleteConversationById(conversationId) {
   if (removedActiveConversation && nextConversationId) {
     await loadConversation(nextConversationId);
   } else if (removedActiveConversation) {
-    resetConversationWorkspaceState();
+    resetConversationWorkspaceState({ preserveDashboard: true });
     renderConversationList();
   } else {
     renderConversationList();
@@ -3274,7 +3286,7 @@ async function loadWorkspace() {
   if (initialConversationId) {
     await refreshChatHistory(initialConversationId);
   } else {
-    resetConversationWorkspaceState();
+    resetConversationWorkspaceState({ preserveDashboard: true });
   }
   state.workspaceLoaded = true;
   ensureWelcomeMessage();

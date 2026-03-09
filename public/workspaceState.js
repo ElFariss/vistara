@@ -135,3 +135,55 @@ export function shouldDockLandingFinalCta({
   const pageBottom = Math.max(0, Number(documentHeight || 0) - Math.max(0, Number(threshold || 0)));
   return bottomEdge >= pageBottom;
 }
+
+export function resolveDashboardResetState({
+  preserveDashboard = false,
+  currentDashboard = null,
+  canvasWidgets = [],
+  canvasPage = 1,
+  canvasPagesCount = 1,
+} = {}) {
+  if (!preserveDashboard) {
+    return {
+      currentDashboard: null,
+      canvasWidgets: [],
+      canvasPage: 1,
+      canvasPagesCount: 1,
+    };
+  }
+
+  const widgets = Array.isArray(canvasWidgets) ? canvasWidgets : [];
+  const maxWidgetPage = widgets.reduce((max, widget) => Math.max(max, Number(widget?.layout?.page || 1)), 1);
+  const pagesCount = Math.max(1, Number(canvasPagesCount || 1), maxWidgetPage);
+  const page = Math.min(Math.max(1, Number(canvasPage || 1)), pagesCount);
+
+  return {
+    currentDashboard,
+    canvasWidgets: widgets,
+    canvasPage: page,
+    canvasPagesCount: pagesCount,
+  };
+}
+
+export function resolveCanvasState({
+  messageWidgets = [],
+  dashboardWidgets = [],
+  canvasPage = 1,
+  canvasPagesCount = 1,
+} = {}) {
+  const preferredWidgets = Array.isArray(messageWidgets) && messageWidgets.length > 0
+    ? messageWidgets
+    : (Array.isArray(dashboardWidgets) ? dashboardWidgets : []);
+  const maxWidgetPage = preferredWidgets.reduce((max, widget) => Math.max(max, Number(widget?.layout?.page || 1)), 1);
+  const pagesCount = preferredWidgets.length > 0
+    ? Math.max(1, Number(canvasPagesCount || 1), maxWidgetPage)
+    : 1;
+
+  return {
+    canvasWidgets: preferredWidgets,
+    canvasPagesCount: pagesCount,
+    canvasPage: preferredWidgets.length > 0
+      ? Math.min(Math.max(1, Number(canvasPage || 1)), pagesCount)
+      : 1,
+  };
+}

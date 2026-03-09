@@ -537,7 +537,7 @@ function buildSmalltalkAnswer(message, datasetReady, userDisplayName = null) {
     return 'Sama-sama.';
   }
 
-  if (/\b(mantap|sip)\b/i.test(lower)) {
+  if (/\b(mantap|sip|sup)\b/i.test(lower)) {
     return datasetReady
       ? 'Siap. Kalau mau, saya lanjutkan ke insight berikutnya.'
       : 'Siap. Tinggal upload dataset saat Anda siap.';
@@ -547,13 +547,13 @@ function buildSmalltalkAnswer(message, datasetReady, userDisplayName = null) {
     return 'Saya aktif.';
   }
 
-  if (/\b(halo|hai|hi|hello|pagi|siang|sore|malam|hey|yo|woi|oi)\b/i.test(lower)) {
+  if (/\b(halo|hai|hi|hello|pagi|siang|sore|malam|hey|yo|woi|oi|permisi)\b/i.test(lower)) {
     return datasetReady
       ? 'Halo. Mau cek insight apa?'
       : 'Halo. Upload dataset saat siap, lalu tanya insight bisnis Anda.';
   }
 
-  if (/\b(apa kabar|gimana kabarnya|how are you|what'?s up|lagi apa)\b/i.test(lower)) {
+  if (/\b(apa kabar|gimana kabar|gimana kabarnya|how are you|what'?s up|lagi apa)\b/i.test(lower)) {
     return datasetReady
       ? 'Siap. Dataset Anda bisa langsung dianalisis.'
       : 'Siap. Tinggal upload dataset untuk mulai analisis.';

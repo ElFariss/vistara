@@ -8,6 +8,8 @@ import {
   pageFromPath,
   pathFromPage,
   resolveAccessiblePage,
+  resolveCanvasState,
+  resolveDashboardResetState,
   resolveInitialConversationId,
   resolveNextConversationIdAfterDelete,
   shouldCenterComposer,
@@ -143,4 +145,70 @@ test('shouldDockLandingFinalCta only docks when the user reaches the bottom of l
 test('shouldShowChatHeader only keeps the header when the dashboard action is available', () => {
   assert.equal(shouldShowChatHeader({ hasCanvasWidgets: true }), true);
   assert.equal(shouldShowChatHeader({ hasCanvasWidgets: false }), false);
+});
+
+test('resolveDashboardResetState preserves dashboard widgets when requested', () => {
+  const widget = {
+    id: 'widget_1',
+    layout: { page: 2 },
+  };
+
+  assert.deepEqual(resolveDashboardResetState({
+    preserveDashboard: true,
+    currentDashboard: { id: 'dash_1' },
+    canvasWidgets: [widget],
+    canvasPage: 3,
+    canvasPagesCount: 1,
+  }), {
+    currentDashboard: { id: 'dash_1' },
+    canvasWidgets: [widget],
+    canvasPage: 2,
+    canvasPagesCount: 2,
+  });
+
+  assert.deepEqual(resolveDashboardResetState({
+    preserveDashboard: false,
+    currentDashboard: { id: 'dash_1' },
+    canvasWidgets: [widget],
+    canvasPage: 2,
+    canvasPagesCount: 2,
+  }), {
+    currentDashboard: null,
+    canvasWidgets: [],
+    canvasPage: 1,
+    canvasPagesCount: 1,
+  });
+});
+
+test('resolveCanvasState falls back to saved dashboard widgets when the conversation has no canvas message', () => {
+  const dashboardWidget = {
+    id: 'widget_dashboard',
+    layout: { page: 2 },
+  };
+  const messageWidget = {
+    id: 'widget_message',
+    layout: { page: 1 },
+  };
+
+  assert.deepEqual(resolveCanvasState({
+    messageWidgets: [],
+    dashboardWidgets: [dashboardWidget],
+    canvasPage: 3,
+    canvasPagesCount: 1,
+  }), {
+    canvasWidgets: [dashboardWidget],
+    canvasPagesCount: 2,
+    canvasPage: 2,
+  });
+
+  assert.deepEqual(resolveCanvasState({
+    messageWidgets: [messageWidget],
+    dashboardWidgets: [dashboardWidget],
+    canvasPage: 1,
+    canvasPagesCount: 2,
+  }), {
+    canvasWidgets: [messageWidget],
+    canvasPagesCount: 2,
+    canvasPage: 1,
+  });
 });

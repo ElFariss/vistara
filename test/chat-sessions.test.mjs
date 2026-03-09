@@ -159,6 +159,26 @@ test('processChatMessage allows acknowledgment smalltalk prompts', async () => {
   }
 });
 
+test('processChatMessage allows extended greeting smalltalk prompts', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    const responses = await Promise.all([
+      processChatMessage({ tenantId, userId, message: 'permisi' }),
+      processChatMessage({ tenantId, userId, message: 'gimana kabar' }),
+      processChatMessage({ tenantId, userId, message: 'sup' }),
+    ]);
+
+    for (const response of responses) {
+      assert.equal(response.intent.intent, 'smalltalk');
+      assert.equal(response.presentation_mode, 'chat');
+      assert.equal(typeof response.answer, 'string');
+      assert.ok(response.answer.length > 0);
+    }
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
 test('processChatMessage returns a clarify error for unparseable prompts', async () => {
   const { tenantId, userId } = seedTenantUser();
   try {
