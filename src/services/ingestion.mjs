@@ -155,11 +155,23 @@ async function parseWithAiFallback(buffer, filename) {
   return parsed;
 }
 
+export function convertLegacySpreadsheetToCsv(filePath, commandRunner = execFileSync) {
+  const convertedCsv = `${filePath}.converted.csv`;
+  try {
+    commandRunner('ssconvert', [filePath, convertedCsv], { stdio: 'ignore' });
+    return convertedCsv;
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new Error('File XLS belum didukung di environment ini karena converter spreadsheet tidak tersedia.');
+    }
+    throw error;
+  }
+}
+
 function parseExcelFile(filePath, fileType) {
   if (fileType === 'xls') {
-    const convertedCsv = `${filePath}.converted.csv`;
+    const convertedCsv = convertLegacySpreadsheetToCsv(filePath);
     try {
-      execFileSync('ssconvert', [filePath, convertedCsv], { stdio: 'ignore' });
       const buffer = fs.readFileSync(convertedCsv);
       return parseCsvBuffer(buffer);
     } finally {
