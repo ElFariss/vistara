@@ -41,6 +41,7 @@ export const config = {
   tokenTtlSeconds: toInt(process.env.TOKEN_TTL_SECONDS, 60 * 60 * 24 * 7),
   jwtSecret: runtimeJwtSecret,
   rateLimitPerMinute: toInt(process.env.RATE_LIMIT_PER_MINUTE, 120),
+  dbBusyTimeoutMs: Math.max(1000, toInt(process.env.DB_BUSY_TIMEOUT_MS, 5000)),
   maxUploadSizeBytes: toInt(process.env.MAX_UPLOAD_SIZE_MB, 20) * 1024 * 1024,
   allowedOrigins: toList(process.env.ALLOWED_ORIGINS),
   trustedProxyIps: toList(process.env.TRUSTED_PROXY_IPS).map((item) => item.toLowerCase()),

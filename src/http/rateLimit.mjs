@@ -1,6 +1,10 @@
 const WINDOW_MS = 60 * 1000;
 const buckets = new Map();
 
+export function shouldRateLimitPath(pathname = '') {
+  return String(pathname || '').trim() !== '/api/health';
+}
+
 export function createRateLimiter(limitPerMinute) {
   return function rateLimit(key) {
     const now = Date.now();

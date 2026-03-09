@@ -6,8 +6,8 @@ import { closeDatabase, initializeDatabase } from './db.mjs';
 import { config } from './config.mjs';
 import { Router } from './router.mjs';
 import { authenticateRequest } from './http/auth.mjs';
-import { createRateLimiter } from './http/rateLimit.mjs';
 import { resolveAllowedOrigin } from './http/cors.mjs';
+import { createRateLimiter, shouldRateLimitPath } from './http/rateLimit.mjs';
 import { getClientIp, parseRequestBody, parseUrl } from './http/request.mjs';
 import { sendError, sendJson, sendMethodNotAllowed, sendNotFound } from './http/response.mjs';
 import { resolveStaticRelativePath, shouldDisableStaticCache } from './http/staticAssets.mjs';
@@ -137,11 +137,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   const ip = getClientIp(req);
-  const limit = rateLimit(`${ip}:${pathname}`);
-  res.setHeader('X-RateLimit-Remaining', String(limit.remaining ?? 0));
-  if (!limit.allowed) {
-    res.setHeader('Retry-After', String(limit.retryAfterSeconds || 60));
-    return sendError(res, 429, 'RATE_LIMITED', 'Terlalu banyak permintaan. Coba lagi sebentar.');
+  if (shouldRateLimitPath(pathname)) {
+    const limit = rateLimit(`${ip}:${pathname}`);
+    res.setHeader('X-RateLimit-Remaining', String(limit.remaining ?? 0));
+    if (!limit.allowed) {
+      res.setHeader('Retry-After', String(limit.retryAfterSeconds || 60));
+      return sendError(res, 429, 'RATE_LIMITED', 'Terlalu banyak permintaan. Coba lagi sebentar.');
+    }
   }
 
   const match = router.match(method, pathname);

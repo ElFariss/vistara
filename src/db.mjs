@@ -8,10 +8,36 @@ const logger = createLogger('db');
 
 fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
 
+function isBusyError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  const code = String(error?.code || '').toLowerCase();
+  return message.includes('database is locked')
+    || message.includes('database table is locked')
+    || code.includes('sqlite_busy')
+    || code.includes('database_busy');
+}
+
 export const db = new DatabaseSync(config.dbPath);
 db.exec('PRAGMA foreign_keys = ON;');
-db.exec('PRAGMA journal_mode = WAL;');
-db.exec('PRAGMA synchronous = NORMAL;');
+db.exec(`PRAGMA busy_timeout = ${Math.max(1000, Number(config.dbBusyTimeoutMs || 5000))};`);
+
+function applyStartupPragma(statement, { tolerateBusy = false } = {}) {
+  try {
+    db.exec(statement);
+  } catch (error) {
+    if (tolerateBusy && isBusyError(error)) {
+      logger.warn('db_startup_pragma_skipped', {
+        statement,
+        reason: 'database_busy',
+      });
+      return;
+    }
+    throw error;
+  }
+}
+
+applyStartupPragma('PRAGMA journal_mode = WAL;', { tolerateBusy: true });
+applyStartupPragma('PRAGMA synchronous = NORMAL;', { tolerateBusy: true });
 const namedParamCache = new Map();
 let databaseClosed = false;
 
@@ -297,26 +323,63 @@ function sanitizeParams(sql, params) {
   return safe;
 }
 
+export function normalizeDatabaseError(error) {
+  if (!isBusyError(error)) {
+    return error;
+  }
+
+  const normalized = new Error('Database sedang sibuk. Coba lagi sebentar.');
+  normalized.code = 'DATABASE_BUSY';
+  normalized.statusCode = 503;
+  normalized.publicMessage = 'Database sedang sibuk. Coba lagi sebentar.';
+  normalized.cause = error;
+  return normalized;
+}
+
+function executePrepared(sql, params, mode) {
+  try {
+    const statement = db.prepare(sql);
+    const safeParams = sanitizeParams(sql, params);
+    if (mode === 'all') {
+      return statement.all(safeParams);
+    }
+    if (mode === 'get') {
+      return statement.get(safeParams) ?? null;
+    }
+    return statement.run(safeParams);
+  } catch (error) {
+    throw normalizeDatabaseError(error);
+  }
+}
+
 export function all(sql, params = {}) {
-  return db.prepare(sql).all(sanitizeParams(sql, params));
+  return executePrepared(sql, params, 'all');
 }
 
 export function get(sql, params = {}) {
-  return db.prepare(sql).get(sanitizeParams(sql, params)) ?? null;
+  return executePrepared(sql, params, 'get');
 }
 
 export function run(sql, params = {}) {
-  return db.prepare(sql).run(sanitizeParams(sql, params));
+  return executePrepared(sql, params, 'run');
 }
 
 export function withTransaction(task) {
-  db.exec('BEGIN');
+  let began = false;
   try {
+    db.exec('BEGIN IMMEDIATE');
+    began = true;
     const result = task();
     db.exec('COMMIT');
     return result;
   } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
+    if (began) {
+      try {
+        db.exec('ROLLBACK');
+      } catch {
+        // Ignore rollback failures when the transaction never fully opened.
+      }
+    }
+    throw normalizeDatabaseError(error);
   }
 }
