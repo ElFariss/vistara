@@ -70,7 +70,26 @@ export function normalizeSettingsSection(value = 'user') {
 }
 
 export function resolveInitialConversationId(conversations = []) {
-  return Array.isArray(conversations) && conversations[0]?.id ? conversations[0].id : null;
+  if (!Array.isArray(conversations) || conversations.length === 0) {
+    return null;
+  }
+
+  const meaningfulConversation = conversations.find((conversation) => {
+    if (!conversation?.id) {
+      return false;
+    }
+
+    const messageCount = Number(conversation.message_count || 0);
+    if (messageCount > 0) {
+      return true;
+    }
+
+    const preview = String(conversation.last_message_preview || '').trim();
+    const role = String(conversation.last_message_role || '').trim();
+    return preview.length > 0 || role.length > 0;
+  });
+
+  return meaningfulConversation?.id || null;
 }
 
 export function resolveNextConversationIdAfterDelete({

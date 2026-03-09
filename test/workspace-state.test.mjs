@@ -51,7 +51,12 @@ test('normalizeSettingsSection locks the modal into user or agent groups', () =>
 
 test('resolveInitialConversationId keeps the empty session state reachable', () => {
   assert.equal(resolveInitialConversationId([]), null);
-  assert.equal(resolveInitialConversationId([{ id: 'conv_1' }]), 'conv_1');
+  assert.equal(resolveInitialConversationId([{ id: 'conv_1' }]), null);
+  assert.equal(resolveInitialConversationId([{ id: 'conv_1', message_count: 2 }]), 'conv_1');
+  assert.equal(resolveInitialConversationId([
+    { id: 'conv_empty', message_count: 0, last_message_preview: '', last_message_role: null },
+    { id: 'conv_real', message_count: 1, last_message_preview: 'Halo', last_message_role: 'assistant' },
+  ]), 'conv_real');
 });
 
 test('resolveNextConversationIdAfterDelete clears the active session when the last one is removed', () => {
@@ -64,8 +69,14 @@ test('resolveNextConversationIdAfterDelete clears the active session when the la
   assert.equal(resolveNextConversationIdAfterDelete({
     activeConversationId: 'conv_1',
     deletedConversationId: 'conv_1',
-    remainingConversations: [{ id: 'conv_2' }],
+    remainingConversations: [{ id: 'conv_2', message_count: 2 }],
   }), 'conv_2');
+
+  assert.equal(resolveNextConversationIdAfterDelete({
+    activeConversationId: 'conv_1',
+    deletedConversationId: 'conv_1',
+    remainingConversations: [{ id: 'conv_2', message_count: 0 }],
+  }), null);
 });
 
 test('didDeleteActiveConversation only returns true for the active deleted session', () => {
