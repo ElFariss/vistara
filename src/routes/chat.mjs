@@ -21,6 +21,16 @@ export function registerChatRoutes(router) {
       );
     }
 
+    if (error?.statusCode) {
+      return sendError(
+        res,
+        error.statusCode,
+        error.code || fallbackCode,
+        error.message || fallbackMessage,
+        error.details ?? null,
+      );
+    }
+
     return sendError(res, 500, fallbackCode, error?.message || fallbackMessage);
   }
 

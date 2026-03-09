@@ -7,14 +7,14 @@
   <title>Vistara</title>
   <meta name="description" content="Vistara - AI analytics workspace berbasis upload dataset untuk bisnis." />
   <meta name="theme-color" content="#faf7f2" />
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/logo-light.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
     rel="stylesheet" />
   <link rel="stylesheet" href="/vendor/gridstack.min.css" />
-  <link rel="stylesheet" href="/styles.css?v=20260308p" />
+  <link rel="stylesheet" href="/styles.css?v=20260309a" />
 </head>
 
 <body>
@@ -24,7 +24,8 @@
   <div class="app-shell">
     <header class="app-header">
       <a id="brandHomeLink" class="brand-home" href="/" aria-label="Kembali ke landing page">
-        <span class="brand-home-mark" aria-hidden="true"></span>
+        <img class="brand-home-logo brand-home-logo-light" src="/logo-light.png" alt="" aria-hidden="true" />
+        <img class="brand-home-logo brand-home-logo-dark" src="/logo-dark.png" alt="" aria-hidden="true" />
         <span class="brand-home-text">Vistara</span>
       </a>
       <div class="header-actions">
@@ -33,7 +34,7 @@
             <path d="M12 8.3a3.7 3.7 0 1 0 0 7.4 3.7 3.7 0 0 0 0-7.4zm9.2 3.7-.9-.5a7.7 7.7 0 0 0-.4-1l.5-.9a1.2 1.2 0 0 0-.2-1.5l-1.2-1.2a1.2 1.2 0 0 0-1.5-.2l-.9.5c-.3-.2-.7-.3-1-.4l-.5-.9A1.2 1.2 0 0 0 14 4h-2a1.2 1.2 0 0 0-1.1.7l-.5.9c-.3.1-.7.2-1 .4l-.9-.5a1.2 1.2 0 0 0-1.5.2L5.8 6.9a1.2 1.2 0 0 0-.2 1.5l.5.9c-.2.3-.3.7-.4 1l-.9.5A1.2 1.2 0 0 0 4 12v2c0 .5.3.9.7 1.1l.9.5c.1.3.2.7.4 1l-.5.9a1.2 1.2 0 0 0 .2 1.5l1.2 1.2c.4.4 1 .5 1.5.2l.9-.5c.3.2.7.3 1 .4l.5.9c.2.4.6.7 1.1.7h2c.5 0 .9-.3 1.1-.7l.5-.9c.3-.1.7-.2 1-.4l.9.5c.5.3 1.1.2 1.5-.2l1.2-1.2c.4-.4.5-1 .2-1.5l-.5-.9c.2-.3.3-.7.4-1l.9-.5c.4-.2.7-.6.7-1.1v-2c0-.5-.3-.9-.7-1.1z"></path>
           </svg>
         </button>
-        <button id="headerCtaBtn" class="cta-nav" type="button">Mulai Gratis</button>
+        <button id="headerCtaBtn" class="cta-nav" type="button">Mulai</button>
         <button id="headerLoginBtn" class="ghost">Masuk</button>
         <button id="logoutBtn" class="ghost" hidden>Logout</button>
       </div>
@@ -46,7 +47,7 @@
           <h2 class="landing-welcome-title">Ngobrol dengan data bisnis tanpa ribet teknis.</h2>
           <p class="landing-welcome-copy">Upload Excel, CSV, atau JSON lalu tanya insight bisnis Anda dengan bahasa yang biasa dipakai sehari-hari.</p>
           <div class="landing-welcome-actions">
-            <button id="landingWelcomeCta" type="button">Mulai Gratis</button>
+            <button id="landingWelcomeCta" type="button">Mulai</button>
             <button id="landingWelcomeDemo" type="button" class="ghost">Coba Demo</button>
           </div>
         </div>
@@ -64,14 +65,6 @@
             <p class="reveal-on-scroll">Vistara dirancang untuk pemilik UMKM, founder, dan tim operasional.</p>
             <p class="reveal-on-scroll">Upload data Anda sekali, lalu tanya insight dengan Bahasa Indonesia natural.</p>
             <p class="reveal-on-scroll">Dapatkan visual siap presentasi dalam alur chat yang tetap simpel.</p>
-          </div>
-          <div class="hero-actions">
-            <button id="landingDemo" type="button">Coba Demo (tanpa login)</button>
-            <button id="landingCta" type="button" class="ghost">Daftar Gratis</button>
-          </div>
-          <div class="hero-cta-notes">
-            <p><strong>Coba Demo:</strong> langsung pakai sample dataset tanpa akun.</p>
-            <p><strong>Daftar Gratis:</strong> simpan dashboard, histori chat, dan personalisasi workspace.</p>
           </div>
         </div>
         <div class="hero-panel">
@@ -112,19 +105,24 @@
         </div>
       </div>
 
-      <section class="pain-strip" aria-label="Masalah umum bisnis kecil">
-        <article class="reveal-on-scroll">
-          <h3>Data tersebar di banyak file</h3>
-          <p>Laporan jadi lambat karena harus gabung manual dari berbagai sumber.</p>
-        </article>
-        <article class="reveal-on-scroll">
-          <h3>Sulit baca tren penting</h3>
-          <p>Omzet naik turun tidak cepat terlihat, sehingga keputusan sering terlambat.</p>
-        </article>
-        <article class="reveal-on-scroll">
-          <h3>Dashboard terasa rumit</h3>
-          <p>Tool BI tradisional butuh setup teknis yang menyita waktu operasional.</p>
-        </article>
+      <section class="pain-strip-section" aria-label="Kenapa Vistara itu penting">
+        <div class="section-head reveal-on-scroll">
+          <p class="hero-eyebrow">Kenapa Vistara itu penting?</p>
+        </div>
+        <div class="pain-strip">
+          <article class="reveal-on-scroll">
+            <h3>Data tersebar di banyak file</h3>
+            <p>Laporan jadi lambat karena harus gabung manual dari berbagai sumber.</p>
+          </article>
+          <article class="reveal-on-scroll">
+            <h3>Sulit baca tren penting</h3>
+            <p>Omzet naik turun tidak cepat terlihat, sehingga keputusan sering terlambat.</p>
+          </article>
+          <article class="reveal-on-scroll">
+            <h3>Dashboard terasa rumit</h3>
+            <p>Tool BI tradisional butuh setup teknis yang menyita waktu operasional.</p>
+          </article>
+        </div>
       </section>
 
       <div class="landing-features">
@@ -245,39 +243,76 @@
 
       <div class="landing-bottom reveal-on-scroll">
         <p>Mulai gratis. Tanpa kartu kredit. Setup kurang dari 2 menit.</p>
-        <button id="landingCtaBottom" type="button">Daftar & Setup Sekarang</button>
+        <button id="landingCtaBottom" type="button">Mulai</button>
       </div>
 
-      <section class="landing-final-cta reveal-on-scroll" aria-label="Final CTA">
+      <section id="landingFinalCta" class="landing-final-cta reveal-on-scroll" aria-label="Final CTA">
         <p>Sudah siap melihat data Anda jadi insight dalam hitungan detik?</p>
-        <button id="landingTryNowBtn" type="button">Mau coba sekarang?</button>
+        <button id="landingTryNowBtn" type="button">Mulai</button>
       </section>
     </section>
 
     <section id="authPage" class="page-view auth-page hidden">
-      <div class="auth-card">
-        <h2>Masuk ke Workspace</h2>
-        <p class="auth-sub">Langkah 1 dari 2: autentikasi akun</p>
+      <div class="auth-shell">
+        <div class="auth-card">
+          <h2>Masuk ke Workspace</h2>
+          <p class="auth-sub">Langkah 1 dari 2: autentikasi akun</p>
 
-        <div class="tabs" id="authTabs" role="tablist">
-          <button class="tab active" data-auth-tab="login" type="button">Login</button>
-          <button class="tab" data-auth-tab="register" type="button">Register</button>
+          <div class="tabs" id="authTabs" role="tablist">
+            <button class="tab active" data-auth-tab="login" type="button">Login</button>
+            <button class="tab" data-auth-tab="register" type="button">Register</button>
+          </div>
+
+          <form id="loginForm" class="stack auth-form">
+            <label>Email<input name="email" type="email" required autocomplete="email" placeholder="nama@bisnis.com" /></label>
+            <label>Password<input name="password" type="password" required autocomplete="current-password" placeholder="Masukkan password" /></label>
+            <button type="submit">Masuk</button>
+          </form>
+
+          <form id="registerForm" class="stack auth-form hidden">
+            <label>Nama<input name="name" required autocomplete="name" placeholder="Nama lengkap" /></label>
+            <label>Email<input name="email" type="email" required autocomplete="email" placeholder="nama@bisnis.com" /></label>
+            <label>Password<input name="password" type="password" minlength="8" required autocomplete="new-password" placeholder="Min. 8 karakter" /></label>
+            <label>No. HP<input name="phone" autocomplete="tel" placeholder="08xx-xxxx-xxxx" /></label>
+            <label>Nama Bisnis<input name="business_name" required autocomplete="organization" placeholder="Nama bisnis kamu" /></label>
+            <button type="submit">Buat Akun</button>
+          </form>
         </div>
 
-        <form id="loginForm" class="stack auth-form">
-          <label>Email<input name="email" type="email" required autocomplete="email" placeholder="nama@bisnis.com" /></label>
-          <label>Password<input name="password" type="password" required autocomplete="current-password" placeholder="Masukkan password" /></label>
-          <button type="submit">Masuk</button>
-        </form>
-
-        <form id="registerForm" class="stack auth-form hidden">
-          <label>Nama<input name="name" required autocomplete="name" placeholder="Nama lengkap" /></label>
-          <label>Email<input name="email" type="email" required autocomplete="email" placeholder="nama@bisnis.com" /></label>
-          <label>Password<input name="password" type="password" minlength="8" required autocomplete="new-password" placeholder="Min. 8 karakter" /></label>
-          <label>No. HP<input name="phone" autocomplete="tel" placeholder="08xx-xxxx-xxxx" /></label>
-          <label>Nama Bisnis<input name="business_name" required autocomplete="organization" placeholder="Nama bisnis kamu" /></label>
-          <button type="submit">Buat Akun</button>
-        </form>
+        <aside class="auth-onboarding" aria-label="Panduan onboarding">
+          <div class="auth-onboarding-head">
+            <p class="hero-eyebrow">Onboarding</p>
+            <h3>Mulai dari file, lanjut ke insight, lalu simpan dashboard.</h3>
+          </div>
+          <div class="auth-onboarding-slides">
+            <article class="auth-onboarding-slide is-active" data-onboarding-slide="0">
+              <span class="auth-onboarding-step">1</span>
+              <h4>Masukkan data ke chat</h4>
+              <p>Drag file langsung ke area chat, atau klik tombol `+` untuk upload dataset dari perangkat Anda.</p>
+            </article>
+            <article class="auth-onboarding-slide" data-onboarding-slide="1" hidden>
+              <span class="auth-onboarding-step">2</span>
+              <h4>Minta agent menganalisis</h4>
+              <p>Tanya dengan bahasa biasa seperti insight minggu ini, tren penjualan, atau anomali yang perlu dicek.</p>
+            </article>
+            <article class="auth-onboarding-slide" data-onboarding-slide="2" hidden>
+              <span class="auth-onboarding-step">3</span>
+              <h4>Generate dashboard</h4>
+              <p>Biarkan agent menyusun widget dan halaman dashboard berdasarkan kekuatan data yang benar-benar tersedia.</p>
+            </article>
+            <article class="auth-onboarding-slide" data-onboarding-slide="3" hidden>
+              <span class="auth-onboarding-step">4</span>
+              <h4>Edit dan simpan</h4>
+              <p>Sesuaikan widget, rapikan layout, lalu simpan dashboard untuk dipakai lagi di sesi berikutnya.</p>
+            </article>
+          </div>
+          <div class="auth-onboarding-nav" id="authOnboardingNav" aria-label="Navigasi onboarding">
+            <button type="button" class="auth-onboarding-dot is-active" data-onboarding-dot="0" aria-label="Slide onboarding 1"></button>
+            <button type="button" class="auth-onboarding-dot" data-onboarding-dot="1" aria-label="Slide onboarding 2"></button>
+            <button type="button" class="auth-onboarding-dot" data-onboarding-dot="2" aria-label="Slide onboarding 3"></button>
+            <button type="button" class="auth-onboarding-dot" data-onboarding-dot="3" aria-label="Slide onboarding 4"></button>
+          </div>
+        </aside>
       </div>
     </section>
 
@@ -318,10 +353,8 @@
         </aside>
 
         <section id="chatPane" class="workspace-pane chat-pane">
-          <div id="chatPaneHead" class="chat-pane-head">
-            <div class="chat-head-copy">
-              <h2 id="chatTitle">Percakapan baru</h2>
-            </div>
+          <div id="chatPaneHead" class="chat-pane-head" hidden>
+            <div class="chat-head-spacer" aria-hidden="true"></div>
             <div class="chat-head-actions">
               <button id="openCanvasBtn" type="button" class="ghost icon-nav-btn" hidden aria-label="Buka dashboard" title="Buka dashboard">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v5h-7zM13 11h7v9h-7zM4 13h7v7H4z"></path></svg>
@@ -359,14 +392,21 @@
             </div>
 
             <form id="chatForm" class="composer">
-              <label class="attach-btn">
-                <input id="chatFile" type="file" />
-                Tambah Dataset
-              </label>
-              <textarea id="chatInput" rows="1" placeholder='Contoh: "Omzet 7 hari terakhir" atau "Kenapa profit turun?"'></textarea>
-              <div class="composer-actions">
-                <span id="fileLabel" class="file-label">Tidak ada file</span>
-                <button id="sendBtn" type="submit">Kirim</button>
+              <div class="composer-row">
+                <label class="attach-btn attach-btn-compact" aria-label="Tambah dataset" title="Tambah dataset">
+                  <input id="chatFile" type="file" />
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+                  <span class="sr-only">Tambah dataset</span>
+                </label>
+                <div class="composer-input-shell">
+                  <textarea id="chatInput" rows="1" placeholder="Tanya data Anda"></textarea>
+                  <button id="sendBtn" type="submit" aria-label="Kirim pesan" title="Kirim">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 11l6-6 6 6"></path></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="composer-meta">
+                <span id="fileLabel" class="file-label" hidden>Tidak ada file</span>
               </div>
             </form>
           </div>
@@ -576,7 +616,7 @@
   <script src="/vendor/gridstack-all.js"></script>
   <script src="/vendor/chart.umd.min.js"></script>
   <script src="/runtime-env.js"></script>
-  <script type="module" src="/app.js?v=20260308f"></script>
+  <script type="module" src="/app.js?v=20260309a"></script>
 </body>
 
 </html>

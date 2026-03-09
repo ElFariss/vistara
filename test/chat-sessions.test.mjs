@@ -190,6 +190,64 @@ test('processChatMessage answers dataset inspection questions in chat', async ()
   }
 });
 
+test('processChatMessage returns a structured error for missing datasets', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    await assert.rejects(
+      () =>
+        processChatMessage({
+          tenantId,
+          userId,
+          message: 'berapa omzet hari ini?',
+        }),
+      (error) => error?.code === 'DATASET_REQUIRED' && error?.statusCode === 400,
+    );
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('processChatMessage persists a dataset-required error in conversation history', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    await assert.rejects(
+      () =>
+        processChatMessage({
+          tenantId,
+          userId,
+          message: 'berapa omzet hari ini?',
+        }),
+      (error) => error?.code === 'DATASET_REQUIRED' && error?.statusCode === 400,
+    );
+
+    const history = getChatHistory({ tenantId, userId });
+    assert.equal(history.messages.length, 2);
+    assert.equal(history.messages[0].role, 'user');
+    assert.equal(history.messages[1].role, 'assistant');
+    assert.equal(history.messages[1].payload?.error?.code, 'DATASET_REQUIRED');
+    assert.match(history.messages[1].content, /^Error:/);
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('processChatMessage allows generic smalltalk prompts', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    const response = await processChatMessage({
+      tenantId,
+      userId,
+      message: 'hi',
+    });
+
+    assert.equal(response.intent.intent, 'smalltalk');
+    assert.equal(response.presentation_mode, 'chat');
+    assert.match(response.answer, /halo/i);
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
 test('processChatMessage rejects an explicit stale conversation id instead of writing into latest', async () => {
   const { tenantId, userId } = seedTenantUser();
   try {
@@ -261,6 +319,46 @@ test('chat routes return 404 for explicit stale conversation ids', async () => {
     });
     assert.equal(chatResponse.statusCode, 404);
     assert.equal(chatResponse.payload.error.code, 'CONVERSATION_NOT_FOUND');
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('chat routes return 400 for structured chat request errors', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    const router = new Router();
+    registerChatRoutes(router);
+
+    const datasetRequiredResponse = await invokeRoute(router, 'POST', '/api/chat', {
+      user: { id: userId, tenant_id: tenantId },
+      body: {
+        message: 'berapa omzet hari ini?',
+      },
+    });
+    assert.equal(datasetRequiredResponse.statusCode, 400);
+    assert.equal(datasetRequiredResponse.payload.error.code, 'DATASET_REQUIRED');
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('chat routes allow generic smalltalk prompts', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    const router = new Router();
+    registerChatRoutes(router);
+
+    const response = await invokeRoute(router, 'POST', '/api/chat', {
+      user: { id: userId, tenant_id: tenantId },
+      body: {
+        message: 'hi',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.payload.intent.intent, 'smalltalk');
+    assert.match(response.payload.answer, /halo/i);
   } finally {
     cleanupTenant(tenantId);
   }

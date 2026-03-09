@@ -92,11 +92,14 @@ export function didDeleteActiveConversation({
   return Boolean(activeConversationId) && activeConversationId === deletedConversationId;
 }
 
-export function getChatHeaderState({
-  activeConversation = null,
-  fallbackTitle = '',
+export function shouldCenterComposer({
+  messageCount = 0,
 } = {}) {
-  return {
-    title: normalizeConversationTitle(activeConversation?.title || fallbackTitle),
-  };
+  return Number(messageCount || 0) === 0;
+}
+
+export function shouldShowChatHeader({
+  hasCanvasWidgets = false,
+} = {}) {
+  return Boolean(hasCanvasWidgets);
 }

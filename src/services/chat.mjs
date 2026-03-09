@@ -24,6 +24,25 @@ export class ConversationNotFoundError extends Error {
   }
 }
 
+export class ChatRequestError extends Error {
+  constructor(code = 'CHAT_REQUEST_INVALID', message = 'Permintaan chat tidak valid.', statusCode = 400) {
+    super(message);
+    this.name = 'ChatRequestError';
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
+
+export class DatasetRequiredError extends ChatRequestError {
+  constructor() {
+    super(
+      'DATASET_REQUIRED',
+      'Dataset belum tersedia. Upload file data dulu (CSV/JSON/XLSX/XLS) atau gunakan Demo Dataset, lalu coba pertanyaan ini lagi.',
+      400,
+    );
+  }
+}
+
 function isDefaultConversationTitle(title) {
   return String(title || '').trim().toLowerCase() === DEFAULT_CONVERSATION_TITLE.toLowerCase();
 }
@@ -172,6 +191,37 @@ function createMessage({ conversationId, tenantId, userId, role, content, payloa
   );
 
   return id;
+}
+
+function persistAssistantErrorMessage({
+  conversationId,
+  tenantId,
+  error,
+  intent = null,
+}) {
+  const message = error?.message || 'Permintaan tidak dapat diproses.';
+  const payload = {
+    answer: `Error: ${message}`,
+    widgets: [],
+    artifacts: [],
+    intent,
+    presentation_mode: 'chat',
+    error: {
+      code: error?.code || 'CHAT_FAILED',
+      message,
+      status: error?.statusCode || 500,
+      details: error?.details ?? null,
+    },
+  };
+
+  createMessage({
+    conversationId,
+    tenantId,
+    userId: null,
+    role: 'assistant',
+    content: payload.answer,
+    payload,
+  });
 }
 
 function maybeAutoTitleConversation({ tenantId, userId, conversationId, message }) {
@@ -539,11 +589,17 @@ function buildSmalltalkAnswer(message, datasetReady, userDisplayName = null) {
     return 'Saya aktif dan siap bantu analisis data Anda.';
   }
 
-  if (datasetReady) {
-    return `Halo ${safeName}. Saya siap bantu analisis data Anda. Coba tanya: "Omzet 7 hari terakhir" atau "Buat dashboard performa bulan ini".`;
+  if (/\b(halo|hai|hi|hello|pagi|siang|sore|malam)\b/i.test(lower)) {
+    return datasetReady
+      ? 'Halo. Saya siap bantu analisis data Anda. Coba minta ringkasan, tren, atau dashboard.'
+      : 'Halo. Saya siap bantu. Upload dataset saat siap, lalu tanya insight bisnis Anda.';
   }
 
-  return `Halo ${safeName}. Upload dataset dulu (CSV/JSON/XLSX/XLS), lalu saya bantu analisis secara instan.`;
+  if (!datasetReady && /\b(apa yang bisa kamu lakukan|bisa bantu apa|cara pakai|mulai dari mana)\b/i.test(lower)) {
+    return `Upload dataset dulu (CSV/JSON/XLSX/XLS), lalu saya bantu analisis secara instan untuk ${safeName}.`;
+  }
+
+  return 'Saya siap bantu. Tanyakan insight data, tren, atau minta dashboard kapan saja.';
 }
 
 export async function processChatMessage({
@@ -579,30 +635,14 @@ export async function processChatMessage({
   const userDisplayName = lookupUserDisplayName(tenantId, userId);
 
   if (!datasetReady && intent.intent !== 'data_management' && intent.intent !== 'smalltalk') {
-    const responsePayload = {
-      answer:
-        'Dataset belum tersedia. Upload file data dulu (CSV/JSON/XLSX/XLS) atau gunakan Demo Dataset, lalu coba pertanyaan ini lagi.',
-      widgets: [],
-      artifacts: [],
-      intent,
-      presentation_mode: 'chat',
-      requires_dataset: true,
-    };
-
-    createMessage({
+    const error = new DatasetRequiredError();
+    persistAssistantErrorMessage({
       conversationId: conversation.id,
       tenantId,
-      userId: null,
-      role: 'assistant',
-      content: responsePayload.answer,
-      payload: responsePayload,
+      error,
+      intent,
     });
-
-    return {
-      conversation_id: conversation.id,
-      conversation: getConversationWithStats(tenantId, userId, conversation.id),
-      ...responsePayload,
-    };
+    throw error;
   }
 
   let responsePayload = {
