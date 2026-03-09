@@ -21,14 +21,40 @@ export function resolvePublicErrorMessage(error, fallbackMessage = 'Permintaan t
   return fallbackMessage;
 }
 
+export function resolveHttpError(error, fallback = {}) {
+  const fallbackStatusCode = Number(fallback.statusCode || 500);
+  const fallbackCode = fallback.code || 'INTERNAL_ERROR';
+  const fallbackMessage = fallback.message || 'Terjadi kesalahan internal server.';
+  const statusCode = Number(error?.statusCode || 0);
+
+  if (statusCode >= 400 && statusCode < 600) {
+    return {
+      statusCode,
+      code: typeof error?.code === 'string' && error.code.trim() ? error.code.trim() : fallbackCode,
+      message: resolvePublicErrorMessage(error, fallbackMessage),
+    };
+  }
+
+  return {
+    statusCode: fallbackStatusCode,
+    code: fallbackCode,
+    message: fallbackMessage,
+  };
+}
+
 export function sendError(res, statusCode, code, message, details = null) {
+  const error = {
+    code,
+    message,
+  };
+
+  if (details !== null && details !== undefined) {
+    error.details = details;
+  }
+
   sendJson(res, statusCode, {
     ok: false,
-    error: {
-      code,
-      message,
-      details,
-    },
+    error,
   });
 }
 

@@ -7,9 +7,10 @@ import { config } from './config.mjs';
 import { Router } from './router.mjs';
 import { authenticateRequest } from './http/auth.mjs';
 import { resolveAllowedOrigin } from './http/cors.mjs';
-import { createRateLimiter, shouldRateLimitPath } from './http/rateLimit.mjs';
+import { createRateLimiter, resolveRateLimitPolicy } from './http/rateLimit.mjs';
 import { getClientIp, parseRequestBody, parseUrl } from './http/request.mjs';
-import { sendError, sendJson, sendMethodNotAllowed, sendNotFound } from './http/response.mjs';
+import { resolveHttpError, sendError, sendJson, sendMethodNotAllowed, sendNotFound } from './http/response.mjs';
+import { applySecurityHeaders } from './http/securityHeaders.mjs';
 import { resolveStaticRelativePath, shouldDisableStaticCache } from './http/staticAssets.mjs';
 import { createLogger } from './utils/logger.mjs';
 import { registerAuthRoutes } from './routes/auth.mjs';
@@ -27,7 +28,8 @@ const __dirname = path.dirname(__filename);
 const publicDir = path.resolve(__dirname, '../public');
 
 const router = new Router();
-const rateLimit = createRateLimiter(config.rateLimitPerMinute);
+const defaultRateLimit = createRateLimiter(config.rateLimitPerMinute);
+const demoAuthRateLimit = createRateLimiter(config.demoAuthRateLimitPerMinute);
 let shuttingDown = false;
 
 registerAuthRoutes(router);
@@ -117,6 +119,7 @@ const server = http.createServer(async (req, res) => {
   const method = req.method || 'GET';
   const { pathname, searchParams } = parseUrl(req);
 
+  applySecurityHeaders(res);
   applyCors(req, res);
 
   if (method === 'OPTIONS') {
@@ -137,8 +140,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   const ip = getClientIp(req);
-  if (shouldRateLimitPath(pathname)) {
-    const limit = rateLimit(`${ip}:${pathname}`);
+  const rateLimitPolicy = resolveRateLimitPolicy(pathname, {
+    defaultLimitPerMinute: config.rateLimitPerMinute,
+    demoAuthLimitPerMinute: config.demoAuthRateLimitPerMinute,
+  });
+  if (rateLimitPolicy.enabled) {
+    const limiter = rateLimitPolicy.scope === 'auth-demo' ? demoAuthRateLimit : defaultRateLimit;
+    const limit = limiter(`${ip}:${rateLimitPolicy.scope}`);
     res.setHeader('X-RateLimit-Remaining', String(limit.remaining ?? 0));
     if (!limit.allowed) {
       res.setHeader('Retry-After', String(limit.retryAfterSeconds || 60));
@@ -202,7 +210,12 @@ const server = http.createServer(async (req, res) => {
     });
 
     if (!res.headersSent) {
-      sendError(res, 500, 'INTERNAL_ERROR', 'Terjadi kesalahan internal server.');
+      const httpError = resolveHttpError(error, {
+        statusCode: 500,
+        code: 'INTERNAL_ERROR',
+        message: 'Terjadi kesalahan internal server.',
+      });
+      sendError(res, httpError.statusCode, httpError.code, httpError.message);
     } else {
       res.end();
     }

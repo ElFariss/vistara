@@ -1,6 +1,16 @@
 import { config } from '../config.mjs';
 import { parseMultipartBody } from './multipart.mjs';
 
+export class RequestBodyError extends Error {
+  constructor(code, message, statusCode, publicMessage = message) {
+    super(message);
+    this.name = 'RequestBodyError';
+    this.code = code;
+    this.statusCode = statusCode;
+    this.publicMessage = publicMessage;
+  }
+}
+
 export function parseUrl(req) {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   return {
@@ -56,11 +66,33 @@ export async function readBody(req, maxBytes = config.maxUploadSizeBytes) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    let settled = false;
+
+    const finishReject = (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    };
+
+    const finishResolve = (value) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(value);
+    };
 
     req.on('data', (chunk) => {
       size += chunk.length;
       if (size > maxBytes) {
-        reject(new Error(`Payload melebihi batas ${maxBytes} bytes.`));
+        finishReject(new RequestBodyError(
+          'PAYLOAD_TOO_LARGE',
+          `Payload melebihi batas ${maxBytes} bytes.`,
+          413,
+          'Ukuran request melebihi batas maksimum.',
+        ));
         req.destroy();
         return;
       }
@@ -68,10 +100,15 @@ export async function readBody(req, maxBytes = config.maxUploadSizeBytes) {
     });
 
     req.on('end', () => {
-      resolve(Buffer.concat(chunks));
+      finishResolve(Buffer.concat(chunks));
     });
 
-    req.on('error', reject);
+    req.on('error', (error) => {
+      if (settled) {
+        return;
+      }
+      finishReject(error);
+    });
   });
 }
 
@@ -88,12 +125,16 @@ export async function parseRequestBody(req) {
     try {
       return JSON.parse(body.toString('utf8'));
     } catch {
-      throw new Error('JSON body tidak valid.');
+      throw new RequestBodyError('INVALID_JSON', 'JSON body tidak valid.', 400);
     }
   }
 
   if (contentType.includes('multipart/form-data')) {
-    return parseMultipartBody(body, rawContentType);
+    try {
+      return parseMultipartBody(body, rawContentType);
+    } catch {
+      throw new RequestBodyError('INVALID_MULTIPART', 'Body multipart tidak valid.', 400);
+    }
   }
 
   if (contentType.includes('application/x-www-form-urlencoded')) {

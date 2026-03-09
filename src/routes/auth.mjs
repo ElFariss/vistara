@@ -24,7 +24,7 @@ function buildOtpSendPayload({ otpPreview = null } = {}) {
     message: 'Jika akun dan nomor telepon tersedia, OTP akan dikirim.',
   };
 
-  if (otpPreview && !config.isProduction) {
+  if (otpPreview && config.otpPreviewEnabled) {
     payload.otp_preview = otpPreview;
   }
 

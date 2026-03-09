@@ -10,6 +10,7 @@ import { generateReport } from './reports.mjs';
 import { createGoal } from './goals.mjs';
 import { logAudit } from './audit.mjs';
 import { inspectDatasetQuestion } from './dataProfile.mjs';
+import { resolvePublicErrorMessage } from '../http/response.mjs';
 
 const DEFAULT_CONVERSATION_TITLE = 'Percakapan baru';
 const AUTO_TITLE_MAX_LENGTH = 56;
@@ -199,9 +200,9 @@ function persistAssistantErrorMessage({
   error,
   intent = null,
 }) {
-  const message = error?.message || 'Permintaan tidak dapat diproses.';
+  const message = resolvePublicErrorMessage(error, 'Permintaan tidak dapat diproses.');
   const payload = {
-    answer: `Error: ${message}`,
+    answer: message,
     widgets: [],
     artifacts: [],
     intent,
@@ -210,7 +211,6 @@ function persistAssistantErrorMessage({
       code: error?.code || 'CHAT_FAILED',
       message,
       status: error?.statusCode || 500,
-      details: error?.details ?? null,
       persistedInConversation: true,
     },
   };
@@ -623,11 +623,11 @@ function buildDashboardAgentError(error, options = {}) {
 
   return new DashboardAgentError({
     code: error?.code || 'DASHBOARD_AGENT_FAILED',
-    message: error?.message || 'Gagal membuat dashboard. Coba lagi.',
+    message: resolvePublicErrorMessage(error, 'Gagal membuat dashboard. Coba lagi.'),
     statusCode: error?.statusCode || 503,
     retryable: Boolean(error?.retryable),
     reason: error?.reason || error?.code || 'dashboard_agent_failed',
-    details: error?.details ?? options.details ?? null,
+    details: null,
   });
 }
 
@@ -847,7 +847,7 @@ export async function processChatMessage({
         if (!config.geminiApiKey) {
           throw new DashboardAgentError({
             code: 'AI_SERVICE_UNAVAILABLE',
-            message: 'Layanan AI belum dikonfigurasi untuk membuat dashboard.',
+            message: 'Layanan AI belum tersedia untuk membuat dashboard.',
             statusCode: 503,
             retryable: false,
             reason: 'missing_api_key',
