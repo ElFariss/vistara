@@ -219,7 +219,38 @@ test('resolveCanvasState falls back to saved dashboard widgets when the conversa
     canvasPagesCount: 2,
   }), {
     canvasWidgets: [messageWidget],
+    canvasPagesCount: 1,
+    canvasPage: 1,
+  });
+});
+
+test('canvas state helpers collapse stale extra pages when widgets only occupy page one', () => {
+  const singlePageWidget = {
+    id: 'widget_single',
+    layout: { page: 1 },
+  };
+
+  assert.deepEqual(resolveDashboardResetState({
+    preserveDashboard: true,
+    currentDashboard: { id: 'dash_1' },
+    canvasWidgets: [singlePageWidget],
+    canvasPage: 2,
     canvasPagesCount: 2,
+  }), {
+    currentDashboard: { id: 'dash_1' },
+    canvasWidgets: [singlePageWidget],
+    canvasPage: 1,
+    canvasPagesCount: 1,
+  });
+
+  assert.deepEqual(resolveCanvasState({
+    messageWidgets: [singlePageWidget],
+    dashboardWidgets: [],
+    canvasPage: 2,
+    canvasPagesCount: 2,
+  }), {
+    canvasWidgets: [singlePageWidget],
+    canvasPagesCount: 1,
     canvasPage: 1,
   });
 });
