@@ -88,6 +88,7 @@ const state = {
   currentDashboard: null,
   canvasWidgets: [],
   workspaceLoaded: false,
+  isWorkspaceBooting: false,
   datasetReady: false,
   schema: null,
   grid: null,
@@ -172,9 +173,15 @@ const refs = {
   authTabs: document.getElementById('authTabs'),
   loginForm: document.getElementById('loginForm'),
   registerForm: document.getElementById('registerForm'),
+  loginPasswordInput: document.getElementById('loginPasswordInput'),
+  loginPasswordToggle: document.getElementById('loginPasswordToggle'),
+  registerPasswordInput: document.getElementById('registerPasswordInput'),
+  registerPasswordToggle: document.getElementById('registerPasswordToggle'),
   authOnboardingSlides: Array.from(document.querySelectorAll('[data-onboarding-slide]')),
   authOnboardingDots: Array.from(document.querySelectorAll('[data-onboarding-dot]')),
   contextForm: document.getElementById('contextForm'),
+  workspaceLoading: document.getElementById('workspaceLoading'),
+  workspaceLoadingText: document.getElementById('workspaceLoadingText'),
 
   sessionRail: document.getElementById('sessionRail'),
   sessionRailPeekBtn: document.getElementById('sessionRailPeekBtn'),
@@ -196,6 +203,7 @@ const refs = {
 
   dataGate: document.getElementById('dataGate'),
   gateUploadInput: document.getElementById('gateUploadInput'),
+  gateUploadPickerBtn: document.getElementById('gateUploadPickerBtn'),
   gateUploadBtn: document.getElementById('gateUploadBtn'),
   gateDemoBtn: document.getElementById('gateDemoBtn'),
 
@@ -206,6 +214,7 @@ const refs = {
   chatForm: document.getElementById('chatForm'),
   chatInput: document.getElementById('chatInput'),
   chatFile: document.getElementById('chatFile'),
+  chatFileBtn: document.getElementById('chatFileBtn'),
   fileLabel: document.getElementById('fileLabel'),
 
   saveCanvasBtn: document.getElementById('saveCanvasBtn'),
@@ -294,12 +303,20 @@ function setTheme(mode) {
 
 function syncHeaderActions() {
   const workspaceVisible = state.currentPage === 'workspace';
+  const authVisible = state.currentPage === 'auth';
   const showSettings = workspaceVisible && Boolean(state.token);
   const showThemeToggle = !workspaceVisible;
   const resolvedTheme = resolveThemeMode(state.settings.theme_mode);
+  const showPublicCtas = !state.token && !authVisible;
 
   if (refs.headerSettingsBtn) {
     refs.headerSettingsBtn.hidden = !showSettings;
+  }
+  if (refs.headerLoginBtn) {
+    refs.headerLoginBtn.hidden = !showPublicCtas;
+  }
+  if (refs.headerCtaBtn) {
+    refs.headerCtaBtn.hidden = !showPublicCtas;
   }
   if (refs.themeToggle) {
     refs.themeToggle.hidden = !showThemeToggle;
@@ -470,6 +487,19 @@ function setSettingsOpen(open, options = {}) {
   document.body.classList.toggle('settings-open', state.settingsOpen);
   refs.settingsBackdrop?.classList.toggle('hidden', !state.settingsOpen);
   refs.settingsPanel?.classList.toggle('hidden', !state.settingsOpen);
+}
+
+function setWorkspaceBooting(booting, options = {}) {
+  state.isWorkspaceBooting = Boolean(booting);
+  const message = String(options.message || '').trim();
+
+  refs.workspacePage?.classList.toggle('workspace-page-loading', state.isWorkspaceBooting);
+  refs.workspaceLoading?.classList.toggle('hidden', !state.isWorkspaceBooting);
+  refs.workspacePage?.setAttribute('aria-busy', String(state.isWorkspaceBooting));
+
+  if (refs.workspaceLoadingText && message) {
+    refs.workspaceLoadingText.textContent = message;
+  }
 }
 
 function syncComposerChrome() {
@@ -944,6 +974,9 @@ function showPage(page, options = {}) {
     refs.appShell.classList.add('workspace-active');
   }
   document.body.classList.add('workspace-mode');
+  if (!state.workspaceLoaded) {
+    setWorkspaceBooting(true);
+  }
   syncAppHeaderOffset();
   syncLandingScrollCue();
 }
@@ -952,8 +985,15 @@ async function ensureWorkspaceLoaded(options = {}) {
   if (state.workspaceLoaded && !options.force) {
     return;
   }
-  await loadWorkspace();
-  state.workspaceLoaded = true;
+  setWorkspaceBooting(true, {
+    message: options.message || 'Kami memuat percakapan, dataset, dan dashboard terlebih dulu supaya tampilan tidak muncul setengah jadi.',
+  });
+  try {
+    await loadWorkspace();
+    state.workspaceLoaded = true;
+  } finally {
+    setWorkspaceBooting(false);
+  }
 }
 
 function switchAuthTab(tab) {
@@ -963,6 +1003,18 @@ function switchAuthTab(tab) {
 
   refs.loginForm.classList.toggle('hidden', tab !== 'login');
   refs.registerForm.classList.toggle('hidden', tab !== 'register');
+}
+
+function togglePasswordVisibility(input, toggle) {
+  if (!input || !toggle) {
+    return;
+  }
+
+  const showing = input.type === 'text';
+  input.type = showing ? 'password' : 'text';
+  toggle.textContent = showing ? 'Tampilkan' : 'Sembunyikan';
+  toggle.setAttribute('aria-label', showing ? 'Tampilkan password' : 'Sembunyikan password');
+  toggle.setAttribute('aria-pressed', String(!showing));
 }
 
 function setOnboardingSlide(index = 0) {
@@ -2178,6 +2230,9 @@ function renderCanvas() {
   if (state.isRenderingCanvas) {
     return;
   }
+  if (state.isWorkspaceBooting && !state.workspaceLoaded) {
+    return;
+  }
   state.isRenderingCanvas = true;
   try {
     ensureGrid();
@@ -3390,6 +3445,22 @@ refs.chatFile.addEventListener('change', () => {
   syncComposerChrome();
 });
 
+refs.gateUploadPickerBtn?.addEventListener('click', () => {
+  refs.gateUploadInput?.click();
+});
+
+refs.chatFileBtn?.addEventListener('click', () => {
+  refs.chatFile?.click();
+});
+
+refs.loginPasswordToggle?.addEventListener('click', () => {
+  togglePasswordVisibility(refs.loginPasswordInput, refs.loginPasswordToggle);
+});
+
+refs.registerPasswordToggle?.addEventListener('click', () => {
+  togglePasswordVisibility(refs.registerPasswordInput, refs.registerPasswordToggle);
+});
+
 if (refs.newSessionBtn) {
   refs.newSessionBtn.addEventListener('click', async () => {
     try {
@@ -4017,6 +4088,7 @@ refs.logoutBtn.addEventListener('click', () => {
   state.canvasPage = 1;
   state.canvasPagesCount = 1;
   state.workspaceLoaded = false;
+  state.isWorkspaceBooting = false;
   state.datasetReady = false;
   state.dataPaneCollapsed = true;
   state.configPaneCollapsed = true;
