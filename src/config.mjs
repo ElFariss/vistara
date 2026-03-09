@@ -20,6 +20,20 @@ function toList(value) {
     .filter(Boolean);
 }
 
+function toBool(value, fallback = false) {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
 const rootDir = process.cwd();
 const dataDir = path.resolve(rootDir, process.env.DATA_DIR || './data');
 const dbPath = path.resolve(rootDir, process.env.DB_PATH || path.join(dataDir, 'umkm.db'));
@@ -43,6 +57,7 @@ export const config = {
   rateLimitPerMinute: toInt(process.env.RATE_LIMIT_PER_MINUTE, 120),
   maxUploadSizeBytes: toInt(process.env.MAX_UPLOAD_SIZE_MB, 20) * 1024 * 1024,
   allowedOrigins: toList(process.env.ALLOWED_ORIGINS),
+  trustProxy: toBool(process.env.TRUST_PROXY, false),
   geminiApiKey: process.env.GEMINI_API_KEY || process.env.GEMINI_API || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-pro',
   pythonAgentUrl: process.env.PYTHON_AGENT_URL || '',
