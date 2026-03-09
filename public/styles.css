@@ -916,6 +916,13 @@ label {
   margin: 0;
 }
 
+.auth-card h1,
+.context-card h1 {
+  margin: 0;
+  font-size: clamp(1.6rem, 2.8vw, 2rem);
+  line-height: 1.1;
+}
+
 .auth-sub {
   margin: -0.25rem 0 0;
   color: var(--ink-muted);
@@ -954,6 +961,26 @@ label {
 .context-card button[type='submit'] {
   margin-top: 0.45rem;
   width: 100%;
+}
+
+.password-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.password-toggle {
+  min-height: 44px;
+  padding-inline: 0.8rem;
+  white-space: nowrap;
+}
+
+.auth-help-text {
+  margin: 0.1rem 0 0;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--ink-muted);
 }
 
 .auth-onboarding {
@@ -1034,6 +1061,7 @@ label {
 .workspace-page {
   --canvas-pane-width: 58%;
   --canvas-pane-width-px: 56vw;
+  position: relative;
   border: none;
   border-radius: 0;
   background: transparent;
@@ -1043,6 +1071,67 @@ label {
   grid-template-rows: 1fr;
   min-height: 0;
   height: 100%;
+}
+
+.workspace-page-loading .workspace-shell {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.workspace-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 34;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg) 92%, transparent), color-mix(in srgb, var(--surface) 88%, transparent)),
+    rgba(250, 247, 242, 0.84);
+  backdrop-filter: blur(12px);
+}
+
+[data-theme='dark'] .workspace-loading {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg) 94%, transparent), color-mix(in srgb, var(--surface) 90%, transparent)),
+    rgba(15, 23, 42, 0.84);
+}
+
+.workspace-loading-card {
+  width: min(100%, 460px);
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--surface) 94%, var(--bg-warm));
+  box-shadow: var(--shadow-lg);
+  padding: 1.4rem;
+  display: grid;
+  gap: 0.75rem;
+  justify-items: start;
+}
+
+.workspace-loading-card h2,
+.workspace-loading-card p {
+  margin: 0;
+}
+
+.workspace-loading-card p {
+  color: var(--ink-secondary);
+  line-height: 1.6;
+}
+
+.workspace-loading-spinner {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--accent) 16%, transparent);
+  border-top-color: var(--accent);
+  animation: workspaceSpin 900ms linear infinite;
+}
+
+@keyframes workspaceSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .utility-context-trigger {
@@ -1383,6 +1472,11 @@ label {
   margin: 0;
 }
 
+.data-gate h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
 .data-gate p {
   margin: 0;
   color: var(--ink-secondary);
@@ -1393,11 +1487,6 @@ label {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
-}
-
-.gate-upload-label {
-  display: inline-flex;
-  align-items: center;
 }
 
 .chat-thread {
@@ -1696,6 +1785,7 @@ label {
 }
 
 .attach-btn {
+  box-shadow: none;
   justify-self: start;
   border: 1px dashed rgba(232, 114, 42, 0.3);
   border-radius: var(--radius-pill);
@@ -1704,6 +1794,12 @@ label {
   padding: 0.36rem 0.77rem;
   font-size: 0.8rem;
   cursor: pointer;
+}
+
+.attach-btn:hover {
+  transform: none;
+  box-shadow: none;
+  background: color-mix(in srgb, var(--accent-light) 84%, var(--surface));
 }
 
 .attach-btn.attach-btn-compact {
@@ -1730,10 +1826,6 @@ label {
   stroke: currentColor;
   stroke-width: 1.85;
   stroke-linecap: round;
-}
-
-.attach-btn input {
-  display: none;
 }
 
 #chatInput {
@@ -2258,6 +2350,11 @@ label {
   text-align: center;
 }
 
+.canvas-page-btn {
+  width: 34px;
+  height: 34px;
+}
+
 .canvas-dock {
   position: absolute;
   left: 50%;
@@ -2275,6 +2372,17 @@ label {
   box-shadow: var(--shadow);
   max-width: calc(100% - 1.2rem);
   overflow-x: auto;
+}
+
+.canvas-dock-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+}
+
+.canvas-dock-group + .canvas-dock-group {
+  padding-left: 0.4rem;
+  border-left: 1px solid var(--line);
 }
 
 #toggleDataPaneBtn,
@@ -2839,6 +2947,14 @@ label {
   background: linear-gradient(180deg, transparent, var(--surface) 38%);
 }
 
+.settings-reset-btn {
+  opacity: 0.82;
+}
+
+.settings-reset-btn:hover {
+  opacity: 1;
+}
+
 @media (max-width: 1180px) {
   .hero-grid {
     grid-template-columns: 1fr;
@@ -3239,6 +3355,10 @@ label {
     justify-content: flex-start;
   }
 
+  .canvas-dock-group + .canvas-dock-group {
+    padding-left: 0.32rem;
+  }
+
   .canvas-stage {
     width: 1080px;
     height: 608px;
@@ -3299,7 +3419,8 @@ label {
 
 @media (prefers-reduced-motion: reduce) {
   .reveal-on-scroll,
-  .prechat-ticker {
+  .prechat-ticker,
+  .workspace-loading-spinner {
     transition: none !important;
     transform: none !important;
     opacity: 1 !important;

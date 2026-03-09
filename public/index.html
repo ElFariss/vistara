@@ -49,7 +49,7 @@
       <section class="landing-welcome reveal-on-scroll" aria-label="Welcome">
         <div>
           <p class="hero-eyebrow">Selamat Datang di Vistara</p>
-          <h2 class="landing-welcome-title">Ngobrol dengan data bisnis tanpa ribet teknis.</h2>
+          <h1 class="landing-welcome-title">Ngobrol dengan data bisnis tanpa ribet teknis.</h1>
           <p class="landing-welcome-copy">Upload Excel, CSV, atau JSON lalu tanya insight bisnis Anda dengan bahasa yang biasa dipakai sehari-hari.</p>
           <div class="landing-welcome-actions">
             <button id="landingWelcomeCta" type="button">Mulai</button>
@@ -255,7 +255,7 @@
     <section id="authPage" class="page-view auth-page hidden">
       <div class="auth-shell">
         <div class="auth-card">
-          <h2>Masuk ke Workspace</h2>
+          <h1>Masuk ke Workspace</h1>
           <p class="auth-sub">Langkah 1 dari 2: autentikasi akun</p>
 
           <div class="tabs" id="authTabs" role="tablist">
@@ -265,14 +265,25 @@
 
           <form id="loginForm" class="stack auth-form">
             <label>Email<input name="email" type="email" required autocomplete="email" placeholder="nama@bisnis.com" /></label>
-            <label>Password<input name="password" type="password" required autocomplete="current-password" placeholder="Masukkan password" /></label>
+            <label>Password
+              <span class="password-field">
+                <input id="loginPasswordInput" name="password" type="password" required autocomplete="current-password" placeholder="Masukkan password" />
+                <button id="loginPasswordToggle" class="ghost password-toggle" type="button" aria-controls="loginPasswordInput" aria-pressed="false" aria-label="Tampilkan password">Tampilkan</button>
+              </span>
+            </label>
             <button type="submit">Masuk</button>
+            <p class="auth-help-text">Belum ada reset password mandiri. Jika akun dibuat oleh tim Anda, minta admin workspace membantu akses.</p>
           </form>
 
           <form id="registerForm" class="stack auth-form hidden">
             <label>Nama<input name="name" required autocomplete="name" placeholder="Nama lengkap" /></label>
             <label>Email<input name="email" type="email" required autocomplete="email" placeholder="nama@bisnis.com" /></label>
-            <label>Password<input name="password" type="password" minlength="8" required autocomplete="new-password" placeholder="Min. 8 karakter" /></label>
+            <label>Password
+              <span class="password-field">
+                <input id="registerPasswordInput" name="password" type="password" minlength="8" required autocomplete="new-password" placeholder="Min. 8 karakter" />
+                <button id="registerPasswordToggle" class="ghost password-toggle" type="button" aria-controls="registerPasswordInput" aria-pressed="false" aria-label="Tampilkan password">Tampilkan</button>
+              </span>
+            </label>
             <label>No. HP<input name="phone" autocomplete="tel" placeholder="08xx-xxxx-xxxx" /></label>
             <label>Nama Bisnis<input name="business_name" required autocomplete="organization" placeholder="Nama bisnis kamu" /></label>
             <button type="submit">Buat Akun</button>
@@ -318,7 +329,7 @@
 
     <section id="contextPage" class="page-view context-page hidden">
       <div class="context-card">
-        <h2>Business Context</h2>
+        <h1>Lengkapi Konteks Bisnis</h1>
         <p class="auth-sub">Langkah 2 dari 2: isi konteks bisnis untuk grounding AI</p>
 
         <form id="contextForm" class="stack">
@@ -334,6 +345,14 @@
     </section>
 
     <main id="workspacePage" class="page-view workspace-page hidden">
+      <h1 id="workspaceTitle" class="sr-only">Workspace analitik Vistara</h1>
+      <section id="workspaceLoading" class="workspace-loading hidden" aria-live="polite" aria-labelledby="workspaceLoadingTitle">
+        <div class="workspace-loading-card">
+          <span class="workspace-loading-spinner" aria-hidden="true"></span>
+          <h2 id="workspaceLoadingTitle">Menyiapkan workspace Anda</h2>
+          <p id="workspaceLoadingText">Kami memuat percakapan, dataset, dan dashboard terlebih dulu supaya tampilan tidak muncul setengah jadi.</p>
+        </div>
+      </section>
       <div class="workspace-shell session-rail-collapsed">
         <button id="sessionRailPeekBtn" type="button" class="ghost session-rail-handle" aria-controls="sessionRail" aria-expanded="false" title="Buka riwayat">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>
@@ -363,13 +382,11 @@
           </div>
 
           <div id="dataGate" class="data-gate hidden">
-            <h3>Upload Dataset Dulu</h3>
+            <h2>Upload Dataset Dulu</h2>
             <p>Workspace ini bekerja dari dataset statis yang kamu upload. Tidak ada stream data real-time.</p>
             <div class="gate-actions">
-              <label class="attach-btn gate-upload-label">
-                <input id="gateUploadInput" type="file" />
-                Pilih Dataset
-              </label>
+              <input id="gateUploadInput" type="file" hidden />
+              <button id="gateUploadPickerBtn" type="button" class="ghost attach-btn gate-upload-btn">Pilih Dataset</button>
               <button id="gateUploadBtn" type="button">Upload & Gunakan</button>
               <button id="gateDemoBtn" type="button" class="ghost">Gunakan Demo test.csv</button>
             </div>
@@ -393,11 +410,11 @@
 
             <form id="chatForm" class="composer">
               <div class="composer-row">
-                <label class="attach-btn attach-btn-compact" aria-label="Tambah dataset" title="Tambah dataset">
-                  <input id="chatFile" type="file" />
+                <input id="chatFile" type="file" hidden />
+                <button id="chatFileBtn" class="ghost attach-btn attach-btn-compact" type="button" aria-label="Tambah dataset" title="Tambah dataset">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
                   <span class="sr-only">Tambah dataset</span>
-                </label>
+                </button>
                 <div class="composer-input-shell">
                   <textarea id="chatInput" rows="1" placeholder="Tanya data Anda"></textarea>
                   <button id="sendBtn" type="submit" aria-label="Kirim pesan" title="Kirim">
@@ -415,6 +432,7 @@
         <div id="panelDivider" class="panel-divider" role="separator" aria-orientation="vertical" aria-label="Ubah ukuran panel" tabindex="0"></div>
 
         <section id="canvasPane" class="workspace-pane canvas-pane">
+          <h1 id="canvasTitle" class="sr-only">Dashboard canvas</h1>
           <div class="canvas-shell">
             <aside class="data-pane" id="dataPane">
               <div class="pane-head">
@@ -430,7 +448,16 @@
                 </div>
                 <div class="canvas-bar-meta">
                   <div class="canvas-page-controls" aria-label="Navigasi slide dashboard">
+                    <button id="canvasPrevPage" type="button" class="ghost canvas-tool-btn canvas-page-btn" aria-label="Halaman sebelumnya" title="Halaman sebelumnya">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"></path></svg>
+                    </button>
                     <span id="canvasPageIndicator">Hal 1 / 1</span>
+                    <button id="canvasAddPage" type="button" class="ghost canvas-tool-btn canvas-page-btn" aria-label="Tambah halaman" title="Tambah halaman">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+                    </button>
+                    <button id="canvasNextPage" type="button" class="ghost canvas-tool-btn canvas-page-btn" aria-label="Halaman berikutnya" title="Halaman berikutnya">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5 7 7-7 7"></path></svg>
+                    </button>
                   </div>
                 </div>
               </div>
@@ -445,43 +472,40 @@
               </div>
 
               <div id="canvasDock" class="canvas-dock" aria-label="Kontrol Canvas">
-                <button id="toggleDataPaneBtn" type="button" class="ghost canvas-tool-btn" aria-controls="dataPane" aria-expanded="false" data-tip="Panel Field Data" title="Panel Field Data">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v14H4zM14 5h6v6h-6zM14 13h6v6h-6z"></path></svg>
-                </button>
-                <button id="toggleConfigPaneBtn" type="button" class="ghost canvas-tool-btn" aria-controls="configPane" aria-expanded="false" data-tip="Panel Konfigurasi" title="Panel Konfigurasi">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v4H4zM4 10h10v4H4zM4 16h16v4H4z"></path></svg>
-                </button>
-                <button id="canvasPrevPage" type="button" class="ghost canvas-tool-btn" aria-label="Halaman sebelumnya" data-tip="Halaman Sebelumnya" title="Halaman Sebelumnya">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"></path></svg>
-                </button>
-                <button id="canvasAddPage" type="button" class="ghost canvas-tool-btn" aria-label="Tambah halaman" data-tip="Tambah Halaman" title="Tambah Halaman">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
-                </button>
-                <button id="canvasNextPage" type="button" class="ghost canvas-tool-btn" aria-label="Halaman berikutnya" data-tip="Halaman Berikutnya" title="Halaman Berikutnya">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5 7 7-7 7"></path></svg>
-                </button>
-                <button id="zoomOutBtn" type="button" class="ghost canvas-tool-btn" aria-label="Zoom keluar" data-tip="Zoom Keluar" title="Zoom Keluar">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>
-                </button>
-                <button id="zoomInBtn" type="button" class="ghost canvas-tool-btn" aria-label="Zoom masuk" data-tip="Zoom Masuk" title="Zoom Masuk">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14"></path></svg>
-                </button>
-                <button id="zoomResetBtn" type="button" class="ghost canvas-tool-btn" aria-label="Reset zoom" data-tip="Reset Zoom" title="Reset Zoom">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM8 12h8"></path></svg>
-                </button>
-                <span id="zoomLevelLabel" class="canvas-zoom-chip" aria-live="polite">100%</span>
-                <button id="addWidgetToolbar" type="button" class="canvas-tool-btn" data-tip="Tambah Widget" title="Tambah Widget">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
-                </button>
-                <button id="editModeBtn" type="button" class="ghost canvas-tool-btn canvas-edit-toggle" aria-pressed="false" data-tip="Mode Edit (ON/OFF)" title="Mode Edit">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16.5V20h3.5L19 8.5 15.5 5 4 16.5zM14 6.5l3.5 3.5"></path></svg>
-                </button>
-                <button id="saveCanvasBtn" type="button" class="ghost canvas-tool-btn" data-tip="Simpan JPG" title="Simpan JPG">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19h14V5H5zM8 3v4M16 3v4M8 14h8"></path></svg>
-                </button>
-                <button id="closeCanvasBtn" type="button" class="ghost canvas-tool-btn" aria-label="Tutup Canvas" data-tip="Tutup Canvas" title="Tutup Canvas">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg>
-                </button>
+                <div class="canvas-dock-group" aria-label="Panel pendukung">
+                  <button id="toggleDataPaneBtn" type="button" class="ghost canvas-tool-btn" aria-controls="dataPane" aria-expanded="false" title="Panel data">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v14H4zM14 5h6v6h-6zM14 13h6v6h-6z"></path></svg>
+                  </button>
+                  <button id="toggleConfigPaneBtn" type="button" class="ghost canvas-tool-btn" aria-controls="configPane" aria-expanded="false" title="Panel konfigurasi">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v4H4zM4 10h10v4H4zM4 16h16v4H4z"></path></svg>
+                  </button>
+                </div>
+                <div class="canvas-dock-group" aria-label="Kontrol zoom">
+                  <button id="zoomOutBtn" type="button" class="ghost canvas-tool-btn" aria-label="Zoom keluar" title="Zoom keluar">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>
+                  </button>
+                  <span id="zoomLevelLabel" class="canvas-zoom-chip" aria-live="polite">100%</span>
+                  <button id="zoomInBtn" type="button" class="ghost canvas-tool-btn" aria-label="Zoom masuk" title="Zoom masuk">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14"></path></svg>
+                  </button>
+                  <button id="zoomResetBtn" type="button" class="ghost canvas-tool-btn" aria-label="Reset zoom" title="Reset zoom">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM8 12h8"></path></svg>
+                  </button>
+                </div>
+                <div class="canvas-dock-group" aria-label="Aksi dashboard">
+                  <button id="addWidgetToolbar" type="button" class="canvas-tool-btn" title="Tambah widget">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+                  </button>
+                  <button id="editModeBtn" type="button" class="ghost canvas-tool-btn canvas-edit-toggle" aria-pressed="false" title="Mode edit">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16.5V20h3.5L19 8.5 15.5 5 4 16.5zM14 6.5l3.5 3.5"></path></svg>
+                  </button>
+                  <button id="saveCanvasBtn" type="button" class="ghost canvas-tool-btn" title="Simpan JPG">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19h14V5H5zM8 3v4M16 3v4M8 14h8"></path></svg>
+                  </button>
+                  <button id="closeCanvasBtn" type="button" class="ghost canvas-tool-btn" aria-label="Tutup canvas" title="Tutup canvas">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -515,15 +539,15 @@
     <div class="settings-head">
       <div>
         <h3 id="settingsTitle">Pengaturan</h3>
-        <p id="settingsDescription">Atur preferensi pribadi dan perilaku agent dari satu tempat.</p>
+        <p id="settingsDescription">Atur preferensi pribadi dan cara Vistara menjawab dari satu tempat.</p>
       </div>
       <button id="settingsCloseBtn" type="button" class="ghost" aria-label="Tutup Pengaturan">Tutup</button>
     </div>
 
     <form id="settingsForm" class="settings-form">
       <div id="settingsGroupTabs" class="settings-group-switcher" role="tablist" aria-label="Grup pengaturan">
-        <button id="settingsGroupUserBtn" type="button" class="settings-group-tab is-active" data-settings-group="user" role="tab" aria-selected="true" aria-pressed="true" aria-controls="settingsUserGroup">User</button>
-        <button id="settingsGroupAgentBtn" type="button" class="settings-group-tab" data-settings-group="agent" role="tab" aria-selected="false" aria-pressed="false" aria-controls="settingsAgentGroup">Agent</button>
+        <button id="settingsGroupUserBtn" type="button" class="settings-group-tab is-active" data-settings-group="user" role="tab" aria-selected="true" aria-pressed="true" aria-controls="settingsUserGroup">Profil</button>
+        <button id="settingsGroupAgentBtn" type="button" class="settings-group-tab" data-settings-group="agent" role="tab" aria-selected="false" aria-pressed="false" aria-controls="settingsAgentGroup">Asisten</button>
       </div>
 
       <div class="settings-group-body">
@@ -607,7 +631,7 @@
       </div>
 
       <div class="settings-actions">
-        <button id="settingsResetBtn" type="button" class="ghost">Reset Default</button>
+        <button id="settingsResetBtn" type="button" class="ghost settings-reset-btn">Kembalikan Saran Awal</button>
         <button type="submit">Simpan Pengaturan</button>
       </div>
     </form>
