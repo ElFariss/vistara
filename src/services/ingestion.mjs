@@ -11,6 +11,7 @@ import { parseFlexibleDate, parseIndonesianNumber, parseBoolean } from '../utils
 import { suggestColumnMapping, requiredFieldsForDataset } from './columnMapper.mjs';
 import { generateJsonWithGemini } from './gemini.mjs';
 import { logAudit } from './audit.mjs';
+import { config } from '../config.mjs';
 
 function detectFileType(filename, contentType = '') {
   const ext = path.extname(filename || '').toLowerCase();
@@ -155,6 +156,10 @@ async function parseWithAiFallback(buffer, filename) {
   return parsed;
 }
 
+function unsupportedUploadError() {
+  return new Error('Format file tidak didukung. Gunakan CSV, TSV, JSON, XLSX, atau XLS.');
+}
+
 function parseExcelFile(filePath, fileType) {
   if (fileType === 'xls') {
     const convertedCsv = `${filePath}.converted.csv`;
@@ -206,6 +211,10 @@ export async function parseDataset(filePath, fileType, filename) {
       // Continue fallback.
     }
 
+    if (!config.rawUploadAiFallbackEnabled) {
+      throw unsupportedUploadError();
+    }
+
     return parseWithAiFallback(buffer, filename);
   }
 
@@ -225,6 +234,10 @@ export async function parseDataset(filePath, fileType, filename) {
     }
   } catch {
     // Continue fallback.
+  }
+
+  if (!config.rawUploadAiFallbackEnabled) {
+    throw unsupportedUploadError();
   }
 
   return parseWithAiFallback(buffer, filename);

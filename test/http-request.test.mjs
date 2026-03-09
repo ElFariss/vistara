@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
-import { parseRequestBody } from '../src/http/request.mjs';
+import { parseRequestBody, readBody } from '../src/http/request.mjs';
 
 function createRequest(body, contentType) {
   const req = Readable.from([body]);
@@ -61,4 +61,18 @@ test('parseRequestBody accepts quoted multipart boundary parameters', async () =
 
   assert.equal(parsed.files.file.filename, 'quoted.csv');
   assert.equal(parsed.files.file.buffer.toString('utf8'), 'x,y\r\n3,4');
+});
+
+test('parseRequestBody classifies malformed JSON as a 400 client error', async () => {
+  await assert.rejects(
+    () => parseRequestBody(createRequest(Buffer.from('{"broken"'), 'application/json')),
+    (error) => error?.statusCode === 400 && error?.code === 'INVALID_JSON',
+  );
+});
+
+test('readBody classifies oversized payloads as a 413 client error', async () => {
+  await assert.rejects(
+    () => readBody(createRequest(Buffer.from('123456', 'utf8'), 'application/json'), 5),
+    (error) => error?.statusCode === 413 && error?.code === 'PAYLOAD_TOO_LARGE',
+  );
 });

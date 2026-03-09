@@ -5,6 +5,31 @@ export function shouldRateLimitPath(pathname = '') {
   return String(pathname || '').trim() !== '/api/health';
 }
 
+export function resolveRateLimitPolicy(
+  pathname = '',
+  { defaultLimitPerMinute = 120, demoAuthLimitPerMinute = 5 } = {},
+) {
+  const normalizedPath = String(pathname || '').trim();
+
+  if (!shouldRateLimitPath(normalizedPath)) {
+    return { enabled: false, scope: 'health', limitPerMinute: 0 };
+  }
+
+  if (normalizedPath === '/api/auth/demo') {
+    return {
+      enabled: true,
+      scope: 'auth-demo',
+      limitPerMinute: demoAuthLimitPerMinute,
+    };
+  }
+
+  return {
+    enabled: true,
+    scope: normalizedPath || 'default',
+    limitPerMinute: defaultLimitPerMinute,
+  };
+}
+
 export function createRateLimiter(limitPerMinute) {
   return function rateLimit(key) {
     const now = Date.now();

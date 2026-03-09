@@ -227,6 +227,7 @@ export class DashboardAgentError extends Error {
     this.name = 'DashboardAgentError';
     this.code = code;
     this.statusCode = statusCode;
+    this.publicMessage = message;
     this.retryable = Boolean(retryable);
     this.reason = reason || code.toLowerCase();
     this.details = details ?? null;

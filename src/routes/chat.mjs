@@ -30,7 +30,6 @@ export function registerChatRoutes(router) {
         code,
         message,
         status: statusCode,
-        details: error?.details ?? null,
         persisted_in_conversation: Boolean(error?.persistedInConversation),
       },
     });

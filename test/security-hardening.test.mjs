@@ -1,14 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { config } from '../src/config.mjs';
 import { get, initializeDatabase, run } from '../src/db.mjs';
 import { Router } from '../src/router.mjs';
 import { registerAuthRoutes } from '../src/routes/auth.mjs';
 import { resolveAllowedOrigin } from '../src/http/cors.mjs';
 import { resolveClientIp } from '../src/http/request.mjs';
-import { resolvePublicErrorMessage } from '../src/http/response.mjs';
+import { resolveHttpError, resolvePublicErrorMessage } from '../src/http/response.mjs';
 import { generateJsonWithGemini, generateWithGeminiTools } from '../src/services/gemini.mjs';
+import { parseDataset } from '../src/services/ingestion.mjs';
 
 initializeDatabase();
 
@@ -125,7 +129,17 @@ test('resolveAllowedOrigin fails closed in production without an allowlist', () 
   assert.equal(resolveAllowedOrigin('https://app.example.com', {
     isProduction: false,
     allowedOrigins: [],
-  }), 'https://app.example.com');
+  }), null);
+
+  assert.equal(resolveAllowedOrigin('http://localhost:5173', {
+    isProduction: false,
+    allowedOrigins: [],
+  }), 'http://localhost:5173');
+
+  assert.equal(resolveAllowedOrigin('http://127.0.0.1:3000', {
+    isProduction: false,
+    allowedOrigins: [],
+  }), 'http://127.0.0.1:3000');
 
   assert.equal(resolveAllowedOrigin('https://app.example.com', {
     isProduction: true,
@@ -142,6 +156,20 @@ test('resolvePublicErrorMessage hides raw 500 messages but preserves explicit 4x
     resolvePublicErrorMessage({ statusCode: 400, message: 'Input tidak valid.' }, 'Fallback aman.'),
     'Input tidak valid.',
   );
+});
+
+test('resolveHttpError preserves typed 4xx client errors for transport responses', () => {
+  const oversized = resolveHttpError({
+    statusCode: 413,
+    code: 'PAYLOAD_TOO_LARGE',
+    publicMessage: 'Ukuran request melebihi batas maksimum.',
+  });
+
+  assert.deepEqual(oversized, {
+    statusCode: 413,
+    code: 'PAYLOAD_TOO_LARGE',
+    message: 'Ukuran request melebihi batas maksimum.',
+  });
 });
 
 test('Gemini requests use x-goog-api-key header instead of query string', async () => {
@@ -198,6 +226,44 @@ test('OTP send does not reveal whether an unauthenticated email exists', async (
   assert.equal(response.payload.otp_preview, undefined);
 });
 
+test('OTP send keeps preview hidden by default even for valid accounts', async () => {
+  const { tenantId, email } = seedTenantUser();
+  const router = new Router();
+  registerAuthRoutes(router);
+
+  try {
+    const response = await invokeRoute(router, 'POST', '/api/auth/otp/send', {
+      body: { email },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.payload.otp_preview, undefined);
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('OTP send reveals preview only when the explicit opt-in flag is enabled', async () => {
+  const { tenantId, email } = seedTenantUser();
+  const router = new Router();
+  const previousOtpPreviewEnabled = config.otpPreviewEnabled;
+  registerAuthRoutes(router);
+
+  config.otpPreviewEnabled = true;
+
+  try {
+    const response = await invokeRoute(router, 'POST', '/api/auth/otp/send', {
+      body: { email },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(typeof response.payload.otp_preview, 'string');
+  } finally {
+    config.otpPreviewEnabled = previousOtpPreviewEnabled;
+    cleanupTenant(tenantId);
+  }
+});
+
 test('OTP verify returns a generic invalid response for unknown emails', async () => {
   const router = new Router();
   registerAuthRoutes(router);
@@ -218,9 +284,11 @@ test('OTP verify consumes the code after the configured number of failed attempt
   const { tenantId, userId, email } = seedTenantUser();
   const router = new Router();
   const previousOtpMaxAttempts = config.otpMaxAttempts;
+  const previousOtpPreviewEnabled = config.otpPreviewEnabled;
   registerAuthRoutes(router);
 
   config.otpMaxAttempts = 3;
+  config.otpPreviewEnabled = true;
 
   try {
     const sendResponse = await invokeRoute(router, 'POST', '/api/auth/otp/send', {
@@ -264,6 +332,36 @@ test('OTP verify consumes the code after the configured number of failed attempt
     assert.equal(finalResponse.payload.error.code, 'OTP_INVALID');
   } finally {
     config.otpMaxAttempts = previousOtpMaxAttempts;
+    config.otpPreviewEnabled = previousOtpPreviewEnabled;
     cleanupTenant(tenantId);
+  }
+});
+
+test('non-tabular raw uploads do not auto-forward to Gemini unless explicitly enabled', async () => {
+  const previousRawUploadAiFallbackEnabled = config.rawUploadAiFallbackEnabled;
+  const previousGeminiApiKey = config.geminiApiKey;
+  const originalFetch = global.fetch;
+  let fetchCalls = 0;
+  const filePath = path.join(os.tmpdir(), `${uid('raw-upload')}.txt`);
+  fs.writeFileSync(filePath, 'memo harian tanpa struktur tabel');
+
+  config.rawUploadAiFallbackEnabled = false;
+  config.geminiApiKey = 'test-key';
+  global.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error('fetch should not be called');
+  };
+
+  try {
+    await assert.rejects(
+      () => parseDataset(filePath, 'text', 'notes.txt'),
+      /Format file tidak didukung/,
+    );
+    assert.equal(fetchCalls, 0);
+  } finally {
+    global.fetch = originalFetch;
+    config.geminiApiKey = previousGeminiApiKey;
+    config.rawUploadAiFallbackEnabled = previousRawUploadAiFallbackEnabled;
+    fs.unlinkSync(filePath);
   }
 });

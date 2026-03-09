@@ -212,6 +212,8 @@ test('processChatMessage returns AI_SERVICE_UNAVAILABLE for dashboard requests w
 
     const history = getChatHistory({ tenantId, userId });
     assert.equal(history.messages.at(-1)?.payload?.error?.code, 'AI_SERVICE_UNAVAILABLE');
+    assert.equal(history.messages.at(-1)?.payload?.error?.details, undefined);
+    assert.equal(history.messages.at(-1)?.content, 'Layanan AI belum tersedia untuk membuat dashboard.');
   } finally {
     config.geminiApiKey = previousGeminiApiKey;
     cleanupTenant(tenantId);
@@ -276,6 +278,7 @@ test('chat route returns persisted conversation metadata for non-stream dashboar
     const payload = JSON.parse(res.body);
     assert.equal(res.statusCode, 503);
     assert.equal(payload.error?.code, 'AI_SERVICE_UNAVAILABLE');
+    assert.equal(payload.error?.details, undefined);
     assert.equal(payload.persisted_in_conversation, true);
     assert.equal(payload.error?.persisted_in_conversation, true);
     assert.ok(payload.conversation_id);
