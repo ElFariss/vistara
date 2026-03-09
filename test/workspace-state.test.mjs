@@ -11,6 +11,7 @@ import {
   resolveInitialConversationId,
   resolveNextConversationIdAfterDelete,
   shouldCenterComposer,
+  shouldDockLandingFinalCta,
   shouldShowChatHeader,
 } from '../public/workspaceState.js';
 
@@ -82,9 +83,61 @@ test('normalizeConversationTitle trims whitespace and falls back cleanly', () =>
   assert.equal(normalizeConversationTitle(''), 'Percakapan baru');
 });
 
-test('shouldCenterComposer only keeps the centered layout for empty conversations', () => {
-  assert.equal(shouldCenterComposer({ messageCount: 0 }), true);
-  assert.equal(shouldCenterComposer({ messageCount: 2 }), false);
+test('shouldCenterComposer only centers a truly empty conversation with no pending state', () => {
+  assert.equal(shouldCenterComposer({
+    messageCount: 0,
+    persistedMessageCount: 0,
+    hasConversationId: false,
+    isLoadingConversation: false,
+    hasPendingActivity: false,
+    hasDraftAttachment: false,
+  }), true);
+
+  assert.equal(shouldCenterComposer({
+    messageCount: 0,
+    persistedMessageCount: 2,
+    hasConversationId: true,
+  }), false);
+
+  assert.equal(shouldCenterComposer({
+    messageCount: 0,
+    persistedMessageCount: 0,
+    hasConversationId: true,
+    isLoadingConversation: true,
+  }), false);
+
+  assert.equal(shouldCenterComposer({
+    messageCount: 0,
+    persistedMessageCount: 0,
+    hasConversationId: true,
+    hasPendingActivity: true,
+  }), false);
+});
+
+test('shouldDockLandingFinalCta only docks when the user reaches the bottom of landing', () => {
+  assert.equal(shouldDockLandingFinalCta({
+    landingVisible: true,
+    scrollY: 1200,
+    viewportHeight: 800,
+    documentHeight: 2200,
+    threshold: 24,
+  }), false);
+
+  assert.equal(shouldDockLandingFinalCta({
+    landingVisible: true,
+    scrollY: 1376,
+    viewportHeight: 800,
+    documentHeight: 2200,
+    threshold: 24,
+  }), true);
+
+  assert.equal(shouldDockLandingFinalCta({
+    landingVisible: false,
+    scrollY: 1376,
+    viewportHeight: 800,
+    documentHeight: 2200,
+    threshold: 24,
+  }), false);
 });
 
 test('shouldShowChatHeader only keeps the header when the dashboard action is available', () => {

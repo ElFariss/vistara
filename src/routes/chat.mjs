@@ -12,26 +12,27 @@ import {
 
 export function registerChatRoutes(router) {
   function handleChatError(res, error, fallbackCode, fallbackMessage) {
-    if (error instanceof ConversationNotFoundError || error?.statusCode === 404) {
-      return sendError(
-        res,
-        error.statusCode || 404,
-        error.code || 'CONVERSATION_NOT_FOUND',
-        error.message || 'Percakapan tidak ditemukan.',
-      );
-    }
+    const statusCode = error instanceof ConversationNotFoundError
+      ? (error.statusCode || 404)
+      : (error?.statusCode || 500);
+    const code = error instanceof ConversationNotFoundError
+      ? (error.code || 'CONVERSATION_NOT_FOUND')
+      : (error?.code || fallbackCode);
+    const message = error instanceof ConversationNotFoundError
+      ? (error.message || 'Percakapan tidak ditemukan.')
+      : (error?.message || fallbackMessage);
 
-    if (error?.statusCode) {
-      return sendError(
-        res,
-        error.statusCode,
-        error.code || fallbackCode,
-        error.message || fallbackMessage,
-        error.details ?? null,
-      );
-    }
-
-    return sendError(res, 500, fallbackCode, error?.message || fallbackMessage);
+    return sendJson(res, statusCode, {
+      ok: false,
+      conversation_id: error?.conversationId || null,
+      error: {
+        code,
+        message,
+        status: statusCode,
+        details: error?.details ?? null,
+        persisted_in_conversation: Boolean(error?.persistedInConversation),
+      },
+    });
   }
 
   function writeStreamEvent(res, type, payload = {}) {
@@ -191,6 +192,7 @@ export function registerChatRoutes(router) {
           code: error?.code || 'CHAT_STREAM_FAILED',
           status: error?.statusCode || 500,
           conversation_id: error?.conversationId || null,
+          persisted_in_conversation: Boolean(error?.persistedInConversation),
           message:
             error instanceof ConversationNotFoundError
               ? error.message

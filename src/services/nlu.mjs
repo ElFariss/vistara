@@ -14,6 +14,7 @@ const INTENTS = [
   'set_goal',
   'generate_report',
   'data_management',
+  'clarify',
 ];
 
 function extractTimePeriod(text) {
@@ -80,7 +81,7 @@ function looksAnalyticsMessage(text) {
 
 function looksSmalltalkMessage(text) {
   const lower = toLowerAlnum(text);
-  if (/^(hi|halo|hello|hai|pagi|siang|sore|malam|permisi|test|tes)\b/i.test(lower)) {
+  if (/^(hi|halo|hello|hai|oi|oy|yo|woi|hey|pagi|siang|sore|malam|permisi|test|tes)\b/i.test(lower)) {
     return true;
   }
   if (/\b(thanks|thank you|makasih|terima kasih|mantap|sip)\b/i.test(lower)) {
@@ -89,7 +90,10 @@ function looksSmalltalkMessage(text) {
   if (/\b(siapa nama saya|nama saya siapa|siapa saya|who am i|apa nama saya|namaku siapa)\b/i.test(lower)) {
     return true;
   }
-  if (/\b(apa kabar|gimana kabar|selamat pagi|selamat siang|selamat sore|selamat malam)\b/i.test(lower)) {
+  if (/\b(apa kabar|gimana kabar|selamat pagi|selamat siang|selamat sore|selamat malam|how are you)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(whats up|what's up|what s up|sup|lagi apa|lagi ngapain|gimana nih)\b/i.test(lower)) {
     return true;
   }
   return false;
@@ -120,7 +124,7 @@ function fallbackIntent(message) {
   const isSmalltalk = looksSmalltalkMessage(message);
   const isDatasetInspection = looksDatasetInspectionMessage(message);
   const isAnalytics = looksAnalyticsMessage(message);
-  let intent = isSmalltalk || !isAnalytics ? 'smalltalk' : 'show_metric';
+  let intent = isSmalltalk ? 'smalltalk' : isAnalytics ? 'show_metric' : 'clarify';
 
   if (isDatasetInspection) {
     intent = 'dataset_inspection';
@@ -132,7 +136,7 @@ function fallbackIntent(message) {
     intent = 'rank';
   } else if (intent !== 'smalltalk' && intent !== 'dataset_inspection' && /(kenapa|mengapa|penyebab|explain)/i.test(lower)) {
     intent = 'explain';
-  } else if (intent !== 'smalltalk' && intent !== 'dataset_inspection' && /(tambah|tambahkan|hilangkan|hapus|ganti|fokus|simpan dashboard|template)/i.test(lower)) {
+  } else if (intent !== 'smalltalk' && intent !== 'dataset_inspection' && /(edit|ubah|rapikan|rinci|detail|lebih detail|perjelas|tambah|tambahkan|hilangkan|hapus|ganti|fokus|simpan dashboard|template)/i.test(lower)) {
     intent = 'modify_dashboard';
   } else if (intent !== 'smalltalk' && intent !== 'dataset_inspection' && /(target|goal)/i.test(lower)) {
     intent = 'set_goal';
@@ -150,6 +154,8 @@ function fallbackIntent(message) {
           ? 'focus_metric'
           : /simpan/i.test(lower)
             ? 'save_dashboard'
+            : /detail|rinci|rapikan|ubah|edit/i.test(lower)
+              ? 'refine_layout'
             : /ganti/i.test(lower)
               ? 'change_granularity'
               : 'add_component'

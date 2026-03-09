@@ -3,7 +3,7 @@ import { generateId } from '../utils/ids.mjs';
 import { parseIntent } from './nlu.mjs';
 import { executeAnalyticsIntent } from './queryEngine.mjs';
 import { ensureDefaultDashboard, applyDashboardModification, getDashboard } from './dashboards.mjs';
-import { runDashboardAgent } from './agentRuntime.mjs';
+import { DashboardAgentError, runDashboardAgent } from './agentRuntime.mjs';
 import { getGeminiQuotaCooldownInfo } from './gemini.mjs';
 import { config } from '../config.mjs';
 import { generateReport } from './reports.mjs';
@@ -211,6 +211,7 @@ function persistAssistantErrorMessage({
       message,
       status: error?.statusCode || 500,
       details: error?.details ?? null,
+      persistedInConversation: true,
     },
   };
 
@@ -222,6 +223,10 @@ function persistAssistantErrorMessage({
     content: payload.answer,
     payload,
   });
+
+  if (error && typeof error === 'object') {
+    error.persistedInConversation = true;
+  }
 }
 
 function attachConversationContext(error, conversationId) {
@@ -497,69 +502,6 @@ function widgetsToArtifacts(widgets = []) {
     .filter(Boolean);
 }
 
-function deterministicDashboardFallback({ tenantId, userId, intent }) {
-  const basePeriod = intent?.time_period || '30 hari terakhir';
-  const templateIds = [
-    'total_revenue',
-    'total_profit',
-    'margin_percentage',
-    'revenue_trend',
-    'top_products',
-    'branch_performance',
-  ];
-
-  const widgets = [];
-  const artifacts = [];
-
-  for (const templateId of templateIds) {
-    const isRank = templateId === 'top_products' || templateId === 'branch_performance';
-    const fallbackIntent = {
-      intent: isRank ? 'rank' : 'show_metric',
-      metric: templateId,
-      template_id: templateId,
-      time_period: basePeriod,
-      branch: intent?.branch || null,
-      channel: intent?.channel || null,
-      limit: isRank ? Math.max(5, Number(intent?.limit || 5)) : 1,
-      dimension: templateId === 'branch_performance' ? 'branch' : null,
-    };
-
-    const analytics = executeAnalyticsIntent({
-      tenantId,
-      userId,
-      intent: fallbackIntent,
-    });
-
-    if (Array.isArray(analytics?.widgets)) {
-      widgets.push(...analytics.widgets);
-    }
-    if (Array.isArray(analytics?.artifacts) && analytics.artifacts.length > 0) {
-      artifacts.push(...analytics.artifacts);
-    } else if (Array.isArray(analytics?.widgets) && analytics.widgets.length > 0) {
-      artifacts.push(...widgetsToArtifacts(analytics.widgets));
-    }
-  }
-
-  const uniqueArtifacts = [];
-  const seen = new Set();
-  for (const item of artifacts) {
-    const key = `${item.kind}:${item.title}`;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    uniqueArtifacts.push(item);
-  }
-
-  return {
-    answer: `Saya siapkan dashboard cepat dari template default. Dashboard berisi ${Math.min(widgets.length, 6)} widget.`,
-    widgets: widgets.slice(0, 6),
-    artifacts: uniqueArtifacts.slice(0, 6),
-    presentation_mode: 'canvas',
-    fallback: true,
-  };
-}
-
 function lookupUserDisplayName(tenantId, userId) {
   if (!tenantId || !userId) {
     return null;
@@ -592,24 +534,105 @@ function buildSmalltalkAnswer(message, datasetReady, userDisplayName = null) {
   }
 
   if (/\b(thanks|thank you|makasih|terima kasih)\b/i.test(lower)) {
-    return 'Sama-sama. Kalau mau, saya bisa lanjutkan dengan ringkasan omzet, untung, atau tren terbaru.';
+    return 'Sama-sama.';
+  }
+
+  if (/\b(mantap|sip)\b/i.test(lower)) {
+    return datasetReady
+      ? 'Siap. Kalau mau, saya lanjutkan ke insight berikutnya.'
+      : 'Siap. Tinggal upload dataset saat Anda siap.';
   }
 
   if (/\b(test|tes)\b/i.test(lower)) {
-    return 'Saya aktif dan siap bantu analisis data Anda.';
+    return 'Saya aktif.';
   }
 
-  if (/\b(halo|hai|hi|hello|pagi|siang|sore|malam)\b/i.test(lower)) {
+  if (/\b(halo|hai|hi|hello|pagi|siang|sore|malam|hey|yo|woi|oi)\b/i.test(lower)) {
     return datasetReady
-      ? 'Halo. Saya siap bantu analisis data Anda. Coba minta ringkasan, tren, atau dashboard.'
-      : 'Halo. Saya siap bantu. Upload dataset saat siap, lalu tanya insight bisnis Anda.';
+      ? 'Halo. Mau cek insight apa?'
+      : 'Halo. Upload dataset saat siap, lalu tanya insight bisnis Anda.';
+  }
+
+  if (/\b(apa kabar|gimana kabarnya|how are you|what'?s up|lagi apa)\b/i.test(lower)) {
+    return datasetReady
+      ? 'Siap. Dataset Anda bisa langsung dianalisis.'
+      : 'Siap. Tinggal upload dataset untuk mulai analisis.';
   }
 
   if (!datasetReady && /\b(apa yang bisa kamu lakukan|bisa bantu apa|cara pakai|mulai dari mana)\b/i.test(lower)) {
-    return `Upload dataset dulu (CSV/JSON/XLSX/XLS), lalu saya bantu analisis secara instan untuk ${safeName}.`;
+    return `Upload dataset dulu (CSV/JSON/XLSX/XLS), lalu saya bantu analisis untuk ${safeName}.`;
   }
 
-  return 'Saya siap bantu. Tanyakan insight data, tren, atau minta dashboard kapan saja.';
+  return null;
+}
+
+function buildDashboardAgentError(error, options = {}) {
+  if (error instanceof DashboardAgentError) {
+    return error;
+  }
+
+  const message = String(error?.message || '').trim().toLowerCase();
+  if (message === 'missing_api_key' || message.includes('not configured')) {
+    return new DashboardAgentError({
+      code: 'AI_SERVICE_UNAVAILABLE',
+      message: 'Layanan AI belum tersedia untuk membuat dashboard.',
+      statusCode: 503,
+      retryable: false,
+      reason: 'missing_api_key',
+      details: options.details ?? null,
+    });
+  }
+
+  if (message === 'dashboard_agent_timeout') {
+    return new DashboardAgentError({
+      code: 'AI_SERVICE_TIMEOUT',
+      message: 'Layanan AI terlalu lama merespons saat membuat dashboard. Coba lagi.',
+      statusCode: 504,
+      retryable: true,
+      reason: 'dashboard_agent_timeout',
+      details: options.details ?? null,
+    });
+  }
+
+  if (message.includes('quota')) {
+    return new DashboardAgentError({
+      code: 'AI_QUOTA_EXHAUSTED',
+      message: 'Kuota AI sedang habis. Coba lagi beberapa saat.',
+      statusCode: 429,
+      retryable: false,
+      reason: 'quota_exhausted',
+      details: options.details ?? null,
+    });
+  }
+
+  if (
+    message.includes('network')
+    || message.includes('fetch')
+    || message.includes('invalid_json')
+    || /^http_5\d\d$/.test(message)
+  ) {
+    return new DashboardAgentError({
+      code: 'AI_SERVICE_UNAVAILABLE',
+      message: 'Layanan AI sedang bermasalah saat membuat dashboard. Coba lagi.',
+      statusCode: 503,
+      retryable: true,
+      reason: error?.reason || message || 'ai_service_unavailable',
+      details: error?.details ?? options.details ?? null,
+    });
+  }
+
+  return new DashboardAgentError({
+    code: error?.code || 'DASHBOARD_AGENT_FAILED',
+    message: error?.message || 'Gagal membuat dashboard. Coba lagi.',
+    statusCode: error?.statusCode || 503,
+    retryable: Boolean(error?.retryable),
+    reason: error?.reason || error?.code || 'dashboard_agent_failed',
+    details: error?.details ?? options.details ?? null,
+  });
+}
+
+function shouldRetryDashboardFailure(error) {
+  return error instanceof DashboardAgentError && Boolean(error.retryable);
 }
 
 export async function processChatMessage({
@@ -644,7 +667,7 @@ export async function processChatMessage({
   const datasetReady = hasDataset(tenantId);
   const userDisplayName = lookupUserDisplayName(tenantId, userId);
 
-  if (!datasetReady && intent.intent !== 'data_management' && intent.intent !== 'smalltalk') {
+  if (!datasetReady && intent.intent !== 'data_management' && intent.intent !== 'smalltalk' && intent.intent !== 'clarify') {
     const error = new DatasetRequiredError();
     persistAssistantErrorMessage({
       conversationId: conversation.id,
@@ -664,13 +687,43 @@ export async function processChatMessage({
   };
 
   if (intent.intent === 'smalltalk') {
+    const answer = buildSmalltalkAnswer(message, datasetReady, userDisplayName);
+    if (!answer) {
+      const error = new ChatRequestError(
+        'CHAT_CLARIFICATION_REQUIRED',
+        'Permintaan belum cukup jelas. Tulis pertanyaan yang lebih spesifik atau minta insight/dashboard dari dataset Anda.',
+        400,
+      );
+      persistAssistantErrorMessage({
+        conversationId: conversation.id,
+        tenantId,
+        error,
+        intent,
+      });
+      throw attachConversationContext(error, conversation.id);
+    }
     responsePayload = {
-      answer: buildSmalltalkAnswer(message, datasetReady, userDisplayName),
+      answer,
       widgets: [],
       artifacts: [],
       intent,
       presentation_mode: 'chat',
     };
+  } else if (intent.intent === 'clarify') {
+    const error = new ChatRequestError(
+      'CHAT_CLARIFICATION_REQUIRED',
+      datasetReady
+        ? 'Permintaan belum cukup jelas. Coba sebut metrik, periode, atau minta dashboard yang ingin dibuat.'
+        : 'Permintaan belum cukup jelas. Upload dataset dulu atau jelaskan insight yang ingin dicari.',
+      400,
+    );
+    persistAssistantErrorMessage({
+      conversationId: conversation.id,
+      tenantId,
+      error,
+      intent,
+    });
+    throw attachConversationContext(error, conversation.id);
   } else if (intent.intent === 'dataset_inspection') {
     const inspection = await inspectDatasetQuestion({
       tenantId,
@@ -790,58 +843,82 @@ export async function processChatMessage({
         });
       }
       const quotaState = getGeminiQuotaCooldownInfo();
-      if (quotaState.active) {
-        if (stream && typeof stream.onTimelineStep === 'function') {
-          stream.onTimelineStep({
-            timeline_id: timelineId,
-            id: `dashboard_quota_cooldown_${Date.now()}`,
-            agent: 'system',
-            status: 'pending',
-            title: 'Kuota AI sedang penuh, gunakan fallback dashboard cepat',
-          });
-        }
-        responsePayload = {
-          ...deterministicDashboardFallback({ tenantId, userId, intent }),
-          intent,
-          agent: {
-            mode: 'deterministic_fallback',
-            reason: quotaState.reason || 'quota_exhausted',
-            quota_cooldown_until: quotaState.until || null,
-          },
-        };
-        if (stream && typeof stream.onTimelineDone === 'function') {
-          stream.onTimelineDone({
-            timeline_id: timelineId,
-          });
-        }
-      } else {
       try {
+        if (!config.geminiApiKey) {
+          throw new DashboardAgentError({
+            code: 'AI_SERVICE_UNAVAILABLE',
+            message: 'Layanan AI belum dikonfigurasi untuk membuat dashboard.',
+            statusCode: 503,
+            retryable: false,
+            reason: 'missing_api_key',
+          });
+        }
+        if (quotaState.active) {
+          throw new DashboardAgentError({
+            code: 'AI_QUOTA_EXHAUSTED',
+            message: 'Kuota AI sedang habis. Coba lagi beberapa saat.',
+            statusCode: 429,
+            retryable: false,
+            reason: quotaState.reason || 'quota_exhausted',
+            details: {
+              quota_cooldown_until: quotaState.until || null,
+            },
+          });
+        }
         const configuredTimeout = Number(config.dashboardAgentTimeoutMs || 180000);
         const complexTimeoutMs = Math.min(300000, Math.max(30000, configuredTimeout));
-        const complex = await Promise.race([
-          runDashboardAgent({
-            tenantId,
-            userId,
-            dashboardId,
-            goal: message,
-            intent,
-            hooks: {
-              onTimelineEvent: (event) => {
-                if (stream && typeof stream.onTimelineStep === 'function') {
-                  stream.onTimelineStep({
-                    timeline_id: timelineId,
-                    ...event,
-                  });
-                }
+        let complex = null;
+        let attempts = 0;
+        let lastError = null;
+
+        while (attempts < 3) {
+          attempts += 1;
+          const attemptController = new AbortController();
+          const timeoutId = setTimeout(() => {
+            attemptController.abort(new Error('dashboard_agent_timeout'));
+          }, complexTimeoutMs);
+          try {
+            complex = await runDashboardAgent({
+              tenantId,
+              userId,
+              dashboardId,
+              goal: message,
+              intent,
+              signal: attemptController.signal,
+              hooks: {
+                onTimelineEvent: (event) => {
+                  if (stream && typeof stream.onTimelineStep === 'function') {
+                    stream.onTimelineStep({
+                      timeline_id: timelineId,
+                      ...event,
+                    });
+                  }
+                },
               },
-            },
-          }),
-          new Promise((_, reject) => {
-            setTimeout(() => {
-              reject(new Error('dashboard_agent_timeout'));
-            }, complexTimeoutMs);
-          }),
-        ]);
+            });
+            break;
+          } catch (error) {
+            lastError = buildDashboardAgentError(error);
+            if (!shouldRetryDashboardFailure(lastError) || attempts >= 3) {
+              throw lastError;
+            }
+            if (stream && typeof stream.onTimelineStep === 'function') {
+              stream.onTimelineStep({
+                timeline_id: timelineId,
+                id: `dashboard_retry_${Date.now()}_${attempts}`,
+                agent: 'system',
+                status: 'pending',
+                title: `Percobaan ulang dashboard ${attempts + 1}/3`,
+              });
+            }
+          } finally {
+            clearTimeout(timeoutId);
+          }
+        }
+
+        if (!complex) {
+          throw lastError || new DashboardAgentError();
+        }
 
         responsePayload = {
           ...complex,
@@ -852,30 +929,29 @@ export async function processChatMessage({
           presentation_mode: complex.presentation_mode || 'canvas',
         };
       } catch (error) {
+        const dashboardError = buildDashboardAgentError(error);
         if (stream && typeof stream.onTimelineStep === 'function') {
           stream.onTimelineStep({
             timeline_id: timelineId,
-            id: `dashboard_fallback_${Date.now()}`,
+            id: `dashboard_error_${Date.now()}`,
             agent: 'system',
             status: 'error',
-            title: 'Mode agentic sibuk, gunakan fallback dashboard cepat',
+            title: dashboardError.message,
           });
         }
-        responsePayload = {
-          ...deterministicDashboardFallback({ tenantId, userId, intent }),
+        persistAssistantErrorMessage({
+          conversationId: conversation.id,
+          tenantId,
+          error: dashboardError,
           intent,
-          agent: {
-            mode: 'deterministic_fallback',
-            reason: error?.message || 'dashboard_agent_failed',
-          },
-        };
+        });
+        throw attachConversationContext(dashboardError, conversation.id);
       } finally {
         if (stream && typeof stream.onTimelineDone === 'function') {
           stream.onTimelineDone({
             timeline_id: timelineId,
           });
         }
-      }
       }
     } else {
       const analytics = executeAnalyticsIntent({ tenantId, userId, intent });

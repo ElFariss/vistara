@@ -94,12 +94,44 @@ export function didDeleteActiveConversation({
 
 export function shouldCenterComposer({
   messageCount = 0,
+  persistedMessageCount = 0,
+  hasConversationId = false,
+  isLoadingConversation = false,
+  hasPendingActivity = false,
+  hasDraftAttachment = false,
 } = {}) {
-  return Number(messageCount || 0) === 0;
+  if (Boolean(isLoadingConversation) || Boolean(hasPendingActivity) || Boolean(hasDraftAttachment)) {
+    return false;
+  }
+
+  const visibleMessages = Number(messageCount || 0);
+  const persistedMessages = Number(persistedMessageCount || 0);
+
+  if (visibleMessages > 0 || persistedMessages > 0) {
+    return false;
+  }
+
+  return !Boolean(hasConversationId) || persistedMessages === 0;
 }
 
 export function shouldShowChatHeader({
   hasCanvasWidgets = false,
 } = {}) {
   return Boolean(hasCanvasWidgets);
+}
+
+export function shouldDockLandingFinalCta({
+  landingVisible = false,
+  scrollY = 0,
+  viewportHeight = 0,
+  documentHeight = 0,
+  threshold = 24,
+} = {}) {
+  if (!landingVisible) {
+    return false;
+  }
+
+  const bottomEdge = Number(scrollY || 0) + Number(viewportHeight || 0);
+  const pageBottom = Math.max(0, Number(documentHeight || 0) - Math.max(0, Number(threshold || 0)));
+  return bottomEdge >= pageBottom;
 }

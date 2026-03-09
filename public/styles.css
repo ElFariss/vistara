@@ -321,6 +321,18 @@ label {
   flex-wrap: wrap;
 }
 
+#themeToggle svg path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#themeToggle[data-theme='dark'] svg {
+  transform: rotate(-14deg);
+}
+
 .cta-nav {
   border-radius: var(--radius-pill);
   padding: 0.52rem 0.95rem;
@@ -355,8 +367,25 @@ label {
   overflow: hidden;
 }
 
-.landing-welcome > div {
+.landing-welcome.reveal-on-scroll,
+.landing-welcome.reveal-on-scroll.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+.landing-welcome > div:first-child {
   width: min(100%, 760px);
+  padding: clamp(1.4rem, 3vw, 2rem);
+  border-radius: calc(var(--radius-lg) + 4px);
+  background: color-mix(in srgb, var(--surface) 88%, var(--bg) 12%);
+  border: 1px solid color-mix(in srgb, var(--line-strong) 72%, transparent);
+  box-shadow: 0 18px 44px rgba(120, 90, 50, 0.08);
+  backdrop-filter: blur(18px);
+}
+
+[data-theme='dark'] .landing-welcome > div:first-child {
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
 }
 
 .landing-welcome-title {
@@ -371,7 +400,7 @@ label {
 .landing-welcome-copy {
   margin: 0.95rem auto 0;
   max-width: 34rem;
-  color: var(--ink-secondary);
+  color: color-mix(in srgb, var(--ink-secondary) 90%, var(--ink) 10%);
   font-size: 0.98rem;
   line-height: 1.65;
 }
@@ -387,6 +416,10 @@ label {
 .landing-welcome-actions button {
   border-radius: var(--radius-pill);
   min-width: 170px;
+}
+
+.landing-welcome .hero-eyebrow {
+  color: color-mix(in srgb, var(--accent) 88%, #6a2808);
 }
 
 .landing-scroll-cue {
@@ -688,16 +721,6 @@ label {
   line-height: 1.5;
 }
 
-.landing-bottom {
-  text-align: center;
-}
-
-.landing-bottom p {
-  margin: 0 0 0.55rem;
-  color: var(--ink-secondary);
-  font-size: 0.9rem;
-}
-
 .pain-strip-section {
   display: grid;
   gap: 1rem;
@@ -713,18 +736,23 @@ label {
   display: grid;
   place-items: center;
   gap: 0.65rem;
-  position: static;
-  z-index: 7;
-}
-
-.landing-final-cta.is-docked {
   position: fixed;
   left: 50%;
   bottom: 1rem;
   width: min(760px, calc(100% - 2rem));
+  transform: translate(-50%, 14px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--transition), transform var(--transition), visibility var(--transition);
+  z-index: 48;
+}
+
+.landing-final-cta.is-visible {
   transform: translate(-50%, 0);
   opacity: 1;
-  z-index: 48;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .landing-final-cta p {
@@ -3117,12 +3145,10 @@ label {
     font-size: 0.93rem;
   }
 
-  .landing-bottom button,
   .landing-final-cta button {
     width: 100%;
   }
 
-  .landing-bottom,
   .landing-final-cta,
   .how-it-works,
   .differentiation,
@@ -3132,11 +3158,6 @@ label {
   }
 
   .landing-final-cta {
-    position: static;
-    margin-bottom: 0.6rem;
-  }
-
-  .landing-final-cta.is-docked {
     width: calc(100% - 1rem);
     bottom: 0.5rem;
   }

@@ -214,6 +214,25 @@ result = {
 }
 `;
 
+export class DashboardAgentError extends Error {
+  constructor({
+    code = 'DASHBOARD_AGENT_FAILED',
+    message = 'Gagal membuat dashboard.',
+    statusCode = 503,
+    retryable = false,
+    reason = null,
+    details = null,
+  } = {}) {
+    super(message);
+    this.name = 'DashboardAgentError';
+    this.code = code;
+    this.statusCode = statusCode;
+    this.retryable = Boolean(retryable);
+    this.reason = reason || code.toLowerCase();
+    this.details = details ?? null;
+  }
+}
+
 function safeText(value, fallback = '', maxLen = 180) {
   const text = String(value ?? '').trim();
   if (!text) {
@@ -1246,7 +1265,14 @@ function timelineTitleForCall(call, fallbackTitle = 'Widget') {
   return `Menjalankan ${call.tool}`;
 }
 
-async function runPlannerAgent({ goal, scope, components, trace, memory, hooks = null }) {
+function throwIfDashboardAborted(signal = null) {
+  if (signal?.aborted) {
+    throw classifyDashboardFailure('dashboard_agent_timeout');
+  }
+}
+
+async function runPlannerAgent({ goal, scope, components, trace, memory, hooks = null, signal = null }) {
+  throwIfDashboardAborted(signal);
   const fallback = defaultPlannerSteps(components);
   const catalog = componentCatalog(components);
   const edaProfile = buildEdaProfile({ components, scope });
@@ -1294,6 +1320,7 @@ async function runPlannerAgent({ goal, scope, components, trace, memory, hooks =
     includeThoughts: false,
     functionCallingMode: 'ANY',
     allowedFunctionNames: ['submit_plan'],
+    signal,
   });
 
   const plannerThought = summarizeThoughtForTimeline(response.thoughts, '');
@@ -1326,7 +1353,8 @@ async function runPlannerAgent({ goal, scope, components, trace, memory, hooks =
       steps: fallback,
     });
     return {
-      ok: false,
+      ok: true,
+      degraded: true,
       reason: response.reason,
       steps: fallback,
       source: 'fallback',
@@ -1343,28 +1371,29 @@ async function runPlannerAgent({ goal, scope, components, trace, memory, hooks =
 
   pushTrace(trace, {
     step: 'planner',
-    ok,
+    ok: true,
     source: ok ? 'gemini_tool_call' : 'fallback',
     planned_steps: finalSteps.length,
   });
 
   emitTimelineEvent(hooks, {
     id: timelineId,
-    status: ok ? 'done' : 'error',
+    status: 'done',
     title: ok ? `Rencana siap (${finalSteps.length} langkah)` : 'Rencana fallback dipakai',
     agent: 'planner',
   });
 
   memory.steps.push({
     agent: 'planner',
-    ok,
+    ok: true,
     steps: finalSteps,
     source: ok ? 'gemini_tool_call' : 'fallback',
     reason: ok ? null : 'missing_submit_plan_call',
   });
 
   return {
-    ok,
+    ok: true,
+    degraded: !ok,
     reason: ok ? null : 'missing_submit_plan_call',
     steps: finalSteps,
     source: ok ? 'gemini_tool_call' : 'fallback',
@@ -1440,7 +1469,7 @@ function runTemplateComponentsDeterministic({ tenantId, userId, components, scop
   };
 }
 
-async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, scope, components, planner, trace, memory, hooks = null }) {
+async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, scope, components, planner, trace, memory, hooks = null, signal = null }) {
   const toolHistory = [];
   const callRecords = [];
   const artifactGroups = [];
@@ -1452,6 +1481,7 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
   let noToolCallStreak = 0;
 
   for (let stepIndex = 0; stepIndex < MAX_WORKER_STEPS; stepIndex += 1) {
+    throwIfDashboardAborted(signal);
     const promptPayload = {
       role: 'worker',
       goal,
@@ -1489,6 +1519,7 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
       includeThoughts: false,
       functionCallingMode: 'ANY',
       allowedFunctionNames: WORKER_TOOL_DECLARATIONS.map((tool) => tool.name),
+      signal,
     });
 
     if (!response.ok) {
@@ -1707,19 +1738,249 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
   };
 }
 
-function summarizeRun({ primary, fallbackUsed, scope }) {
-  const total = primary.artifacts.length;
-  const nonEmpty = primary.nonEmptyCount;
-
-  if (fallbackUsed) {
-    return `Saya pindahkan hasil ke Canvas Mode dan menyusun dashboard otomatis dari template. Rentang waktu disesuaikan ke data agar widget tidak kosong (${nonEmpty}/${total} komponen berisi data, ${Math.max(1, Number(primary.pageCount || 1))} halaman).`;
+function parseArtifactNumber(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
   }
 
-  if (nonEmpty === 0) {
-    return 'Saya pindahkan ke Canvas Mode, namun data untuk rentang waktu ini belum terisi. Coba ubah periode atau upload dataset lain.';
+  const parsed = Number(String(value ?? '')
+    .replace(/[^0-9,.-]/g, '')
+    .replace(/,(?=\d{1,2}\b)/g, '.')
+    .replace(/,/g, ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatInsightNumber(value, { currency = true, percent = false } = {}) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return '-';
+  }
+  if (percent) {
+    return `${numeric.toLocaleString('id-ID', {
+      maximumFractionDigits: Math.abs(numeric) >= 10 ? 1 : 2,
+    })}%`;
+  }
+  const absolute = Math.abs(numeric);
+  const sign = numeric < 0 ? '-' : '';
+  if (absolute >= 1_000_000_000) {
+    return `${sign}${currency ? 'Rp ' : ''}${(absolute / 1_000_000_000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} M`;
+  }
+  if (absolute >= 1_000_000) {
+    return `${sign}${currency ? 'Rp ' : ''}${(absolute / 1_000_000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} jt`;
+  }
+  if (absolute >= 1_000) {
+    return `${sign}${currency ? 'Rp ' : ''}${(absolute / 1_000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} rb`;
+  }
+  return `${sign}${currency ? 'Rp ' : ''}${absolute.toLocaleString('id-ID', { maximumFractionDigits: 0 })}`;
+}
+
+function artifactLooksPercent(artifact = {}) {
+  const title = safeText(artifact.title || '', '', 80).toLowerCase();
+  const value = safeText(artifact.value || '', '', 40);
+  return title.includes('margin') || value.includes('%');
+}
+
+function classifyDashboardFailure(reason = 'dashboard_agent_failed', details = null) {
+  const normalizedReason = safeText(reason, 'dashboard_agent_failed', 80).toLowerCase();
+
+  if (normalizedReason === 'quota_exhausted' || normalizedReason === 'http_429') {
+    return new DashboardAgentError({
+      code: 'AI_QUOTA_EXHAUSTED',
+      statusCode: 429,
+      retryable: false,
+      reason: normalizedReason,
+      message: 'Kuota AI sedang habis. Coba lagi beberapa saat.',
+      details,
+    });
   }
 
-  return `Saya pindahkan ke Canvas Mode dan membuat dashboard dari template aktif (${nonEmpty}/${total} komponen berisi data, periode ${scope.time_period}, ${Math.max(1, Number(primary.pageCount || 1))} halaman).`;
+  if (normalizedReason === 'missing_api_key') {
+    return new DashboardAgentError({
+      code: 'AI_SERVICE_UNAVAILABLE',
+      statusCode: 503,
+      retryable: false,
+      reason: normalizedReason,
+      message: 'Layanan AI belum dikonfigurasi untuk membuat dashboard.',
+      details,
+    });
+  }
+
+  if (normalizedReason === 'timeout' || normalizedReason === 'dashboard_agent_timeout') {
+    return new DashboardAgentError({
+      code: 'AI_SERVICE_TIMEOUT',
+      statusCode: 504,
+      retryable: true,
+      reason: normalizedReason,
+      message: 'Layanan AI terlalu lama merespons saat membuat dashboard. Coba lagi.',
+      details,
+    });
+  }
+
+  if (normalizedReason === 'dashboard_generation_empty') {
+    return new DashboardAgentError({
+      code: 'DASHBOARD_EMPTY',
+      statusCode: 422,
+      retryable: false,
+      reason: normalizedReason,
+      message: 'Dashboard belum bisa dibuat karena visual yang dihasilkan kosong atau tidak cukup kuat untuk ditampilkan.',
+      details,
+    });
+  }
+
+  if (
+    normalizedReason === 'network_error'
+    || normalizedReason === 'invalid_json'
+    || normalizedReason === 'missing_submit_plan_call'
+    || normalizedReason === 'no_worker_tools_executed'
+    || /^http_5\d\d$/.test(normalizedReason)
+  ) {
+    return new DashboardAgentError({
+      code: 'AI_SERVICE_UNAVAILABLE',
+      statusCode: 503,
+      retryable: true,
+      reason: normalizedReason,
+      message: 'Layanan AI sedang bermasalah saat membuat dashboard. Coba lagi.',
+      details,
+    });
+  }
+
+  return new DashboardAgentError({
+    code: 'DASHBOARD_AGENT_FAILED',
+    statusCode: 503,
+    retryable: false,
+    reason: normalizedReason,
+    message: 'Gagal membuat dashboard. Coba lagi.',
+    details,
+  });
+}
+
+function metricClause(artifact = {}) {
+  const title = safeText(artifact.title || 'Metrik', 'Metrik', 48);
+  const titleLower = title.toLowerCase();
+  const rawValue = parseArtifactNumber(artifact.raw_value ?? artifact.value);
+  const formattedValue = rawValue === null
+    ? safeText(artifact.value || '-', '-', 32)
+    : formatInsightNumber(rawValue, {
+        currency: !artifactLooksPercent(artifact),
+        percent: artifactLooksPercent(artifact),
+      });
+  const delta = safeText(artifact.delta || '', '', 48);
+
+  let prefix = `${title} tercatat ${formattedValue}`;
+  if (titleLower.includes('omzet') || titleLower.includes('revenue')) {
+    prefix = `omzet tercatat ${formattedValue}`;
+  } else if (titleLower.includes('untung') || titleLower.includes('profit') || titleLower.includes('laba')) {
+    prefix = `untung berada di ${formattedValue}`;
+  } else if (titleLower.includes('margin')) {
+    prefix = `margin berada di ${formattedValue}`;
+  } else if (titleLower.includes('biaya') || titleLower.includes('expense')) {
+    prefix = `biaya tercatat ${formattedValue}`;
+  }
+
+  return delta ? `${prefix} (${delta})` : prefix;
+}
+
+function chartInsight(artifact = {}) {
+  const series = Array.isArray(artifact.series) ? artifact.series : [];
+  const values = Array.isArray(series[0]?.values)
+    ? series[0].values.map((value) => Number(value || 0)).filter((value) => Number.isFinite(value))
+    : [];
+  const labels = Array.isArray(artifact.labels) ? artifact.labels.map((label) => safeText(label, '', 36)) : [];
+  if (values.length === 0) {
+    return null;
+  }
+
+  const title = safeText(artifact.title || 'tren', 'tren', 48);
+  const chartType = safeText(artifact.chart_type || 'line', 'line', 16).toLowerCase();
+  const isPercent = artifactLooksPercent(artifact);
+  const peakValue = Math.max(...values);
+  const peakIndex = values.indexOf(peakValue);
+  const peakLabel = labels[peakIndex] || 'periode tertinggi';
+
+  if (chartType === 'pie' || chartType === 'bar') {
+    const leadLabel = labels[peakIndex] || 'kategori utama';
+    const leadPct = chartType === 'pie'
+      ? ` (${((peakValue / (values.reduce((sum, value) => sum + Math.max(0, value), 0) || 1)) * 100).toLocaleString('id-ID', { maximumFractionDigits: 1 })}%)`
+      : '';
+    return `${title} didominasi ${leadLabel} dengan nilai ${formatInsightNumber(peakValue, { currency: !isPercent, percent: isPercent })}${leadPct}.`;
+  }
+
+  const latestValue = values[values.length - 1];
+  const latestLabel = labels[values.length - 1] || 'periode terbaru';
+  const startValue = values[0];
+  const direction = latestValue > startValue ? 'naik' : latestValue < startValue ? 'turun' : 'stabil';
+
+  return `${title} berakhir di ${latestLabel} sebesar ${formatInsightNumber(latestValue, { currency: !isPercent, percent: isPercent })} dan bergerak ${direction} dibanding awal rentang. Puncak tertinggi ada di ${peakLabel}.`;
+}
+
+function tableInsight(artifact = {}) {
+  const rows = Array.isArray(artifact.rows) ? artifact.rows : [];
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const title = safeText(artifact.title || 'peringkat', 'peringkat', 48);
+  const topRow = rows[0] || {};
+  const label = safeText(topRow.name || topRow.label || topRow.branch || topRow.product || 'item teratas', 'item teratas', 40);
+  const rawValue = parseArtifactNumber(topRow.value ?? topRow.total_revenue ?? topRow.revenue ?? topRow.total_profit ?? topRow.profit);
+  const formattedValue = rawValue === null ? null : formatInsightNumber(rawValue);
+
+  if (formattedValue) {
+    return `Di ${title}, posisi teratas ditempati ${label} dengan nilai ${formattedValue}.`;
+  }
+
+  return `Di ${title}, posisi teratas saat ini ditempati ${label}.`;
+}
+
+function buildDashboardFindings({ artifacts = [], scope = {} }) {
+  const metrics = artifacts.filter((artifact) => artifact?.kind === 'metric');
+  const charts = artifacts.filter((artifact) => artifact?.kind === 'chart');
+  const tables = artifacts.filter((artifact) => artifact?.kind === 'table');
+
+  const primaryMetrics = [];
+  const metricMatchers = [
+    (title) => title.includes('omzet') || title.includes('revenue'),
+    (title) => title.includes('untung') || title.includes('profit') || title.includes('laba'),
+    (title) => title.includes('margin'),
+    (title) => title.includes('biaya') || title.includes('expense'),
+  ];
+
+  for (const matcher of metricMatchers) {
+    const match = metrics.find((artifact) => matcher(safeText(artifact.title || '', '', 80).toLowerCase()));
+    if (match && !primaryMetrics.includes(match)) {
+      primaryMetrics.push(match);
+    }
+  }
+
+  for (const artifact of metrics) {
+    if (primaryMetrics.length >= 3) {
+      break;
+    }
+    if (!primaryMetrics.includes(artifact)) {
+      primaryMetrics.push(artifact);
+    }
+  }
+
+  const clauses = primaryMetrics.map((artifact) => metricClause(artifact)).filter(Boolean).slice(0, 3);
+  const nonMetricInsights = [
+    chartInsight(charts[0]),
+    tableInsight(tables[0]),
+    chartInsight(charts[1]),
+    tableInsight(tables[1]),
+  ].filter(Boolean);
+
+  if (clauses.length > 0) {
+    const firstParagraph = `Untuk periode ${safeText(scope.time_period || 'yang diminta', 'yang diminta', 48)}, ${clauses.join(', ')}.`;
+    const secondParagraph = nonMetricInsights.find(Boolean) || '';
+    return secondParagraph ? `${firstParagraph}\n\n${secondParagraph}` : firstParagraph;
+  }
+
+  const [primaryInsight = '', secondaryInsight = ''] = nonMetricInsights;
+  if (primaryInsight) {
+    return secondaryInsight ? `${primaryInsight}\n\n${secondaryInsight}` : primaryInsight;
+  }
+
+  return `Belum ada temuan dashboard yang cukup kuat untuk diringkas pada periode ${safeText(scope.time_period || 'yang diminta', 'yang diminta', 48)}.`;
 }
 
 async function reviewArtifactsWithPython(artifacts) {
@@ -1745,7 +2006,7 @@ function normalizeReviewResult(raw) {
   };
 }
 
-async function runReviewerAgent({ goal, scope, artifacts, trace, memory, hooks = null }) {
+async function runReviewerAgent({ goal, scope, artifacts, trace, memory, hooks = null, signal = null }) {
   let pythonResult = null;
   const reviewStepId = `reviewer_${Date.now()}`;
   emitTimelineEvent(hooks, {
@@ -1756,6 +2017,7 @@ async function runReviewerAgent({ goal, scope, artifacts, trace, memory, hooks =
   });
 
   for (let stepIndex = 0; stepIndex < MAX_REVIEWER_STEPS; stepIndex += 1) {
+    throwIfDashboardAborted(signal);
     const response = await generateWithGeminiTools({
       systemPrompt: [
         VISTARA_SYSTEM_PROMPT,
@@ -1776,6 +2038,7 @@ async function runReviewerAgent({ goal, scope, artifacts, trace, memory, hooks =
       includeThoughts: false,
       functionCallingMode: 'ANY',
       allowedFunctionNames: REVIEWER_TOOL_DECLARATIONS.map((tool) => tool.name),
+      signal,
     });
 
     if (!response.ok) {
@@ -1920,7 +2183,9 @@ export async function runDashboardAgent({
   goal = '',
   intent = {},
   hooks = null,
+  signal = null,
 }) {
+  throwIfDashboardAborted(signal);
   const scope = normalizeScope(intent);
   const trace = [];
   const memory = {
@@ -1965,6 +2230,7 @@ export async function runDashboardAgent({
     trace,
     memory,
     hooks,
+    signal,
   });
 
   let worker = await runWorkerAgentWithGemini({
@@ -1978,89 +2244,16 @@ export async function runDashboardAgent({
     trace,
     memory,
     hooks,
+    signal,
   });
 
-  let fallbackUsed = false;
-  if (!worker.ok || worker.artifacts.length === 0 || worker.nonEmptyCount === 0) {
-    fallbackUsed = true;
-    const fallbackStepId = `worker_fallback_${Date.now()}`;
-
-    pushTrace(trace, {
-      step: 'worker_fallback',
-      reason: worker.reason || 'empty_worker_output',
+  if (!worker.ok || worker.calls.length === 0) {
+    throw classifyDashboardFailure(worker.reason || 'worker_failed', {
+      stage: 'worker',
+      source: worker.source,
+      non_empty_count: Number(worker.nonEmptyCount || 0),
+      artifact_count: Array.isArray(worker.artifacts) ? worker.artifacts.length : 0,
     });
-    emitTimelineEvent(hooks, {
-      id: fallbackStepId,
-      status: 'pending',
-      title: 'Mengaktifkan fallback deterministik untuk melengkapi dashboard',
-      agent: 'worker',
-    });
-
-    const deterministicPrimary = runTemplateComponentsDeterministic({
-      tenantId,
-      userId,
-      components,
-      scope,
-      trace,
-      hooks,
-    });
-
-    worker = deterministicPrimary;
-
-    if (worker.artifacts.length === 0 || worker.nonEmptyCount === 0) {
-      worker = runTemplateComponentsDeterministic({
-        tenantId,
-        userId,
-        components: COMPLEX_TEMPLATE_COMPONENTS.map(cloneComponent),
-        scope,
-        trace,
-        hooks,
-      });
-    }
-    emitTimelineEvent(hooks, {
-      id: fallbackStepId,
-      status: 'done',
-      title: 'Fallback deterministik selesai',
-      agent: 'worker',
-    });
-  }
-
-  // Only broaden sparse output when the user asked for a fuller dashboard, not for focused custom layouts.
-  if ((worker.nonEmptyCount || 0) < 3 && isFullDashboardGoal(goal, intent) && components.length >= 3) {
-    const augment = runTemplateComponentsDeterministic({
-      tenantId,
-      userId,
-      components: COMPLEX_TEMPLATE_COMPONENTS.map(cloneComponent),
-      scope,
-      trace,
-      hooks,
-    });
-
-    // merge artifacts preserving existing non-empty first
-    const mergedArtifacts = [...worker.artifacts];
-    for (const art of augment.artifacts) {
-      const key = `${art.kind}:${art.title}`;
-      if (!mergedArtifacts.find((a) => `${a.kind}:${a.title}` === key)) {
-        mergedArtifacts.push(art);
-      }
-    }
-
-    const uniqueArtifacts = dedupeArtifacts(mergedArtifacts).slice(0, MAX_WIDGETS);
-    const rebuilt = buildWidgetsFromArtifacts({
-      artifacts: uniqueArtifacts.map((art) => [art]),
-      calls: augment.calls.length ? augment.calls : worker.calls,
-      components,
-      layoutPlan: worker.layoutPlan,
-    });
-
-    worker = {
-      ...worker,
-      artifacts: rebuilt.artifacts,
-      widgets: rebuilt.widgets.slice(0, MAX_WIDGETS),
-      nonEmptyCount: rebuilt.nonEmptyCount,
-      pageCount: rebuilt.pageCount || worker.pageCount || 0,
-      source: worker.source || 'augment',
-    };
   }
 
   if (!worker.widgets.length || !worker.artifacts.length || worker.nonEmptyCount === 0) {
@@ -2075,43 +2268,11 @@ export async function runDashboardAgent({
       result: 'empty_dashboard_blocked',
       reason: failureReason,
     });
-
-    return {
-      answer: 'Saya belum bisa membuat dashboard yang valid dari data ini. Semua visual yang dihasilkan kosong atau tidak cukup kuat untuk ditampilkan. Coba ubah periode, tambahkan dataset yang lebih lengkap, atau minta insight chat biasa dulu.',
-      widgets: [],
-      artifacts: [],
-      dashboard,
-      presentation_mode: 'chat',
-      agent: {
-        mode: 'multi_agent_runtime',
-        trace,
-        memory,
-        fallback_used: fallbackUsed,
-        period_adjusted_steps: worker.adjustedPeriodCount,
-        tool_calls: worker.calls.length,
-        planner: {
-          ok: planner.ok,
-          reason: planner.reason || null,
-          source: planner.source,
-          steps: planner.steps,
-        },
-        worker: {
-          ok: false,
-          reason: failureReason,
-          source: worker.source,
-          pages: worker.pageCount || 0,
-        },
-        reviewer: null,
-        reviewer_meta: {
-          ok: false,
-          source: 'skipped_empty_dashboard',
-        },
-        python_tool: {
-          ok: false,
-          reason: 'skipped_empty_dashboard',
-        },
-      },
-    };
+    throw classifyDashboardFailure('dashboard_generation_empty', {
+      stage: 'worker',
+      source: worker.source,
+      reason: failureReason,
+    });
   }
 
   const reviewer = await runReviewerAgent({
@@ -2121,20 +2282,16 @@ export async function runDashboardAgent({
     trace,
     memory,
     hooks,
+    signal,
   });
 
-  const baseAnswer = worker.summary || summarizeRun({
-    primary: worker,
-    fallbackUsed,
+  const baseAnswer = buildDashboardFindings({
+    artifacts: worker.artifacts,
     scope,
-  });
-
-  const reviewTag = reviewer.result
-    ? ` Kualitas dashboard: ${toNumber(reviewer.result.completeness_pct, 0)}% (${safeText(reviewer.result.verdict, 'unknown', 24)}).`
-    : '';
+  }) || worker.summary || 'Dashboard siap ditinjau di canvas.';
 
   return {
-    answer: `${baseAnswer}${reviewTag}`,
+    answer: baseAnswer,
     widgets: worker.widgets,
     artifacts: worker.artifacts,
     dashboard,
@@ -2143,7 +2300,7 @@ export async function runDashboardAgent({
       mode: 'multi_agent_runtime',
       trace,
       memory,
-      fallback_used: fallbackUsed,
+      fallback_used: false,
       period_adjusted_steps: worker.adjustedPeriodCount,
       tool_calls: worker.calls.length,
       planner: {

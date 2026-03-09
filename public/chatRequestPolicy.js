@@ -1,8 +1,13 @@
 export function shouldRetryNonStreamChatRequest(error = null) {
   const statusCode = Number(error?.statusCode || error?.status || 0);
   const code = String(error?.code || '').trim().toUpperCase();
+  const persistedInConversation = Boolean(error?.persistedInConversation);
 
-  if (statusCode >= 500) {
+  if (persistedInConversation) {
+    return false;
+  }
+
+  if (statusCode >= 500 && !code) {
     return true;
   }
 

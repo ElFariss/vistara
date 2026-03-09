@@ -2,6 +2,7 @@ import { renderArtifact } from './vendor/chart-lite.js?v=20260308d';
 import { createGridStackLite } from './vendor/gridstack-lite.js?v=20260307e';
 import { resolveCanvasViewportTarget } from './canvasViewport.js';
 import { shouldRetryNonStreamChatRequest } from './chatRequestPolicy.js';
+import { summarizeChartArtifactForExport } from './exportSummary.js?v=20260309a';
 import {
   didDeleteActiveConversation,
   normalizeAppPath,
@@ -13,6 +14,7 @@ import {
   resolveInitialConversationId,
   resolveNextConversationIdAfterDelete,
   shouldCenterComposer,
+  shouldDockLandingFinalCta,
   shouldShowChatHeader,
 } from './workspaceState.js?v=20260309a';
 import {
@@ -41,7 +43,7 @@ const runtimeConfig = window.__VISTARA_RUNTIME__ || {};
 const API_BASE_URL = String(runtimeConfig.API_BASE_URL || '').trim().replace(/\/+$/, '');
 
 const DEFAULT_SETTINGS = {
-  theme_mode: 'light',
+  theme_mode: 'system',
   accent_color: 'orange',
   nickname: '',
   response_style: 'ringkas',
@@ -78,6 +80,7 @@ const state = {
   profile: null,
   conversationId: null,
   conversationTitle: 'Percakapan baru',
+  conversationMessageCount: 0,
   conversations: [],
   messages: [],
   currentDashboard: null,
@@ -110,6 +113,9 @@ const state = {
   preChatTickerKey: '',
   isProgrammaticGridUpdate: false,
   isRenderingCanvas: false,
+  isLoadingConversation: false,
+  isSendingMessage: false,
+  isUploadingDataset: false,
   landingRevealObserver: null,
   onboardingSlideIndex: 0,
   currentPage: 'landing',
@@ -274,9 +280,55 @@ function setTheme(mode) {
   const next = resolveThemeMode(mode || 'light');
   root.setAttribute('data-theme', next);
   syncBrowserThemeChrome(next);
+  if (refs.themeToggle) {
+    refs.themeToggle.dataset.theme = next;
+    refs.themeToggle.setAttribute('aria-label', next === 'dark' ? 'Aktifkan mode terang' : 'Aktifkan mode gelap');
+    refs.themeToggle.setAttribute('title', next === 'dark' ? 'Aktifkan mode terang' : 'Aktifkan mode gelap');
+  }
   document.dispatchEvent(new CustomEvent('vistara:theme-change', {
     detail: { theme: next },
   }));
+}
+
+function syncHeaderActions() {
+  const workspaceVisible = state.currentPage === 'workspace';
+  const showSettings = workspaceVisible && Boolean(state.token);
+  const showThemeToggle = !workspaceVisible;
+  const resolvedTheme = resolveThemeMode(state.settings.theme_mode);
+
+  if (refs.headerSettingsBtn) {
+    refs.headerSettingsBtn.hidden = !showSettings;
+  }
+  if (refs.themeToggle) {
+    refs.themeToggle.hidden = !showThemeToggle;
+    refs.themeToggle.setAttribute('aria-label', resolvedTheme === 'dark' ? 'Aktifkan mode terang' : 'Aktifkan mode gelap');
+    refs.themeToggle.setAttribute('title', resolvedTheme === 'dark' ? 'Aktifkan mode terang' : 'Aktifkan mode gelap');
+    refs.themeToggle.dataset.theme = resolvedTheme;
+  }
+}
+
+function currentConversationMessageCount() {
+  const visiblePersistedMessages = state.messages.filter((entry) => entry.mode !== 'timeline').length;
+  return Math.max(Number(state.conversationMessageCount || 0), visiblePersistedMessages);
+}
+
+function shouldUseCenteredComposerLayout() {
+  return shouldCenterComposer({
+    messageCount: state.messages.length,
+    persistedMessageCount: currentConversationMessageCount(),
+    hasConversationId: Boolean(state.conversationId),
+    isLoadingConversation: state.isLoadingConversation,
+    hasPendingActivity: state.isSendingMessage || state.isUploadingDataset,
+    hasDraftAttachment: Boolean(refs.chatFile?.files?.[0]),
+  });
+}
+
+function dashboardSummaryParagraphs(message = {}) {
+  return String(message.content || '')
+    .split(/\n{2,}/)
+    .map((value) => value.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .slice(0, 2);
 }
 
 function setAccent(accentKey = 'orange') {
@@ -366,6 +418,7 @@ function applySettings(nextSettings, options = {}) {
 
   setTheme(state.settings.theme_mode);
   setAccent(state.settings.accent_color);
+  syncHeaderActions();
   syncSettingsForm();
   if (!refs.workspacePage?.classList.contains('hidden')) {
     renderThread();
@@ -417,6 +470,14 @@ function setSettingsOpen(open, options = {}) {
   refs.settingsPanel?.classList.toggle('hidden', !state.settingsOpen);
 }
 
+function syncComposerChrome() {
+  const centeredComposer = shouldUseCenteredComposerLayout();
+  refs.chatPane?.classList.toggle('is-empty-thread', centeredComposer);
+  updatePreChatTicker();
+  updateQuickPromptsVisibility();
+  updateChatHeader();
+}
+
 function getPreChatTickerMessages() {
   const nickname = state.settings.nickname || 'Anda';
   return [
@@ -463,9 +524,9 @@ function updatePreChatTicker() {
 
   const shouldShow = Boolean(state.token)
     && Boolean(state.conversationId)
-    && state.messages.length === 0
+    && currentConversationMessageCount() === 0
     && state.conversations.length > 0
-    && !shouldCenterComposer({ messageCount: state.messages.length });
+    && !shouldUseCenteredComposerLayout();
 
   if (!shouldShow) {
     stopPreChatTicker();
@@ -498,7 +559,10 @@ function updateQuickPromptsVisibility() {
     return;
   }
   const workspaceVisible = Boolean(refs.workspacePage) && !refs.workspacePage.classList.contains('hidden');
-  const shouldShow = workspaceVisible && state.messages.length === 0 && Boolean(state.token) && Boolean(state.datasetReady);
+  const shouldShow = workspaceVisible
+    && shouldUseCenteredComposerLayout()
+    && Boolean(state.token)
+    && Boolean(state.datasetReady);
   refs.quickPrompts.classList.toggle('hidden', !shouldShow);
 }
 
@@ -560,6 +624,9 @@ function createAppError(message, options = {}) {
   if (options.conversationId) {
     error.conversationId = options.conversationId;
   }
+  if (options.persistedInConversation !== undefined) {
+    error.persistedInConversation = Boolean(options.persistedInConversation);
+  }
   return error;
 }
 
@@ -598,6 +665,11 @@ async function api(path, options = {}) {
       code: payload?.error?.code || null,
       statusCode: payload?.error?.status || response.status,
       details: payload?.error?.details ?? null,
+      conversationId: payload?.conversation_id || null,
+      persistedInConversation:
+        payload?.error?.persisted_in_conversation
+        ?? payload?.error?.persistedInConversation
+        ?? false,
     });
   }
 
@@ -633,6 +705,7 @@ function setAuth(token, user = null, options = {}) {
     if (refs.headerCtaBtn) refs.headerCtaBtn.hidden = false;
   }
 
+  syncHeaderActions();
   syncAppHeaderOffset();
 }
 
@@ -757,8 +830,13 @@ function syncLandingScrollCue() {
     refs.landingScrollCue.classList.toggle('is-hidden', hide);
   }
   if (refs.landingFinalCta) {
-    const docked = landingVisible && window.scrollY > Math.max(240, window.innerHeight * 0.6);
-    refs.landingFinalCta.classList.toggle('is-docked', docked);
+    const showFinalCta = shouldDockLandingFinalCta({
+      landingVisible,
+      scrollY: window.scrollY,
+      viewportHeight: window.innerHeight,
+      documentHeight: document.documentElement?.scrollHeight || document.body?.scrollHeight || 0,
+    });
+    refs.landingFinalCta.classList.toggle('is-visible', showFinalCta);
   }
 }
 
@@ -822,6 +900,7 @@ function showPage(page, options = {}) {
   syncAppHeaderOffset();
   document.body.classList.remove('workspace-mode');
   state.currentPage = page;
+  syncHeaderActions();
   syncBrowserRoute(page, {
     replace: options.replace === true,
   });
@@ -1296,7 +1375,7 @@ function setDatasetGateVisible(visible) {
 }
 
 function appendMessage(message) {
-  state.messages.push({
+  const nextMessage = {
     id: message.id || generateMessageId(),
     role: message.role,
     content: message.content || '',
@@ -1308,7 +1387,12 @@ function appendMessage(message) {
     collapsed: Boolean(message.collapsed),
     timelineRunId: message.timelineRunId || null,
     error: Boolean(message.error),
-  });
+  };
+
+  state.messages.push(nextMessage);
+  if (nextMessage.mode !== 'timeline') {
+    state.conversationMessageCount += 1;
+  }
 
   renderThread();
 }
@@ -1332,14 +1416,23 @@ function renderDashboardSummary(message) {
 
   const title = document.createElement('p');
   title.className = 'summary-title';
-  const count = message.widgets?.length || 0;
-  title.textContent = count > 0 ? `${count} widget siap.` : 'Dashboard siap.';
+  title.textContent = 'Temuan dashboard';
   card.append(title);
 
-  const meta = document.createElement('span');
-  meta.className = 'summary-meta';
-  meta.textContent = summarizeDashboardText(message.content);
-  card.append(meta);
+  const paragraphs = dashboardSummaryParagraphs(message);
+  if (paragraphs.length === 0) {
+    const meta = document.createElement('span');
+    meta.className = 'summary-meta';
+    meta.textContent = summarizeDashboardText(message.content);
+    card.append(meta);
+  } else {
+    paragraphs.forEach((paragraph, index) => {
+      const block = document.createElement(index === 0 ? 'p' : 'span');
+      block.className = index === 0 ? 'summary-meta' : 'summary-support';
+      block.textContent = paragraph;
+      card.append(block);
+    });
+  }
 
   const openBtn = document.createElement('button');
   openBtn.type = 'button';
@@ -1456,17 +1549,12 @@ function renderThread() {
     refs.chatMessages.append(row);
   }
 
-  const centeredComposer = shouldCenterComposer({ messageCount: state.messages.length });
-  refs.chatPane?.classList.toggle('is-empty-thread', centeredComposer);
-
   if (state.messages.length > 0) {
     scrollToBottom();
   } else {
     refs.chatMessages.scrollTo({ top: 0 });
   }
-  updatePreChatTicker();
-  updateQuickPromptsVisibility();
-  updateChatHeader();
+  syncComposerChrome();
 }
 
 function toMetricArtifact(widget) {
@@ -2188,13 +2276,13 @@ async function refreshSources() {
       refs.sourceStats.textContent = `Data: ${ready.length}/${sources.length} source • ${totalRows.toLocaleString('id-ID')} baris`;
     }
     setDatasetGateVisible(!state.datasetReady);
-    updateChatHeader();
+    syncComposerChrome();
   } catch {
     if (refs.sourceStats) {
       refs.sourceStats.textContent = 'Data: tidak dapat dimuat';
     }
     setDatasetGateVisible(!state.datasetReady);
-    updateChatHeader();
+    syncComposerChrome();
   }
 }
 
@@ -2211,6 +2299,7 @@ function updateChatHeader() {
 function resetConversationWorkspaceState({ conversationId = null, conversationTitle = '' } = {}) {
   state.conversationId = conversationId;
   state.conversationTitle = normalizeConversationTitle(conversationTitle);
+  state.conversationMessageCount = 0;
   state.openConversationMenuId = null;
   state.messages = [];
   state.timelineRunId = null;
@@ -2220,6 +2309,9 @@ function resetConversationWorkspaceState({ conversationId = null, conversationTi
   state.canvasPage = 1;
   state.canvasPagesCount = 1;
   state.selectedWidgetId = null;
+  state.isLoadingConversation = false;
+  state.isSendingMessage = false;
+  state.isUploadingDataset = false;
   setCanvasOpen(false);
   renderCanvas();
   renderThread();
@@ -2346,51 +2438,59 @@ async function refreshConversationList() {
   const response = await api('/api/chat/conversations');
   state.conversations = Array.isArray(response.conversations) ? response.conversations : [];
   renderConversationList();
+  syncComposerChrome();
 }
 
 async function refreshChatHistory(conversationId = state.conversationId) {
-  const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : '';
-  const response = await api(`/api/chat/history${query}`);
-  state.conversationId = response.conversation_id;
-  state.conversationTitle = normalizeConversationTitle(response.conversation?.title || 'Percakapan baru');
-  upsertConversation(response.conversation);
+  state.isLoadingConversation = true;
+  try {
+    const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : '';
+    const response = await api(`/api/chat/history${query}`);
+    state.conversationId = response.conversation_id;
+    state.conversationTitle = normalizeConversationTitle(response.conversation?.title || 'Percakapan baru');
+    upsertConversation(response.conversation);
 
-  state.messages = (response.messages || [])
-    .map((item) => {
-      const payload = item.payload || {};
-      return {
-        role: item.role,
-        content: item.content,
-        artifacts: Array.isArray(payload.artifacts) ? payload.artifacts : [],
-        widgets: Array.isArray(payload.widgets) ? payload.widgets : [],
-        mode: payload.presentation_mode || 'chat',
-        fileName: null,
-        error: Boolean(payload.error),
-      };
-    })
-    .filter((entry) => !(entry.role === 'assistant' && entry.mode === 'chat' && /^selamat datang/i.test(entry.content || '')));
+    state.messages = (response.messages || [])
+      .map((item) => {
+        const payload = item.payload || {};
+        return {
+          role: item.role,
+          content: item.content,
+          artifacts: Array.isArray(payload.artifacts) ? payload.artifacts : [],
+          widgets: Array.isArray(payload.widgets) ? payload.widgets : [],
+          mode: payload.presentation_mode || 'chat',
+          fileName: null,
+          error: Boolean(payload.error),
+        };
+      })
+      .filter((entry) => !(entry.role === 'assistant' && entry.mode === 'chat' && /^selamat datang/i.test(entry.content || '')));
 
-  const lastCanvas = [...state.messages]
-    .reverse()
-    .find((item) => item.mode === 'canvas' && Array.isArray(item.widgets) && item.widgets.length > 0);
+    state.conversationMessageCount = state.messages.filter((entry) => entry.mode !== 'timeline').length;
 
-  if (lastCanvas) {
-    state.canvasWidgets = normalizeIncomingWidgets(lastCanvas.widgets);
-    state.canvasPagesCount = Math.max(
-      state.canvasPagesCount,
-      state.canvasWidgets.reduce((max, widget) => Math.max(max, Number(widget.layout?.page || 1)), 1),
-    );
-    state.canvasPage = 1;
-    renderCanvas();
-  } else {
-    state.canvasWidgets = [];
-    state.canvasPagesCount = 1;
-    state.canvasPage = 1;
-    renderCanvas();
+    const lastCanvas = [...state.messages]
+      .reverse()
+      .find((item) => item.mode === 'canvas' && Array.isArray(item.widgets) && item.widgets.length > 0);
+
+    if (lastCanvas) {
+      state.canvasWidgets = normalizeIncomingWidgets(lastCanvas.widgets);
+      state.canvasPagesCount = Math.max(
+        state.canvasPagesCount,
+        state.canvasWidgets.reduce((max, widget) => Math.max(max, Number(widget.layout?.page || 1)), 1),
+      );
+      state.canvasPage = 1;
+      renderCanvas();
+    } else {
+      state.canvasWidgets = [];
+      state.canvasPagesCount = 1;
+      state.canvasPage = 1;
+      renderCanvas();
+    }
+
+    renderThread();
+  } finally {
+    state.isLoadingConversation = false;
+    syncComposerChrome();
   }
-
-  renderThread();
-  updateChatHeader();
 }
 
 async function loadConversation(conversationId) {
@@ -2567,38 +2667,45 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
     return null;
   }
 
-  let response;
-  if (demo) {
-    response = await api('/api/data/demo/import', {
-      method: 'POST',
-    });
-  } else {
-    if (!file) {
-      throw new Error('Pilih file dulu.');
+  state.isUploadingDataset = true;
+  syncComposerChrome();
+  try {
+    let response;
+    if (demo) {
+      response = await api('/api/data/demo/import', {
+        method: 'POST',
+      });
+    } else {
+      if (!file) {
+        throw new Error('Pilih file dulu.');
+      }
+
+      const formData = new FormData();
+      formData.set('file', file);
+
+      response = await api('/api/data/upload', {
+        method: 'POST',
+        body: formData,
+      });
     }
 
-    const formData = new FormData();
-    formData.set('file', file);
+    await Promise.allSettled([refreshSources(), refreshVerdict(), refreshDashboards()]);
 
-    response = await api('/api/data/upload', {
-      method: 'POST',
-      body: formData,
-    });
+    if (!silent) {
+      appendMessage({
+        role: 'assistant',
+        content: `Dataset ${response.source?.filename || 'baru'} siap digunakan. ${response.ingestion?.inserted ?? 0} baris diproses.`,
+        mode: 'chat',
+        artifacts: [],
+      });
+    }
+
+    showToast(demo ? 'Demo dataset berhasil diimport.' : 'Dataset berhasil diupload.');
+    return response;
+  } finally {
+    state.isUploadingDataset = false;
+    syncComposerChrome();
   }
-
-  await Promise.allSettled([refreshSources(), refreshVerdict(), refreshDashboards()]);
-
-  if (!silent) {
-    appendMessage({
-      role: 'assistant',
-      content: `Dataset ${response.source?.filename || 'baru'} siap digunakan. ${response.ingestion?.inserted ?? 0} baris diproses.`,
-      mode: 'chat',
-      artifacts: [],
-    });
-  }
-
-  showToast(demo ? 'Demo dataset berhasil diimport.' : 'Dataset berhasil diupload.');
-  return response;
 }
 
 function traceStepTitle(step = {}) {
@@ -2815,6 +2922,10 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
           code: event.code || 'CHAT_STREAM_FAILED',
           statusCode: event.status || 500,
           conversationId: event.conversation_id || null,
+          persistedInConversation:
+            event.persisted_in_conversation
+            ?? event.persistedInConversation
+            ?? false,
         });
       }
     }
@@ -2837,6 +2948,8 @@ async function sendChatMessage(userText) {
   if (state.timelineRunId) {
     finalizeTimeline(state.timelineRunId);
   }
+  state.isSendingMessage = true;
+  syncComposerChrome();
   showTyping();
 
   try {
@@ -2876,7 +2989,7 @@ async function sendChatMessage(userText) {
     hideTyping();
     finalizeTimeline(state.timelineRunId);
     const historyConversationId = error?.conversationId || state.conversationId;
-    if (error?.statusCode && error.statusCode < 500 && historyConversationId) {
+    if ((error?.persistedInConversation || (error?.statusCode && error.statusCode < 500)) && historyConversationId) {
       state.conversationId = historyConversationId;
       try {
         await refreshChatHistory(historyConversationId);
@@ -2892,6 +3005,9 @@ async function sendChatMessage(userText) {
       artifacts: [],
       error: true,
     });
+  } finally {
+    state.isSendingMessage = false;
+    syncComposerChrome();
   }
 }
 
@@ -3048,7 +3164,18 @@ function drawWidgetOnExport(context, widget, rect) {
     x: body.x,
     y: body.y + 4,
     width: Math.max(40, body.width),
-    height: Math.max(40, body.height - 8),
+    height: Math.max(36, body.height - 74),
+  });
+
+  const summaryLines = summarizeChartArtifactForExport(artifact);
+  if (!summaryLines.length) {
+    return;
+  }
+
+  context.fillStyle = '#475569';
+  context.font = '600 13px Inter, Arial, sans-serif';
+  summaryLines.slice(0, 3).forEach((line, index) => {
+    context.fillText(String(line).slice(0, 48), body.x, rect.y + rect.h - 30 + index * 15);
   });
 }
 
@@ -3242,6 +3369,7 @@ refs.chatFile.addEventListener('change', () => {
     refs.fileLabel.hidden = !file;
     refs.fileLabel.textContent = file ? file.name : 'Tidak ada file';
   }
+  syncComposerChrome();
 });
 
 if (refs.newSessionBtn) {
@@ -3542,12 +3670,6 @@ if (refs.headerCtaBtn) {
     routePrimaryEntry({ authTab: 'register' });
   });
 }
-if (refs.landingCtaBottom) {
-  refs.landingCtaBottom.addEventListener('click', () => {
-    routePrimaryEntry({ authTab: 'register' });
-  });
-}
-
 async function startDemoSession() {
   if (state.token) {
     routePrimaryEntry({ replace: true });

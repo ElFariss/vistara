@@ -5,7 +5,7 @@ import { config } from '../src/config.mjs';
 import { initializeDatabase, run } from '../src/db.mjs';
 import { layoutsIntersect } from '../public/dashboard-layout.js';
 import { executeAnalyticsIntent } from '../src/services/queryEngine.mjs';
-import { runDashboardAgent } from '../src/services/agentRuntime.mjs';
+import { DashboardAgentError, runDashboardAgent } from '../src/services/agentRuntime.mjs';
 
 function uid(prefix) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
@@ -124,40 +124,6 @@ function seedTransaction({ tenantId, date = '2024-01-15T00:00:00.000Z', revenue 
   );
 }
 
-function artifactHasData(artifact) {
-  if (!artifact) {
-    return false;
-  }
-  if (artifact.kind === 'metric') {
-    const raw = Number(artifact.raw_value);
-    if (Number.isFinite(raw)) {
-      return raw > 0;
-    }
-    return Number(String(artifact.value || '').replace(/[^0-9.-]/g, '')) > 0;
-  }
-  if (artifact.kind === 'table') {
-    return Array.isArray(artifact.rows) && artifact.rows.length > 0;
-  }
-  if (artifact.kind === 'chart') {
-    const values = (artifact.series || []).flatMap((series) => series.values || []);
-    return values.some((value) => Number(value || 0) > 0);
-  }
-  return false;
-}
-
-async function withDeterministicDashboardAgent(runTest) {
-  const previousGeminiApiKey = config.geminiApiKey;
-  const previousGeminiModel = config.geminiModel;
-  config.geminiApiKey = '';
-  config.geminiModel = 'gemini-disabled-for-tests';
-  try {
-    return await runTest();
-  } finally {
-    config.geminiApiKey = previousGeminiApiKey;
-    config.geminiModel = previousGeminiModel;
-  }
-}
-
 function geminiToolPayload({ text = null, functionCalls = [] } = {}) {
   const parts = [];
   if (typeof text === 'string') {
@@ -218,14 +184,79 @@ async function withMockGeminiToolResponses(responses, runTest) {
   }
 }
 
+function createDashboardAgentResponses({
+  timePeriod = '30 hari terakhir',
+  finalSummary = 'Omzet stabil dengan kontribusi kuat dari produk utama.',
+  templates = ['total_revenue', 'total_profit', 'revenue_trend', 'top_products'],
+  plannerFunctionCalls = [
+    {
+      name: 'submit_plan',
+      args: {
+        steps: [
+          'Identifikasi KPI utama.',
+          'Ambil tren penjualan inti.',
+          'Susun layout dashboard yang ringkas dan jelas.',
+        ],
+      },
+    },
+  ],
+  placements = [
+    { title: 'Omzet', page: 1, x: 0, y: 0, w: 4, h: 2, kind: 'metric' },
+    { title: 'Untung', page: 1, x: 4, y: 0, w: 4, h: 2, kind: 'metric' },
+    { title: 'Trend Omzet', page: 1, x: 0, y: 2, w: 8, h: 4, kind: 'chart' },
+    { title: 'Produk Terlaris', page: 1, x: 8, y: 2, w: 8, h: 4, kind: 'table' },
+  ],
+} = {}) {
+  return [
+    geminiToolPayload({
+      functionCalls: plannerFunctionCalls,
+    }),
+    ...templates.map((templateId) => geminiToolPayload({
+      functionCalls: [
+        {
+          name: 'query_template',
+          args: {
+            template_id: templateId,
+            time_period: timePeriod,
+            limit: templateId === 'top_products' ? 5 : null,
+          },
+        },
+      ],
+    })),
+    geminiToolPayload({
+      functionCalls: [
+        {
+          name: 'finalize_dashboard',
+          args: {
+            summary: finalSummary,
+            layout_plan: {
+              strategy: 'balanced',
+              pages: Math.max(...placements.map((placement) => Number(placement.page || 1))),
+              placements,
+            },
+          },
+        },
+      ],
+    }),
+    geminiToolPayload({
+      functionCalls: [
+        {
+          name: 'submit_review',
+          args: {
+            verdict: 'good',
+            completeness_pct: 100,
+            summary: 'Layout konsisten dan artefak cukup untuk dipakai.',
+          },
+        },
+      ],
+    }),
+  ];
+}
+
 test('executeAnalyticsIntent anchors relative period to latest dataset date', () => {
   const { tenantId, userId } = seedTenantUser();
   try {
-    seedTransaction({
-      tenantId,
-      date: '2024-01-18T00:00:00.000Z',
-      revenue: 2_000_000,
-    });
+    seedTransaction({ tenantId, date: '2024-01-18T00:00:00.000Z', revenue: 2_000_000 });
 
     const result = executeAnalyticsIntent({
       tenantId,
@@ -245,303 +276,112 @@ test('executeAnalyticsIntent anchors relative period to latest dataset date', ()
   }
 });
 
-test('runDashboardAgent builds dashboard widgets from template with non-empty artifacts', async () => {
+test('runDashboardAgent returns canvas widgets with findings instead of generic success copy', async () => {
   const { tenantId, userId } = seedTenantUser();
   try {
-    seedTransaction({
-      tenantId,
-      date: '2024-01-10T00:00:00.000Z',
-      revenue: 1_500_000,
-    });
-    seedTransaction({
-      tenantId,
-      date: '2024-01-11T00:00:00.000Z',
-      revenue: 2_250_000,
-    });
+    seedTransaction({ tenantId, date: '2024-01-10T00:00:00.000Z', revenue: 1_500_000 });
+    seedTransaction({ tenantId, date: '2024-01-11T00:00:00.000Z', revenue: 2_250_000 });
+    seedTransaction({ tenantId, date: '2024-01-12T00:00:00.000Z', revenue: 1_900_000 });
+    seedTransaction({ tenantId, date: '2024-01-13T00:00:00.000Z', revenue: 2_600_000 });
 
-    const response = await withDeterministicDashboardAgent(() => runDashboardAgent({
-      tenantId,
-      userId,
-      goal: 'Buat dashboard lengkap performa bisnis',
-      intent: {
-        intent: 'show_metric',
-        time_period: '7 hari terakhir',
-      },
-    }));
+    const response = await withMockGeminiToolResponses(
+      createDashboardAgentResponses({
+        finalSummary: 'Omzet terus menguat dengan kontribusi terbesar dari produk inti. Margin tetap sehat dan tren penjualan bergerak naik.',
+      }),
+      () => runDashboardAgent({
+        tenantId,
+        userId,
+        goal: 'Buat dashboard performa bisnis',
+        intent: {
+          intent: 'show_metric',
+          time_period: '30 hari terakhir',
+        },
+      }),
+    );
 
     assert.equal(response.presentation_mode, 'canvas');
     assert.ok(Array.isArray(response.widgets));
     assert.ok(response.widgets.length > 0);
-    assert.ok((response.artifacts || []).some((artifact) => artifactHasData(artifact)));
-    assert.equal(response.agent.mode, 'multi_agent_runtime');
+    assert.equal(response.agent.fallback_used, false);
+
+    const paragraphs = String(response.answer || '')
+      .split(/\n\s*\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    assert.ok(paragraphs.length >= 1);
+    assert.ok(paragraphs.length <= 2);
+    assert.doesNotMatch(response.answer, /widget siap|dashboard siap|review selesai/i);
   } finally {
     cleanupTenant(tenantId);
   }
 });
 
-test('runDashboardAgent preserves an explicit component layout when it does not collide', async () => {
-  const { tenantId, userId } = seedTenantUser();
-  try {
-    seedTransaction({
-      tenantId,
-      date: '2024-01-10T00:00:00.000Z',
-      revenue: 1_500_000,
-    });
-
-    const response = await withDeterministicDashboardAgent(() => runDashboardAgent({
-      tenantId,
-      userId,
-      goal: 'Buat dashboard omzet',
-      intent: {
-        intent: 'show_metric',
-        time_period: '7 hari terakhir',
-      },
-      dashboard: {
-        config: {
-          components: [
-            {
-              id: 'component_1',
-              type: 'TrendChart',
-              title: 'Trend Omzet',
-              metric: 'revenue_trend',
-              layout: { x: 8, y: 2, w: 8, h: 4, page: 1 },
-            },
-          ],
-        },
-      },
-    }));
-
-    assert.equal(response.presentation_mode, 'canvas');
-    assert.ok(Array.isArray(response.widgets));
-    assert.ok(response.widgets.length >= 1);
-    assert.equal(response.widgets[0].layout?.x, 8);
-    assert.equal(response.widgets[0].layout?.y, 2);
-    assert.equal(response.widgets[0].layout?.w, 8);
-    assert.equal(response.widgets[0].layout?.h, 4);
-    assert.equal(response.widgets[0].layout?.page, 1);
-  } finally {
-    cleanupTenant(tenantId);
-  }
-});
-
-test('runDashboardAgent preserves explicit dashboard component layout when provided', async () => {
-  const { tenantId, userId } = seedTenantUser();
-  try {
-    seedTransaction({
-      tenantId,
-      date: '2024-01-11T00:00:00.000Z',
-      revenue: 2_250_000,
-    });
-
-    const response = await withDeterministicDashboardAgent(() => runDashboardAgent({
-      tenantId,
-      userId,
-      goal: 'Buat dashboard omzet sederhana',
-      intent: {
-        intent: 'show_metric',
-        time_period: '7 hari terakhir',
-      },
-      dashboard: {
-        id: 'dash_test',
-        config: {
-          components: [
-            {
-              type: 'MetricCard',
-              title: 'Omzet',
-              metric: 'revenue',
-              layout: { x: 6, y: 0, w: 4, h: 2, page: 1 },
-            },
-          ],
-        },
-      },
-    }));
-
-    const omzetWidget = response.widgets.find((widget) => widget.title === 'Omzet');
-    assert.equal(omzetWidget?.layout?.x, 6);
-    assert.equal(omzetWidget?.layout?.page, 1);
-  } finally {
-    cleanupTenant(tenantId);
-  }
-});
-
-test('runDashboardAgent preserves explicit component layout when generating widgets', async () => {
-  const { tenantId, userId } = seedTenantUser();
-  try {
-    seedTransaction({
-      tenantId,
-      date: '2024-01-18T00:00:00.000Z',
-      revenue: 2_000_000,
-    });
-
-    const response = await withDeterministicDashboardAgent(() => runDashboardAgent({
-      tenantId,
-      userId,
-      goal: 'Buat dashboard omzet dengan layout khusus',
-      dashboard: {
-        config: {
-          components: [
-            {
-              type: 'MetricCard',
-              title: 'Omzet',
-              metric: 'revenue',
-              layout: { x: 4, y: 1, w: 4, h: 2, page: 1 },
-            },
-          ],
-        },
-      },
-      intent: {
-        intent: 'show_metric',
-        time_period: '7 hari terakhir',
-      },
-    }));
-
-    assert.equal(response.presentation_mode, 'canvas');
-    const omzetWidget = response.widgets.find((widget) => widget.title === 'Omzet');
-    assert.equal(omzetWidget?.layout?.x, 4);
-    assert.equal(omzetWidget?.layout?.y, 1);
-    assert.equal(omzetWidget?.layout?.w, 4);
-    assert.equal(omzetWidget?.layout?.h, 2);
-  } finally {
-    cleanupTenant(tenantId);
-  }
-});
-
-test('runDashboardAgent keeps a balanced dense dashboard across two pages only when more than six strong widgets exist', async () => {
+test('runDashboardAgent preserves valid worker-authored page placements', async () => {
   const { tenantId, userId } = seedTenantUser();
   try {
     for (let index = 0; index < 4; index += 1) {
       seedTransaction({
         tenantId,
         date: `2024-01-${10 + index}T00:00:00.000Z`,
-        revenue: 1_500_000 + index * 250_000,
+        revenue: 1_500_000 + index * 200_000,
       });
     }
 
-    const response = await withDeterministicDashboardAgent(() => runDashboardAgent({
-      tenantId,
-      userId,
-      goal: 'Buat dashboard performa bisnis yang padat',
-      dashboard: {
-        id: 'dash_dense',
-        config: {
-          components: [
-            { type: 'MetricCard', title: 'Omzet', metric: 'revenue' },
-            { type: 'MetricCard', title: 'Untung', metric: 'profit' },
-            { type: 'MetricCard', title: 'Margin', metric: 'margin' },
-            {
-              type: 'TrendChart',
-              title: 'Omzet per Channel',
-              query: {
-                dataset: 'transactions',
-                measure: 'revenue',
-                group_by: 'channel',
-                visualization: 'bar',
-                title: 'Omzet per Channel',
-              },
-            },
-            { type: 'TrendChart', title: 'Trend Omzet', metric: 'revenue_trend' },
-            { type: 'TopList', title: 'Produk Terlaris', metric: 'top_products' },
-            { type: 'TopList', title: 'Performa Cabang', metric: 'branch_performance' },
-          ],
-        },
-      },
-      intent: {
-        intent: 'show_metric',
-        time_period: '30 hari terakhir',
-      },
-    }));
+    const placements = [
+      { title: 'Omzet', page: 1, x: 0, y: 0, w: 4, h: 2, kind: 'metric' },
+      { title: 'Untung', page: 1, x: 4, y: 0, w: 4, h: 2, kind: 'metric' },
+      { title: 'Trend Omzet', page: 2, x: 0, y: 0, w: 8, h: 4, kind: 'chart' },
+      { title: 'Produk Terlaris', page: 2, x: 8, y: 0, w: 8, h: 4, kind: 'table' },
+    ];
 
-    assert.equal(response.presentation_mode, 'canvas');
-    assert.equal(response.widgets.length, 7);
-    assert.equal(new Set(response.widgets.map((widget) => Number(widget.layout?.page || 1))).size, 2);
-    assert.ok(response.widgets.some((widget) => Number(widget.layout?.page || 1) === 2));
-  } finally {
-    cleanupTenant(tenantId);
-  }
-});
-
-test('runDashboardAgent keeps balanced dashboards on one page when six or fewer strong widgets exist', async () => {
-  const { tenantId, userId } = seedTenantUser();
-  try {
-    for (let index = 0; index < 4; index += 1) {
-      seedTransaction({
+    const response = await withMockGeminiToolResponses(
+      createDashboardAgentResponses({ placements }),
+      () => runDashboardAgent({
         tenantId,
-        date: `2024-01-${10 + index}T00:00:00.000Z`,
-        revenue: 1_500_000 + index * 250_000,
-      });
-    }
-
-    const response = await withDeterministicDashboardAgent(() => runDashboardAgent({
-      tenantId,
-      userId,
-      goal: 'Buat dashboard lengkap performa bisnis',
-      dashboard: {
-        id: 'dash_balanced_single_page',
-        config: {
-          components: [
-            { type: 'MetricCard', title: 'Omzet', metric: 'revenue' },
-            { type: 'MetricCard', title: 'Untung', metric: 'profit' },
-            { type: 'MetricCard', title: 'Margin', metric: 'margin' },
-            { type: 'TrendChart', title: 'Trend Omzet', metric: 'revenue_trend' },
-            { type: 'TopList', title: 'Produk Terlaris', metric: 'top_products' },
-            { type: 'TopList', title: 'Performa Cabang', metric: 'branch_performance' },
-          ],
+        userId,
+        goal: 'Buat dashboard dua halaman',
+        intent: {
+          intent: 'show_metric',
+          time_period: '30 hari terakhir',
         },
-      },
-      intent: {
-        intent: 'show_metric',
-        time_period: '30 hari terakhir',
-      },
-    }));
+      }),
+    );
 
-    assert.equal(response.presentation_mode, 'canvas');
-    assert.equal(response.widgets.length, 6);
-    assert.equal(new Set(response.widgets.map((widget) => Number(widget.layout?.page || 1))).size, 1);
-    assert.ok(response.widgets.every((widget) => Number(widget.layout?.page || 1) === 1));
+    assert.equal(response.agent.worker.pages, 2);
+    assert.ok(response.widgets.every((widget) => Number(widget.layout?.page || 0) >= 1));
+    assert.equal(response.widgets.find((widget) => widget.title === 'Trend Omzet')?.layout?.page, 2);
+    assert.equal(response.widgets.find((widget) => widget.title === 'Produk Terlaris')?.layout?.page, 2);
   } finally {
     cleanupTenant(tenantId);
   }
 });
 
-test('runDashboardAgent repairs invalid overlapping layouts instead of returning collisions', async () => {
+test('runDashboardAgent repairs overlapping worker-authored layouts before returning widgets', async () => {
   const { tenantId, userId } = seedTenantUser();
   try {
-    seedTransaction({
-      tenantId,
-      date: '2024-01-18T00:00:00.000Z',
-      revenue: 2_100_000,
-    });
+    seedTransaction({ tenantId, date: '2024-01-18T00:00:00.000Z', revenue: 2_100_000 });
 
-    const response = await withDeterministicDashboardAgent(() => runDashboardAgent({
-      tenantId,
-      userId,
-      goal: 'Buat dashboard omzet dan laba',
-      dashboard: {
-        id: 'dash_overlap',
-        config: {
-          components: [
-            {
-              type: 'MetricCard',
-              title: 'Omzet',
-              metric: 'revenue',
-              layout: { x: 0, y: 0, w: 4, h: 2, page: 1 },
-            },
-            {
-              type: 'MetricCard',
-              title: 'Untung',
-              metric: 'profit',
-              layout: { x: 0, y: 0, w: 4, h: 2, page: 1 },
-            },
-          ],
+    const placements = [
+      { title: 'Omzet', page: 1, x: 0, y: 0, w: 4, h: 2, kind: 'metric' },
+      { title: 'Untung', page: 1, x: 0, y: 0, w: 4, h: 2, kind: 'metric' },
+    ];
+
+    const response = await withMockGeminiToolResponses(
+      createDashboardAgentResponses({
+        templates: ['total_revenue', 'total_profit'],
+        placements,
+      }),
+      () => runDashboardAgent({
+        tenantId,
+        userId,
+        goal: 'Buat dashboard omzet dan laba',
+        intent: {
+          intent: 'show_metric',
+          time_period: '7 hari terakhir',
         },
-      },
-      intent: {
-        intent: 'show_metric',
-        time_period: '7 hari terakhir',
-      },
-    }));
+      }),
+    );
 
-    assert.equal(response.presentation_mode, 'canvas');
     assert.equal(response.widgets.length, 2);
     assert.equal(layoutsIntersect(response.widgets[0].layout, response.widgets[1].layout), false);
   } finally {
@@ -549,224 +389,100 @@ test('runDashboardAgent repairs invalid overlapping layouts instead of returning
   }
 });
 
-test('runDashboardAgent preserves an explicit later-page layout when it is already valid', async () => {
+test('runDashboardAgent rejects unusable dashboards with DASHBOARD_EMPTY', async () => {
   const { tenantId, userId } = seedTenantUser();
   try {
-    seedTransaction({
-      tenantId,
-      date: '2024-01-18T00:00:00.000Z',
-      revenue: 2_300_000,
-    });
-
-    const response = await withDeterministicDashboardAgent(() => runDashboardAgent({
-      tenantId,
-      userId,
-      goal: 'Buat dashboard dua halaman',
-      dashboard: {
-        id: 'dash_page_two',
-        config: {
-          components: [
-            {
-              type: 'MetricCard',
-              title: 'Omzet',
-              metric: 'revenue',
-              layout: { x: 0, y: 0, w: 4, h: 2, page: 1 },
-            },
-            {
-              type: 'TrendChart',
-              title: 'Trend Omzet',
-              metric: 'revenue_trend',
-              layout: { x: 0, y: 0, w: 8, h: 4, page: 2 },
-            },
-          ],
-        },
+    await assert.rejects(
+      () => withMockGeminiToolResponses(
+        createDashboardAgentResponses({
+          templates: ['total_revenue', 'total_profit', 'revenue_trend', 'top_products'],
+        }),
+        () => runDashboardAgent({
+          tenantId,
+          userId,
+          goal: 'Buat dashboard performa bisnis',
+          intent: {
+            intent: 'show_metric',
+            time_period: '30 hari terakhir',
+          },
+        }),
+      ),
+      (error) => {
+        assert.ok(error instanceof DashboardAgentError);
+        assert.equal(error.code, 'DASHBOARD_EMPTY');
+        assert.equal(error.statusCode, 422);
+        return true;
       },
-      intent: {
-        intent: 'show_metric',
-        time_period: '7 hari terakhir',
-      },
-    }));
-
-    const trendWidget = response.widgets.find((widget) => widget.title === 'Trend Omzet');
-    assert.equal(response.presentation_mode, 'canvas');
-    assert.equal(trendWidget?.layout?.page, 2);
-    assert.equal(trendWidget?.layout?.x, 0);
-    assert.equal(trendWidget?.layout?.y, 0);
+    );
   } finally {
     cleanupTenant(tenantId);
   }
 });
 
-test('runDashboardAgent preserves a valid worker-authored layout plan and lets it override template placement', async () => {
+test('runDashboardAgent builds findings from chart-only dashboards without generic success copy', async () => {
   const { tenantId, userId } = seedTenantUser();
   try {
-    for (let index = 0; index < 4; index += 1) {
-      seedTransaction({
+    seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
+    seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
+    seedTransaction({ tenantId, date: '2024-01-17T00:00:00.000Z', revenue: 1_950_000 });
+
+    const response = await withMockGeminiToolResponses(
+      createDashboardAgentResponses({
+        templates: ['revenue_trend'],
+        placements: [
+          { title: 'Trend Omzet', page: 1, x: 0, y: 0, w: 8, h: 4, kind: 'chart' },
+        ],
+      }),
+      () => runDashboardAgent({
         tenantId,
-        date: `2024-01-${10 + index}T00:00:00.000Z`,
-        revenue: 1_600_000 + index * 200_000,
-      });
-    }
-
-    const responses = [
-      geminiToolPayload({
-        functionCalls: [
-          {
-            name: 'submit_plan',
-            args: {
-              steps: [
-                'Hitung KPI utama.',
-                'Bangun tren omzet.',
-                'Susun dashboard dua halaman yang tetap ringkas.',
-              ],
-            },
-          },
-        ],
-      }),
-      geminiToolPayload({
-        functionCalls: [
-          {
-            name: 'query_template',
-            args: { template_id: 'total_revenue', time_period: '30 hari terakhir' },
-          },
-        ],
-      }),
-      geminiToolPayload({
-        functionCalls: [
-          {
-            name: 'query_template',
-            args: { template_id: 'total_profit', time_period: '30 hari terakhir' },
-          },
-        ],
-      }),
-      geminiToolPayload({
-        functionCalls: [
-          {
-            name: 'query_template',
-            args: { template_id: 'revenue_trend', time_period: '30 hari terakhir' },
-          },
-        ],
-      }),
-      geminiToolPayload({
-        functionCalls: [
-          {
-            name: 'query_template',
-            args: { template_id: 'top_products', time_period: '30 hari terakhir', limit: 5 },
-          },
-        ],
-      }),
-      geminiToolPayload({
-        functionCalls: [
-          {
-            name: 'finalize_dashboard',
-            args: {
-              summary: 'Dashboard selesai.',
-              layout_plan: {
-                strategy: 'balanced',
-                pages: 2,
-                placements: [
-                  { title: 'Omzet', page: 1, x: 0, y: 0, w: 4, h: 2, kind: 'metric' },
-                  { title: 'Untung', page: 1, x: 4, y: 0, w: 4, h: 2, kind: 'metric' },
-                  { title: 'Trend Omzet', page: 2, x: 0, y: 0, w: 8, h: 4, kind: 'chart' },
-                  { title: 'Produk Terlaris', page: 2, x: 8, y: 0, w: 8, h: 4, kind: 'table' },
-                ],
-              },
-            },
-          },
-        ],
-      }),
-      geminiToolPayload({
-        functionCalls: [
-          {
-            name: 'submit_review',
-            args: {
-              verdict: 'good',
-              completeness_pct: 100,
-              summary: 'Review selesai.',
-            },
-          },
-        ],
-      }),
-    ];
-
-    const response = await withMockGeminiToolResponses(responses, async ({ requests }) => runDashboardAgent({
-      tenantId,
-      userId,
-      goal: 'Buat dashboard lengkap performa bisnis',
-      dashboard: {
-        id: 'dash_worker_layout',
-        config: {
-          components: [
-            {
-              type: 'MetricCard',
-              title: 'Omzet',
-              metric: 'revenue',
-              layout: { x: 10, y: 5, w: 4, h: 2, page: 1 },
-            },
-            {
-              type: 'MetricCard',
-              title: 'Untung',
-              metric: 'profit',
-              layout: { x: 6, y: 5, w: 4, h: 2, page: 1 },
-            },
-            {
-              type: 'TrendChart',
-              title: 'Trend Omzet',
-              metric: 'revenue_trend',
-              layout: { x: 0, y: 4, w: 8, h: 4, page: 1 },
-            },
-            {
-              type: 'TopList',
-              title: 'Produk Terlaris',
-              metric: 'top_products',
-              layout: { x: 8, y: 4, w: 8, h: 4, page: 1 },
-            },
-          ],
+        userId,
+        goal: 'Buat dashboard tren omzet',
+        intent: {
+          intent: 'show_metric',
+          time_period: '7 hari terakhir',
         },
-      },
-      intent: {
-        intent: 'show_metric',
-        time_period: '30 hari terakhir',
-      },
-    }).then((result) => {
-      assert.equal(requests.length, 7);
-      return result;
-    }));
+      }),
+    );
 
-    const trendWidget = response.widgets.find((widget) => widget.title === 'Trend Omzet');
-    const productsWidget = response.widgets.find((widget) => widget.title === 'Produk Terlaris');
-    const omzetWidget = response.widgets.find((widget) => widget.title === 'Omzet');
-
-    assert.equal(response.presentation_mode, 'canvas');
-    assert.equal(response.agent.worker.pages, 2);
-    assert.equal(trendWidget?.layout?.page, 2);
-    assert.equal(trendWidget?.layout?.x, 0);
-    assert.equal(productsWidget?.layout?.page, 2);
-    assert.equal(omzetWidget?.layout?.x, 0);
-    assert.equal(omzetWidget?.layout?.y, 0);
+    assert.equal(response.widgets.length, 1);
+    assert.equal(response.artifacts[0]?.kind, 'chart');
+    assert.doesNotMatch(response.answer, /dashboard .* sudah siap/i);
+    assert.match(response.answer, /trend|berakhir|puncak/i);
   } finally {
     cleanupTenant(tenantId);
   }
 });
 
-test('runDashboardAgent returns an explicit chat failure when all generated artifacts are unusable', async () => {
+test('runDashboardAgent falls back to deterministic planner steps when submit_plan is missing', async () => {
   const { tenantId, userId } = seedTenantUser();
   try {
-    const response = await withDeterministicDashboardAgent(() => runDashboardAgent({
-      tenantId,
-      userId,
-      goal: 'Buat dashboard performa bisnis',
-      intent: {
-        intent: 'show_metric',
-        time_period: '30 hari terakhir',
-      },
-    }));
+    seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
+    seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
 
-    assert.equal(response.presentation_mode, 'chat');
-    assert.equal(response.widgets.length, 0);
-    assert.equal(response.artifacts.length, 0);
-    assert.match(response.answer, /belum bisa membuat dashboard yang valid/i);
-    assert.equal(response.agent.worker.ok, false);
+    const response = await withMockGeminiToolResponses(
+      createDashboardAgentResponses({
+        templates: ['total_revenue', 'revenue_trend'],
+        plannerFunctionCalls: [],
+        placements: [
+          { title: 'Omzet', page: 1, x: 0, y: 0, w: 4, h: 2, kind: 'metric' },
+          { title: 'Trend Omzet', page: 1, x: 0, y: 2, w: 8, h: 4, kind: 'chart' },
+        ],
+      }),
+      () => runDashboardAgent({
+        tenantId,
+        userId,
+        goal: 'Buat dashboard omzet minggu ini',
+        intent: {
+          intent: 'show_metric',
+          time_period: '7 hari terakhir',
+        },
+      }),
+    );
+
+    assert.equal(response.widgets.length, 2);
+    assert.equal(response.agent.planner.source, 'fallback');
+    assert.equal(response.agent.planner.ok, true);
+    assert.equal(response.agent.planner.reason, 'missing_submit_plan_call');
   } finally {
     cleanupTenant(tenantId);
   }

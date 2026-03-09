@@ -245,6 +245,7 @@ export async function generateWithGeminiTools({
   maxRetries = 1,
   functionCallingMode = 'AUTO',
   allowedFunctionNames = [],
+  signal = null,
 }) {
   if (!config.geminiApiKey) {
     return {
@@ -272,6 +273,13 @@ export async function generateWithGeminiTools({
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
   const prompt = buildPrompt(systemPrompt, userPrompt);
+  const abortOnExternalSignal = () => controller.abort(signal?.reason);
+
+  if (signal?.aborted) {
+    abortOnExternalSignal();
+  } else if (signal && typeof signal.addEventListener === 'function') {
+    signal.addEventListener('abort', abortOnExternalSignal, { once: true });
+  }
 
   const attempt = async () => {
     const parsedBudget = Number(thinkingBudget);
@@ -375,5 +383,8 @@ export async function generateWithGeminiTools({
     }
   } finally {
     clearTimeout(timeout);
+    if (signal && typeof signal.removeEventListener === 'function') {
+      signal.removeEventListener('abort', abortOnExternalSignal);
+    }
   }
 }
