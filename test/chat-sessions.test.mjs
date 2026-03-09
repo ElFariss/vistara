@@ -65,12 +65,18 @@ function createMockResponse() {
     statusCode: 200,
     headers: {},
     body: '',
+    writableEnded: false,
+    destroyed: false,
     writeHead(statusCode, headers = {}) {
       this.statusCode = statusCode;
       this.headers = headers;
     },
+    write(chunk = '') {
+      this.body += chunk ? String(chunk) : '';
+    },
     end(chunk = '') {
       this.body += chunk ? String(chunk) : '';
+      this.writableEnded = true;
     },
   };
 }
@@ -89,9 +95,18 @@ async function invokeRoute(router, method, routePath, { user, body, query } = {}
     getBody: async () => body || {},
   });
 
+  let payload = null;
+  if (res.body) {
+    try {
+      payload = JSON.parse(res.body);
+    } catch {
+      payload = res.body;
+    }
+  }
+
   return {
     statusCode: res.statusCode,
-    payload: res.body ? JSON.parse(res.body) : null,
+    payload,
   };
 }
 
@@ -359,6 +374,42 @@ test('chat routes allow generic smalltalk prompts', async () => {
     assert.equal(response.statusCode, 200);
     assert.equal(response.payload.intent.intent, 'smalltalk');
     assert.match(response.payload.answer, /halo/i);
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('chat stream returns structured error context for first-message dataset failures', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    const router = new Router();
+    registerChatRoutes(router);
+
+    const response = await invokeRoute(router, 'POST', '/api/chat/stream', {
+      user: { id: userId, tenant_id: tenantId },
+      body: {
+        message: 'berapa omzet hari ini?',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const events = typeof response.payload === 'string'
+      ? response.payload.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line))
+      : [response.payload].filter(Boolean);
+    const errorEvent = events.find((event) => event.type === 'error');
+
+    assert.ok(errorEvent);
+    assert.equal(errorEvent.code, 'DATASET_REQUIRED');
+    assert.equal(errorEvent.status, 400);
+    assert.ok(errorEvent.conversation_id);
+
+    const history = getChatHistory({
+      tenantId,
+      userId,
+      conversationId: errorEvent.conversation_id,
+    });
+    assert.equal(history.conversation_id, errorEvent.conversation_id);
+    assert.equal(history.messages.at(-1)?.payload?.error?.code, 'DATASET_REQUIRED');
   } finally {
     cleanupTenant(tenantId);
   }

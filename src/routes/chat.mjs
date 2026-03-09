@@ -189,6 +189,8 @@ export function registerChatRoutes(router) {
       } catch (error) {
         writeStreamEvent(ctx.res, 'error', {
           code: error?.code || 'CHAT_STREAM_FAILED',
+          status: error?.statusCode || 500,
+          conversation_id: error?.conversationId || null,
           message:
             error instanceof ConversationNotFoundError
               ? error.message

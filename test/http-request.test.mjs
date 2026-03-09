@@ -38,3 +38,27 @@ test('parseRequestBody preserves multipart boundary casing for browser uploads',
   assert.equal(parsed.files.file.contentType, 'text/csv');
   assert.equal(parsed.files.file.buffer.toString('utf8'), 'a,b\r\n1,2');
 });
+
+test('parseRequestBody accepts quoted multipart boundary parameters', async () => {
+  const boundary = '----WebKitFormBoundaryQuotedAbCd123';
+  const multipartBody = Buffer.from(
+    [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="file"; filename="quoted.csv"',
+      'Content-Type: text/csv',
+      '',
+      'x,y',
+      '3,4',
+      `--${boundary}--`,
+      '',
+    ].join('\r\n'),
+    'utf8',
+  );
+
+  const parsed = await parseRequestBody(
+    createRequest(multipartBody, `multipart/form-data; boundary=\"${boundary}\"`),
+  );
+
+  assert.equal(parsed.files.file.filename, 'quoted.csv');
+  assert.equal(parsed.files.file.buffer.toString('utf8'), 'x,y\r\n3,4');
+});

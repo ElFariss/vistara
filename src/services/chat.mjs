@@ -224,6 +224,16 @@ function persistAssistantErrorMessage({
   });
 }
 
+function attachConversationContext(error, conversationId) {
+  if (!error || !conversationId) {
+    return error;
+  }
+  if (!error.conversationId) {
+    error.conversationId = conversationId;
+  }
+  return error;
+}
+
 function maybeAutoTitleConversation({ tenantId, userId, conversationId, message }) {
   const conversation = get(
     `
@@ -642,7 +652,7 @@ export async function processChatMessage({
       error,
       intent,
     });
-    throw error;
+    throw attachConversationContext(error, conversation.id);
   }
 
   let responsePayload = {

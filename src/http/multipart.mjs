@@ -41,12 +41,13 @@ function sliceBetween(buffer, start, end) {
 }
 
 export function parseMultipartBody(bodyBuffer, contentType) {
-  const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
+  const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
   if (!boundaryMatch) {
     throw new Error('Boundary multipart tidak ditemukan.');
   }
 
-  const boundary = `--${boundaryMatch[1]}`;
+  const boundaryValue = String(boundaryMatch[1] || boundaryMatch[2] || '').trim();
+  const boundary = `--${boundaryValue}`;
   const boundaryBuffer = Buffer.from(boundary);
   const fields = {};
   const files = {};

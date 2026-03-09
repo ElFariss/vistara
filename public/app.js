@@ -557,6 +557,9 @@ function createAppError(message, options = {}) {
   if (options.details !== undefined) {
     error.details = options.details;
   }
+  if (options.conversationId) {
+    error.conversationId = options.conversationId;
+  }
   return error;
 }
 
@@ -2810,6 +2813,8 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
       } else if (event.type === 'error') {
         throw createAppError(event.message || 'Stream error.', {
           code: event.code || 'CHAT_STREAM_FAILED',
+          statusCode: event.status || 500,
+          conversationId: event.conversation_id || null,
         });
       }
     }
@@ -2870,9 +2875,11 @@ async function sendChatMessage(userText) {
   } catch (error) {
     hideTyping();
     finalizeTimeline(state.timelineRunId);
-    if (error?.statusCode && error.statusCode < 500 && state.conversationId) {
+    const historyConversationId = error?.conversationId || state.conversationId;
+    if (error?.statusCode && error.statusCode < 500 && historyConversationId) {
+      state.conversationId = historyConversationId;
       try {
-        await refreshChatHistory(state.conversationId);
+        await refreshChatHistory(historyConversationId);
         return;
       } catch (refreshError) {
         console.warn('refreshChatHistory_after_error_failed', refreshError);
