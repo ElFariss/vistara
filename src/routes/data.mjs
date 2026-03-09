@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.mjs';
-import { sendError, sendJson, sendNoContent } from '../http/response.mjs';
+import { resolvePublicErrorMessage, sendError, sendJson, sendNoContent } from '../http/response.mjs';
 import {
   deleteSource,
   getSource,
@@ -169,7 +169,12 @@ export function registerDataRoutes(router) {
         if (fs.existsSync(storedPath)) {
           fs.unlinkSync(storedPath);
         }
-        return sendError(ctx.res, 400, 'UPLOAD_PROCESS_ERROR', error.message);
+        return sendError(
+          ctx.res,
+          400,
+          'UPLOAD_PROCESS_ERROR',
+          resolvePublicErrorMessage(error, 'File tidak bisa diproses sebagai dataset.'),
+        );
       }
     },
     { auth: true },
@@ -217,7 +222,12 @@ export function registerDataRoutes(router) {
         if (fs.existsSync(storedPath)) {
           fs.unlinkSync(storedPath);
         }
-        return sendError(ctx.res, 400, 'DEMO_IMPORT_FAILED', error.message);
+        return sendError(
+          ctx.res,
+          400,
+          'DEMO_IMPORT_FAILED',
+          resolvePublicErrorMessage(error, 'Dataset demo tidak bisa diimpor saat ini.'),
+        );
       }
     },
     { auth: true },
@@ -309,7 +319,12 @@ export function registerDataRoutes(router) {
           repair,
         });
       } catch (error) {
-        return sendError(ctx.res, 500, 'DATASET_REPAIR_FAILED', error.message);
+        return sendError(
+          ctx.res,
+          500,
+          'DATASET_REPAIR_FAILED',
+          resolvePublicErrorMessage(error, 'Perbaikan dataset gagal dijalankan.'),
+        );
       }
     },
     { auth: true },
@@ -368,7 +383,12 @@ export function registerDataRoutes(router) {
           source: getSource(ctx.user.tenant_id, ctx.params.id),
         });
       } catch (error) {
-        return sendError(ctx.res, 400, 'MAPPING_INVALID', error.message);
+        return sendError(
+          ctx.res,
+          400,
+          'MAPPING_INVALID',
+          resolvePublicErrorMessage(error, 'Mapping data tidak valid.'),
+        );
       }
     },
     { auth: true },
@@ -416,7 +436,12 @@ export function registerDataRoutes(router) {
           ...result,
         });
       } catch (error) {
-        return sendError(ctx.res, 400, 'QUERY_FAILED', error.message);
+        return sendError(
+          ctx.res,
+          400,
+          'QUERY_FAILED',
+          resolvePublicErrorMessage(error, 'Query builder tidak bisa diproses.'),
+        );
       }
     },
     { auth: true },

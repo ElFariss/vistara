@@ -7,6 +7,7 @@ import { config } from './config.mjs';
 import { Router } from './router.mjs';
 import { authenticateRequest } from './http/auth.mjs';
 import { createRateLimiter } from './http/rateLimit.mjs';
+import { resolveAllowedOrigin } from './http/cors.mjs';
 import { getClientIp, parseRequestBody, parseUrl } from './http/request.mjs';
 import { sendError, sendJson, sendMethodNotAllowed, sendNotFound } from './http/response.mjs';
 import { resolveStaticRelativePath, shouldDisableStaticCache } from './http/staticAssets.mjs';
@@ -74,13 +75,9 @@ function getContentType(filePath) {
 
 function applyCors(req, res) {
   const origin = req.headers.origin;
-
-  if (!origin) {
-    return;
-  }
-
-  if (config.allowedOrigins.length === 0 || config.allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
+  const allowedOrigin = resolveAllowedOrigin(origin);
+  if (allowedOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
     res.setHeader('Vary', 'Origin');
   }
 

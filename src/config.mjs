@@ -43,12 +43,14 @@ export const config = {
   rateLimitPerMinute: toInt(process.env.RATE_LIMIT_PER_MINUTE, 120),
   maxUploadSizeBytes: toInt(process.env.MAX_UPLOAD_SIZE_MB, 20) * 1024 * 1024,
   allowedOrigins: toList(process.env.ALLOWED_ORIGINS),
+  trustedProxyIps: toList(process.env.TRUSTED_PROXY_IPS).map((item) => item.toLowerCase()),
   geminiApiKey: process.env.GEMINI_API_KEY || process.env.GEMINI_API || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-pro',
   pythonAgentUrl: process.env.PYTHON_AGENT_URL || '',
   pythonAgentToken: process.env.PYTHON_AGENT_TOKEN || '',
   pythonAgentTimeoutMs: toInt(process.env.PYTHON_AGENT_TIMEOUT_MS, 3500),
   dashboardAgentTimeoutMs: toInt(process.env.DASHBOARD_AGENT_TIMEOUT_MS, 180000),
+  otpMaxAttempts: Math.max(1, toInt(process.env.OTP_MAX_ATTEMPTS, 5)),
 };
 
 if (config.isProduction && !process.env.JWT_SECRET) {

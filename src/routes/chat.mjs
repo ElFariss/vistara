@@ -1,4 +1,4 @@
-import { sendError, sendJson } from '../http/response.mjs';
+import { resolvePublicErrorMessage, sendError, sendJson } from '../http/response.mjs';
 import {
   ConversationNotFoundError,
   createConversation,
@@ -20,7 +20,7 @@ export function registerChatRoutes(router) {
       : (error?.code || fallbackCode);
     const message = error instanceof ConversationNotFoundError
       ? (error.message || 'Percakapan tidak ditemukan.')
-      : (error?.message || fallbackMessage);
+      : resolvePublicErrorMessage(error, fallbackMessage);
 
     return sendJson(res, statusCode, {
       ok: false,
@@ -76,7 +76,12 @@ export function registerChatRoutes(router) {
 
         return sendJson(ctx.res, 201, { ok: true, conversation });
       } catch (error) {
-        return sendError(ctx.res, 500, 'CONVERSATION_CREATE_FAILED', error.message);
+        return sendError(
+          ctx.res,
+          500,
+          'CONVERSATION_CREATE_FAILED',
+          resolvePublicErrorMessage(error, 'Percakapan baru tidak bisa dibuat saat ini.'),
+        );
       }
     },
     { auth: true },
@@ -197,7 +202,7 @@ export function registerChatRoutes(router) {
           message:
             error instanceof ConversationNotFoundError
               ? error.message
-              : error.message || 'Gagal memproses chat stream.',
+              : resolvePublicErrorMessage(error, 'Gagal memproses chat stream.'),
         });
       } finally {
         ctx.res.end();

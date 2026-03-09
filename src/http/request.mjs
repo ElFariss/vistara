@@ -9,12 +9,47 @@ export function parseUrl(req) {
   };
 }
 
-export function getClientIp(req) {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.length > 0) {
-    return forwarded.split(',')[0].trim();
+function normalizeIp(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) {
+    return '';
   }
-  return req.socket.remoteAddress || 'unknown';
+
+  if (raw.startsWith('::ffff:')) {
+    return raw.slice('::ffff:'.length);
+  }
+
+  return raw;
+}
+
+export function resolveClientIp({
+  remoteAddress = '',
+  forwardedFor = '',
+  trustedProxyIps = [],
+} = {}) {
+  const normalizedRemote = normalizeIp(remoteAddress);
+  const trusted = new Set((trustedProxyIps || []).map((item) => normalizeIp(item)).filter(Boolean));
+
+  if (normalizedRemote && trusted.has(normalizedRemote)) {
+    const firstForwarded = String(forwardedFor || '')
+      .split(',')
+      .map((item) => normalizeIp(item))
+      .find(Boolean);
+
+    if (firstForwarded) {
+      return firstForwarded;
+    }
+  }
+
+  return normalizedRemote || 'unknown';
+}
+
+export function getClientIp(req) {
+  return resolveClientIp({
+    remoteAddress: req.socket?.remoteAddress,
+    forwardedFor: req.headers['x-forwarded-for'],
+    trustedProxyIps: config.trustedProxyIps,
+  });
 }
 
 export async function readBody(req, maxBytes = config.maxUploadSizeBytes) {

@@ -163,7 +163,7 @@ export async function generateJsonWithGemini({ systemPrompt = '', userPrompt, te
     };
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent?key=${config.geminiApiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
 
@@ -174,6 +174,7 @@ export async function generateJsonWithGemini({ systemPrompt = '', userPrompt, te
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'x-goog-api-key': config.geminiApiKey,
       },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
@@ -269,7 +270,7 @@ export async function generateWithGeminiTools({
     };
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent?key=${config.geminiApiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
   const prompt = buildPrompt(systemPrompt, userPrompt);
@@ -306,6 +307,7 @@ export async function generateWithGeminiTools({
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'x-goog-api-key': config.geminiApiKey,
       },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],

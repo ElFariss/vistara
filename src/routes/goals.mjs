@@ -1,4 +1,4 @@
-import { sendError, sendJson } from '../http/response.mjs';
+import { resolvePublicErrorMessage, sendError, sendJson } from '../http/response.mjs';
 import { createGoal, getGoalProgress, listGoals } from '../services/goals.mjs';
 
 export function registerGoalRoutes(router) {
@@ -23,7 +23,12 @@ export function registerGoalRoutes(router) {
 
         return sendJson(ctx.res, 201, { ok: true, goal });
       } catch (error) {
-        return sendError(ctx.res, 400, 'GOAL_CREATE_FAILED', error.message);
+        return sendError(
+          ctx.res,
+          400,
+          'GOAL_CREATE_FAILED',
+          resolvePublicErrorMessage(error, 'Goal tidak bisa dibuat dengan input saat ini.'),
+        );
       }
     },
     { auth: true },

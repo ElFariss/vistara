@@ -232,11 +232,20 @@ CREATE INDEX IF NOT EXISTS idx_messages_tenant_created ON chat_messages(tenant_i
 CREATE INDEX IF NOT EXISTS idx_goals_tenant_status ON goals(tenant_id, status);
 `;
 
+function ensureColumn(tableName, columnName, definition) {
+  const columns = all(`PRAGMA table_info(${tableName})`);
+  const exists = columns.some((column) => String(column?.name || '').toLowerCase() === String(columnName || '').toLowerCase());
+  if (!exists) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
+  }
+}
+
 export function initializeDatabase() {
   if (databaseClosed) {
     throw new Error('Database sudah ditutup dan tidak bisa diinisialisasi ulang pada proses ini.');
   }
   db.exec(schema);
+  ensureColumn('otp_codes', 'failed_attempts', 'failed_attempts INTEGER NOT NULL DEFAULT 0');
   logger.info('database initialized', { dbPath: config.dbPath });
 }
 

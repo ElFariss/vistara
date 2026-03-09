@@ -5,7 +5,7 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-HOST = os.getenv("PY_AGENT_HOST", "0.0.0.0")
+HOST = os.getenv("PY_AGENT_HOST", "127.0.0.1")
 PORT = int(os.getenv("PY_AGENT_PORT", "8091"))
 TOKEN = os.getenv("PY_AGENT_TOKEN", "")
 TIMEOUT_SEC = float(os.getenv("PY_AGENT_TIMEOUT_SEC", "2.5"))
@@ -182,7 +182,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _authorized(self):
         if not TOKEN:
-            return True
+            return False
         auth = self.headers.get("Authorization", "")
         return auth == f"Bearer {TOKEN}"
 
@@ -194,6 +194,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": True,
                     "service": "python-agent",
                     "timeout_sec": TIMEOUT_SEC,
+                    "auth_configured": bool(TOKEN),
                 },
             )
         return self._send_json(404, {"ok": False, "error": "not_found"})
@@ -201,6 +202,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path != "/execute":
             return self._send_json(404, {"ok": False, "error": "not_found"})
+
+        if not TOKEN:
+            return self._send_json(503, {"ok": False, "error": "agent_token_required"})
 
         if not self._authorized():
             return self._send_json(401, {"ok": False, "error": "unauthorized"})
