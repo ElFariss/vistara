@@ -4,7 +4,7 @@ import { executeAnalyticsIntent, executeBuilderQuery, getBuilderSchema } from '.
 import { ensureDefaultDashboard, getDashboard } from './dashboards.mjs';
 import { runPythonSnippet } from './pythonRuntime.mjs';
 import { generateWithGeminiTools } from './gemini.mjs';
-import { normalizeDashboardLayout, packDashboardLayout } from '../../public/dashboard-layout.js';
+import { normalizeDashboardLayout, packDashboardLayout } from '../../shared/dashboard-layout.mjs';
 
 const VISTARA_SYSTEM_PROMPT = `
 Kamu adalah Vistara AI, asisten analitik bisnis. Fokus pada insight bisnis, bukan kode atau topik di luar data.
