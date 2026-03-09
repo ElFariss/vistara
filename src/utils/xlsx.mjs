@@ -10,8 +10,8 @@ function decodeXml(input = '') {
     .replace(/&#39;/g, "'");
 }
 
-function getZipEntries(filePath) {
-  const output = execFileSync('zipinfo', ['-1', filePath], { encoding: 'utf8' });
+export function listZipEntries(filePath, commandRunner = execFileSync) {
+  const output = commandRunner('unzip', ['-Z1', filePath], { encoding: 'utf8' });
   return output.split(/\r?\n/).filter(Boolean);
 }
 
@@ -98,7 +98,7 @@ function parseSheetRows(sheetXml, sharedStrings) {
 }
 
 export function parseXlsxFile(filePath) {
-  const entries = getZipEntries(filePath);
+  const entries = listZipEntries(filePath);
   const sheetEntry = entries
     .filter((entry) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(entry))
     .sort()[0];
