@@ -25,6 +25,7 @@ export function registerChatRoutes(router) {
     return sendJson(res, statusCode, {
       ok: false,
       conversation_id: error?.conversationId || null,
+      persisted_in_conversation: Boolean(error?.persistedInConversation),
       error: {
         code,
         message,

@@ -256,3 +256,31 @@ test('chat stream error events include persisted conversation metadata for dashb
     cleanupTenant(tenantId);
   }
 });
+
+test('chat route returns persisted conversation metadata for non-stream dashboard failures', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  const previousGeminiApiKey = config.geminiApiKey;
+  try {
+    await seedDataset({ tenantId, userId });
+    config.geminiApiKey = '';
+
+    const router = new Router();
+    registerChatRoutes(router);
+    const res = await invokeRoute(router, 'POST', '/api/chat', {
+      user: { id: userId, tenant_id: tenantId },
+      body: {
+        message: 'buat dashboard performa bulan ini',
+      },
+    });
+
+    const payload = JSON.parse(res.body);
+    assert.equal(res.statusCode, 503);
+    assert.equal(payload.error?.code, 'AI_SERVICE_UNAVAILABLE');
+    assert.equal(payload.persisted_in_conversation, true);
+    assert.equal(payload.error?.persisted_in_conversation, true);
+    assert.ok(payload.conversation_id);
+  } finally {
+    config.geminiApiKey = previousGeminiApiKey;
+    cleanupTenant(tenantId);
+  }
+});
