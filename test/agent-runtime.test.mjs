@@ -231,7 +231,9 @@ function createDashboardAgentResponses({
             summary: finalSummary,
             layout_plan: {
               strategy: 'balanced',
-              pages: Math.max(...placements.map((placement) => Number(placement.page || 1))),
+              pages: placements.length > 0
+                ? Math.max(...placements.map((placement) => Number(placement.page || 1)))
+                : 1,
               placements,
             },
           },
@@ -395,7 +397,8 @@ test('runDashboardAgent rejects unusable dashboards with DASHBOARD_EMPTY', async
     await assert.rejects(
       () => withMockGeminiToolResponses(
         createDashboardAgentResponses({
-          templates: ['total_revenue', 'total_profit', 'revenue_trend', 'top_products'],
+          templates: ['top_products'],
+          placements: [{ title: 'Produk Terlaris', page: 1, x: 0, y: 0, w: 8, h: 4, kind: 'table' }],
         }),
         () => runDashboardAgent({
           tenantId,

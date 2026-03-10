@@ -106,6 +106,7 @@ const state = {
   settings: { ...DEFAULT_SETTINGS },
   settingsGroup: 'user',
   settingsOpen: false,
+  settingsReturnFocus: null,
   sessionRailCollapsed: true,
   openConversationMenuId: null,
   dataPaneCollapsed: true,
@@ -486,10 +487,23 @@ function setSettingsOpen(open, options = {}) {
   state.settingsOpen = Boolean(open);
   if (state.settingsOpen) {
     setSettingsGroup(options.group || state.settingsGroup || 'user');
+    state.settingsReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   }
   document.body.classList.toggle('settings-open', state.settingsOpen);
   refs.settingsBackdrop?.classList.toggle('hidden', !state.settingsOpen);
   refs.settingsPanel?.classList.toggle('hidden', !state.settingsOpen);
+  if (refs.appShell) {
+    if ('inert' in refs.appShell) {
+      refs.appShell.inert = state.settingsOpen;
+    }
+    refs.appShell.setAttribute('aria-hidden', String(state.settingsOpen));
+  }
+  if (state.settingsOpen) {
+    refs.settingsPanel?.focus();
+  } else if (state.settingsReturnFocus && typeof state.settingsReturnFocus.focus === 'function') {
+    state.settingsReturnFocus.focus();
+    state.settingsReturnFocus = null;
+  }
 }
 
 function setWorkspaceBooting(booting, options = {}) {
@@ -1074,6 +1088,16 @@ function setCanvasPreparing(preparing, options = {}) {
   state.isCanvasPreparing = Boolean(preparing);
   refs.canvasPane?.classList.toggle('canvas-preparing', state.isCanvasPreparing);
   refs.canvasLoading?.classList.toggle('hidden', !state.isCanvasPreparing);
+  refs.canvasPane?.setAttribute('aria-busy', String(state.isCanvasPreparing));
+  if (refs.canvasViewport && 'inert' in refs.canvasViewport) {
+    refs.canvasViewport.inert = state.isCanvasPreparing;
+  }
+  if (refs.canvasDock && 'inert' in refs.canvasDock) {
+    refs.canvasDock.inert = state.isCanvasPreparing;
+  }
+  if (refs.canvasPageIndicator && 'inert' in refs.canvasPageIndicator) {
+    refs.canvasPageIndicator.inert = state.isCanvasPreparing;
+  }
   if (refs.canvasLoading && options.message) {
     const text = refs.canvasLoading.querySelector('[data-canvas-loading-text]');
     if (text) {
@@ -1642,6 +1666,44 @@ function renderThread() {
 }
 
 function toMetricArtifact(widget) {
+  const extractTopListValue = (item = {}) => {
+    const candidates = [
+      item.total_revenue,
+      item.revenue,
+      item.total_profit,
+      item.profit,
+      item.total_expense,
+      item.expense,
+      item.amount,
+      item.total,
+      item.value,
+      item.quantity,
+      item.qty,
+      item.count,
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate === null || candidate === undefined) {
+        continue;
+      }
+      const numeric = Number(candidate);
+      if (Number.isFinite(numeric)) {
+        return numeric;
+      }
+      const text = String(candidate)
+        .replace(/\./g, '')
+        .replace(/,/g, '.')
+        .replace(/[^\d.-]/g, '')
+        .trim();
+      const parsed = Number(text);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+
+    return 0;
+  };
+
   if (widget.type === 'MetricCard') {
     return {
       kind: 'metric',
@@ -1673,7 +1735,7 @@ function toMetricArtifact(widget) {
       columns: ['name', 'value'],
       rows: (widget.items || []).map((item) => ({
         name: item.name || item.label || 'Item',
-        value: item.total_revenue ?? item.revenue ?? item.value ?? 0,
+        value: extractTopListValue(item),
       })),
     };
   }
@@ -2321,6 +2383,7 @@ async function refreshDashboards() {
   } catch {
     state.currentDashboard = null;
     state.canvasPagesCount = 1;
+    setCanvasPreparing(false);
   }
 }
 
@@ -2608,6 +2671,7 @@ async function refreshChatHistory(conversationId = state.conversationId) {
   } finally {
     state.isLoadingConversation = false;
     syncComposerChrome();
+    setCanvasPreparing(false);
   }
 }
 

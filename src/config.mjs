@@ -59,6 +59,8 @@ export const config = {
   dbBusyTimeoutMs: Math.max(1000, toInt(process.env.DB_BUSY_TIMEOUT_MS, 5000)),
   maxUploadSizeBytes: toInt(process.env.MAX_UPLOAD_SIZE_MB, 20) * 1024 * 1024,
   allowedOrigins: toList(process.env.ALLOWED_ORIGINS),
+  apiBaseUrl: process.env.API_BASE_URL || '',
+  cspConnectSrc: toList(process.env.CSP_CONNECT_SRC),
   trustedProxyIps: toList(process.env.TRUSTED_PROXY_IPS).map((item) => item.toLowerCase()),
   otpPreviewEnabled: toBoolean(process.env.OTP_PREVIEW_ENABLED, false),
   geminiApiKey: process.env.GEMINI_API_KEY || process.env.GEMINI_API || '',
@@ -67,7 +69,8 @@ export const config = {
   pythonAgentUrl: process.env.PYTHON_AGENT_URL || '',
   pythonAgentToken: process.env.PYTHON_AGENT_TOKEN || '',
   pythonAgentTimeoutMs: toInt(process.env.PYTHON_AGENT_TIMEOUT_MS, 3500),
-  dashboardAgentTimeoutMs: toInt(process.env.DASHBOARD_AGENT_TIMEOUT_MS, 180000),
+  dashboardAgentTimeoutMs: toInt(process.env.DASHBOARD_AGENT_TIMEOUT_MS, 120000),
+  dashboardAgentMaxAttempts: Math.max(1, toInt(process.env.DASHBOARD_AGENT_MAX_ATTEMPTS, 2)),
   otpMaxAttempts: Math.max(1, toInt(process.env.OTP_MAX_ATTEMPTS, 5)),
   demoAuthRateLimitPerMinute: Math.max(1, toInt(process.env.DEMO_AUTH_RATE_LIMIT_PER_MINUTE, 5)),
 };

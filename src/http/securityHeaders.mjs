@@ -1,4 +1,37 @@
+import { config } from '../config.mjs';
+
+function normalizeOrigin(value = '') {
+  try {
+    const url = new URL(String(value));
+    return url.origin;
+  } catch {
+    return '';
+  }
+}
+
+function buildConnectSrcList() {
+  const sources = new Set(["'self'"]);
+  const apiOrigin = normalizeOrigin(config.apiBaseUrl);
+  if (apiOrigin) {
+    sources.add(apiOrigin);
+  }
+  (config.allowedOrigins || []).forEach((origin) => {
+    const normalized = normalizeOrigin(origin);
+    if (normalized) {
+      sources.add(normalized);
+    }
+  });
+  (config.cspConnectSrc || []).forEach((origin) => {
+    const normalized = normalizeOrigin(origin);
+    if (normalized) {
+      sources.add(normalized);
+    }
+  });
+  return Array.from(sources);
+}
+
 function buildContentSecurityPolicy() {
+  const connectSrc = buildConnectSrcList();
   return [
     "default-src 'self'",
     "base-uri 'self'",
@@ -8,8 +41,7 @@ function buildContentSecurityPolicy() {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data:",
-    // Runtime API base can be injected client-side, so connect-src cannot be locked to self only.
-    "connect-src 'self' http: https: ws: wss:",
+    `connect-src ${connectSrc.join(' ')}`,
     "form-action 'self'",
   ].join('; ');
 }
@@ -25,10 +57,14 @@ const SECURITY_HEADERS = Object.freeze({
 });
 
 export function getSecurityHeaders() {
-  return {
+  const headers = {
     ...SECURITY_HEADERS,
     'Content-Security-Policy': buildContentSecurityPolicy(),
   };
+  if (config.isProduction) {
+    headers['Strict-Transport-Security'] = 'max-age=15552000; includeSubDomains';
+  }
+  return headers;
 }
 
 export function applySecurityHeaders(res) {

@@ -530,7 +530,6 @@ function widgetDedupKey(widget = {}) {
       normalizeKeyText(query.branch || ''),
       normalizeKeyText(query.channel || ''),
       normalizeLimit(query.limit, 0, 500),
-      normalizeKeyText(widget?.title || widget?.artifact?.title || ''),
     ].join(':');
   }
 
@@ -595,8 +594,6 @@ function dedupeComponents(components = []) {
       result.push(component);
       continue;
     }
-    const layout = component.layout || {};
-    const layoutKey = layout.page ? `page:${Number(layout.page)}` : '';
     const key = component?.query && typeof component.query === 'object'
       ? [
           'builder',
@@ -606,13 +603,11 @@ function dedupeComponents(components = []) {
           normalizeKeyText(component.query.visualization || ''),
           normalizeKeyText(component.query.time_period || ''),
           normalizeKeyText(component.title || ''),
-          layoutKey,
         ].join(':')
       : [
           'template',
           normalizeTemplateId(component.metric || component.title || component.type || '') || componentMetricKey(component),
           normalizeKeyText(component.title || ''),
-          layoutKey,
         ].join(':');
 
     if (seen.has(key)) {
@@ -829,12 +824,45 @@ function toArtifactFromLegacyWidget(widget) {
       columns: ['name', 'value'],
       rows: (widget.items || []).map((item) => ({
         name: item.name || item.label || 'Item',
-        value: item.total_revenue ?? item.revenue ?? item.value ?? 0,
+        value: extractTopListValue(item),
       })),
     };
   }
 
   return null;
+}
+
+function extractTopListValue(item = {}) {
+  const candidates = [
+    item.total_revenue,
+    item.revenue,
+    item.total_profit,
+    item.profit,
+    item.total_expense,
+    item.expense,
+    item.amount,
+    item.total,
+    item.value,
+    item.quantity,
+    item.qty,
+    item.count,
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate === null || candidate === undefined) {
+      continue;
+    }
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+    const parsed = parseIndonesianNumber(candidate);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return 0;
 }
 
 function artifactsFromAnalyticsResult(result) {
@@ -852,10 +880,10 @@ function artifactLooksEmpty(artifact) {
   if (artifact.kind === 'metric') {
     const raw = Number(artifact.raw_value);
     if (Number.isFinite(raw)) {
-      return raw === 0;
+      return false;
     }
     const parsed = parseIndonesianNumber(artifact.value);
-    return !Number.isFinite(parsed) || parsed === 0;
+    return !Number.isFinite(parsed);
   }
 
   if (artifact.kind === 'table') {
@@ -867,7 +895,7 @@ function artifactLooksEmpty(artifact) {
     if (values.length === 0) {
       return true;
     }
-    return values.every((value) => Number(value || 0) === 0);
+    return false;
   }
 
   return false;

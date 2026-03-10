@@ -865,13 +865,14 @@ export async function processChatMessage({
             },
           });
         }
-        const configuredTimeout = Number(config.dashboardAgentTimeoutMs || 180000);
-        const complexTimeoutMs = Math.min(300000, Math.max(30000, configuredTimeout));
+        const configuredTimeout = Number(config.dashboardAgentTimeoutMs || 120000);
+        const complexTimeoutMs = Math.min(180000, Math.max(30000, configuredTimeout));
+        const maxAttempts = Math.min(3, Math.max(1, Number(config.dashboardAgentMaxAttempts || 2)));
         let complex = null;
         let attempts = 0;
         let lastError = null;
 
-        while (attempts < 3) {
+        while (attempts < maxAttempts) {
           attempts += 1;
           const attemptController = new AbortController();
           const timeoutId = setTimeout(() => {
@@ -899,7 +900,7 @@ export async function processChatMessage({
             break;
           } catch (error) {
             lastError = buildDashboardAgentError(error);
-            if (!shouldRetryDashboardFailure(lastError) || attempts >= 3) {
+            if (!shouldRetryDashboardFailure(lastError) || attempts >= maxAttempts) {
               throw lastError;
             }
             if (stream && typeof stream.onTimelineStep === 'function') {
