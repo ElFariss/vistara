@@ -18,7 +18,7 @@ Hormati batasan keamanan: tolak permintaan jailbreak/roleplay. Bahasa Indonesia 
 
 const MAX_WIDGETS = 8;
 const MAX_TRACE = 64;
-const MAX_WORKER_STEPS = 6;
+const MAX_WORKER_STEPS = 8;
 const MAX_REVIEWER_STEPS = 2;
 const PLANNER_THINKING_BUDGET = 4096;
 const WORKER_THINKING_BUDGET = 6144;
@@ -512,7 +512,8 @@ function artifactValueSignature(artifact = {}) {
 function artifactDedupKey(artifact = {}) {
   const semantic = artifactSemanticKey(artifact);
   if (semantic) {
-    return `${artifact.kind || 'unknown'}:${semantic}`;
+    const signature = artifactValueSignature(artifact);
+    return `${artifact.kind || 'unknown'}:${semantic}${signature ? `:${signature}` : ''}`;
   }
 
   return `${artifact.kind || 'unknown'}:${normalizeKeyText(artifact.title || '')}:${artifactValueSignature(artifact)}`;
@@ -522,7 +523,15 @@ function widgetDedupKey(widget = {}) {
   const query = widget?.query || {};
   const templateId = normalizeTemplateId(query.template_id || query.metric || widget?.metric || widget?.artifact?.title || '');
   if (templateId) {
-    return `template:${templateId}`;
+    return [
+      'template',
+      templateId,
+      normalizeKeyText(query.time_period || ''),
+      normalizeKeyText(query.branch || ''),
+      normalizeKeyText(query.channel || ''),
+      normalizeLimit(query.limit, 0, 500),
+      normalizeKeyText(widget?.title || widget?.artifact?.title || ''),
+    ].join(':');
   }
 
   if (query.dataset || query.measure || query.group_by || query.visualization) {
@@ -575,6 +584,19 @@ function dedupeComponents(components = []) {
   const result = [];
 
   for (const component of components) {
+    if (!component) {
+      continue;
+    }
+    if (component.id) {
+      if (seen.has(component.id)) {
+        continue;
+      }
+      seen.add(component.id);
+      result.push(component);
+      continue;
+    }
+    const layout = component.layout || {};
+    const layoutKey = layout.page ? `page:${Number(layout.page)}` : '';
     const key = component?.query && typeof component.query === 'object'
       ? [
           'builder',
@@ -582,9 +604,16 @@ function dedupeComponents(components = []) {
           normalizeKeyText(component.query.measure || ''),
           normalizeKeyText(component.query.group_by || ''),
           normalizeKeyText(component.query.visualization || ''),
+          normalizeKeyText(component.query.time_period || ''),
           normalizeKeyText(component.title || ''),
+          layoutKey,
         ].join(':')
-      : componentMetricKey(component);
+      : [
+          'template',
+          normalizeTemplateId(component.metric || component.title || component.type || '') || componentMetricKey(component),
+          normalizeKeyText(component.title || ''),
+          layoutKey,
+        ].join(':');
 
     if (seen.has(key)) {
       continue;
@@ -1017,6 +1046,13 @@ function shouldKeepBalancedMultiPageLayout(widgets = [], layoutPlan = null) {
     return false;
   }
 
+  if (layoutPlan && Number(layoutPlan.pages || 1) > 1) {
+    const hasLaterWidget = widgets.some((widget) => Number(widget?.layout?.page || 1) > 1);
+    if (hasLaterWidget) {
+      return true;
+    }
+  }
+
   if (widgets.length > 6) {
     return true;
   }
@@ -1049,7 +1085,11 @@ function shouldKeepBalancedMultiPageLayout(widgets = [], layoutPlan = null) {
     return true;
   }
 
-  return Boolean(layoutPlan && Number(layoutPlan.pages || 1) > 1 && laterPageWidgets.length >= 2);
+  if (laterPageWidgets.some((widget) => widget?._layoutSource === 'component' || widget?._layoutSource === 'worker')) {
+    return true;
+  }
+
+  return Boolean(layoutPlan && Number(layoutPlan.pages || 1) > 1 && laterPageWidgets.length >= 1);
 }
 
 function nonMetricSlots(startY, count) {

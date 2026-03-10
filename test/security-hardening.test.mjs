@@ -243,7 +243,7 @@ test('OTP send keeps preview hidden by default even for valid accounts', async (
   }
 });
 
-test('OTP send reveals preview only when the explicit opt-in flag is enabled', async () => {
+test('OTP send keeps preview hidden for public email flow even when opt-in is enabled', async () => {
   const { tenantId, email } = seedTenantUser();
   const router = new Router();
   const previousOtpPreviewEnabled = config.otpPreviewEnabled;
@@ -254,6 +254,35 @@ test('OTP send reveals preview only when the explicit opt-in flag is enabled', a
   try {
     const response = await invokeRoute(router, 'POST', '/api/auth/otp/send', {
       body: { email },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.payload.otp_preview, undefined);
+  } finally {
+    config.otpPreviewEnabled = previousOtpPreviewEnabled;
+    cleanupTenant(tenantId);
+  }
+});
+
+test('OTP send reveals preview only for authenticated user flow when opt-in is enabled', async () => {
+  const { tenantId, userId, email } = seedTenantUser();
+  const router = new Router();
+  const previousOtpPreviewEnabled = config.otpPreviewEnabled;
+  registerAuthRoutes(router);
+
+  config.otpPreviewEnabled = true;
+
+  try {
+    const response = await invokeRoute(router, 'POST', '/api/auth/otp/send', {
+      user: {
+        id: userId,
+        tenant_id: tenantId,
+        email,
+        role: 'owner',
+        phone: '08123456789',
+        phone_verified: false,
+      },
+      body: {},
     });
 
     assert.equal(response.statusCode, 200);
@@ -281,7 +310,8 @@ test('OTP verify returns a generic invalid response for unknown emails', async (
 });
 
 test('OTP verify consumes the code after the configured number of failed attempts', async () => {
-  const { tenantId, userId, email } = seedTenantUser();
+  const phone = '08123456789';
+  const { tenantId, userId, email } = seedTenantUser({ phone });
   const router = new Router();
   const previousOtpMaxAttempts = config.otpMaxAttempts;
   const previousOtpPreviewEnabled = config.otpPreviewEnabled;
@@ -292,6 +322,11 @@ test('OTP verify consumes the code after the configured number of failed attempt
 
   try {
     const sendResponse = await invokeRoute(router, 'POST', '/api/auth/otp/send', {
+      user: {
+        id: userId,
+        tenant_id: tenantId,
+        phone,
+      },
       body: { email },
     });
     assert.equal(sendResponse.statusCode, 200);

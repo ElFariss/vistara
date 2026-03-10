@@ -1,5 +1,5 @@
-const SECURITY_HEADERS = Object.freeze({
-  'Content-Security-Policy': [
+function buildContentSecurityPolicy() {
+  return [
     "default-src 'self'",
     "base-uri 'self'",
     "object-src 'none'",
@@ -8,9 +8,13 @@ const SECURITY_HEADERS = Object.freeze({
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data:",
-    "connect-src 'self'",
+    // Runtime API base can be injected client-side, so connect-src cannot be locked to self only.
+    "connect-src 'self' http: https: ws: wss:",
     "form-action 'self'",
-  ].join('; '),
+  ].join('; ');
+}
+
+const SECURITY_HEADERS = Object.freeze({
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Resource-Policy': 'same-origin',
   'Origin-Agent-Cluster': '?1',
@@ -21,7 +25,10 @@ const SECURITY_HEADERS = Object.freeze({
 });
 
 export function getSecurityHeaders() {
-  return { ...SECURITY_HEADERS };
+  return {
+    ...SECURITY_HEADERS,
+    'Content-Security-Policy': buildContentSecurityPolicy(),
+  };
 }
 
 export function applySecurityHeaders(res) {

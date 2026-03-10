@@ -46,9 +46,13 @@ export class Router {
       }
 
       const params = {};
-      route.paramNames.forEach((name, index) => {
-        params[name] = decodeURIComponent(match[index + 1]);
-      });
+      try {
+        route.paramNames.forEach((name, index) => {
+          params[name] = decodeURIComponent(match[index + 1]);
+        });
+      } catch {
+        return null;
+      }
 
       return {
         route,

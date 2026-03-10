@@ -123,8 +123,15 @@ export async function parseRequestBody(req) {
 
   if (contentType.includes('application/json')) {
     try {
-      return JSON.parse(body.toString('utf8'));
-    } catch {
+      const parsed = JSON.parse(body.toString('utf8'));
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new RequestBodyError('INVALID_JSON', 'JSON body harus berupa object.', 400);
+      }
+      return parsed;
+    } catch (error) {
+      if (error instanceof RequestBodyError) {
+        throw error;
+      }
       throw new RequestBodyError('INVALID_JSON', 'JSON body tidak valid.', 400);
     }
   }

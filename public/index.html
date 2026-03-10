@@ -346,7 +346,7 @@
 
     <main id="workspacePage" class="page-view workspace-page hidden">
       <h1 id="workspaceTitle" class="sr-only">Workspace analitik Vistara</h1>
-      <section id="workspaceLoading" class="workspace-loading hidden" aria-live="polite" aria-labelledby="workspaceLoadingTitle">
+      <section id="workspaceLoading" class="workspace-loading hidden" aria-live="polite" aria-labelledby="workspaceLoadingTitle" role="dialog" aria-modal="true">
         <div class="workspace-loading-card">
           <span class="workspace-loading-spinner" aria-hidden="true"></span>
           <h2 id="workspaceLoadingTitle">Menyiapkan workspace Anda</h2>
@@ -390,6 +390,7 @@
               <button id="gateUploadBtn" type="button">Upload & Gunakan</button>
               <button id="gateDemoBtn" type="button" class="ghost">Gunakan Demo test.csv</button>
             </div>
+            <span id="gateUploadName" class="gate-upload-name hidden" aria-live="polite"></span>
           </div>
 
           <div id="chatMessages" class="chat-thread" aria-live="polite"></div>
@@ -459,6 +460,13 @@
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5 7 7-7 7"></path></svg>
                     </button>
                   </div>
+                </div>
+              </div>
+
+              <div id="canvasLoading" class="canvas-loading hidden" role="status" aria-live="polite">
+                <div class="canvas-loading-card">
+                  <span class="canvas-loading-spinner" aria-hidden="true"></span>
+                  <p data-canvas-loading-text>Dashboard sedang disiapkan...</p>
                 </div>
               </div>
 

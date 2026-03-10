@@ -206,10 +206,11 @@ test('resolveCanvasState falls back to saved dashboard widgets when the conversa
     dashboardWidgets: [dashboardWidget],
     canvasPage: 3,
     canvasPagesCount: 1,
+    dashboardPagesCount: 3,
   }), {
     canvasWidgets: [dashboardWidget],
-    canvasPagesCount: 2,
-    canvasPage: 2,
+    canvasPagesCount: 3,
+    canvasPage: 3,
   });
 
   assert.deepEqual(resolveCanvasState({
@@ -239,8 +240,8 @@ test('canvas state helpers collapse stale extra pages when widgets only occupy p
   }), {
     currentDashboard: { id: 'dash_1' },
     canvasWidgets: [singlePageWidget],
-    canvasPage: 1,
-    canvasPagesCount: 1,
+    canvasPage: 2,
+    canvasPagesCount: 2,
   });
 
   assert.deepEqual(resolveCanvasState({

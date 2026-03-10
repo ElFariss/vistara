@@ -1489,6 +1489,16 @@ label {
   gap: 0.45rem;
 }
 
+.gate-upload-name {
+  font-size: 0.82rem;
+  color: var(--ink-secondary);
+  padding: 0.35rem 0.5rem;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px dashed var(--line);
+  justify-self: start;
+}
+
 .chat-thread {
   overflow: auto;
   overscroll-behavior: contain;
@@ -2300,6 +2310,43 @@ label {
   z-index: 2;
 }
 
+.canvas-loading {
+  position: absolute;
+  inset: var(--canvas-topbar-height) 0 0 0;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg) 86%, transparent), transparent);
+  z-index: 3;
+}
+
+.canvas-loading-card {
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.9rem;
+  color: var(--ink-secondary);
+}
+
+.canvas-loading-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-top-color: var(--accent);
+  animation: spin 1.1s linear infinite;
+}
+
+.canvas-preparing .canvas-page-controls,
+.canvas-preparing .canvas-dock {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 .canvas-bar-copy h2 {
   margin: 0;
   font-size: 0.98rem;
@@ -2627,6 +2674,11 @@ label {
   stroke-width: 1.9;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.summary-btn.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .timeline-card {

@@ -116,6 +116,7 @@ const state = {
   preChatTickerKey: '',
   isProgrammaticGridUpdate: false,
   isRenderingCanvas: false,
+  isCanvasPreparing: false,
   isLoadingConversation: false,
   isSendingMessage: false,
   isUploadingDataset: false,
@@ -200,11 +201,13 @@ const refs = {
   canvasShell: document.querySelector('.canvas-shell'),
   canvasViewport: document.getElementById('canvasViewport'),
   canvasWorld: document.getElementById('canvasWorld'),
+  canvasLoading: document.getElementById('canvasLoading'),
 
   dataGate: document.getElementById('dataGate'),
   gateUploadInput: document.getElementById('gateUploadInput'),
   gateUploadPickerBtn: document.getElementById('gateUploadPickerBtn'),
   gateUploadBtn: document.getElementById('gateUploadBtn'),
+  gateUploadName: document.getElementById('gateUploadName'),
   gateDemoBtn: document.getElementById('gateDemoBtn'),
 
   chatMessages: document.getElementById('chatMessages'),
@@ -496,6 +499,12 @@ function setWorkspaceBooting(booting, options = {}) {
   refs.workspacePage?.classList.toggle('workspace-page-loading', state.isWorkspaceBooting);
   refs.workspaceLoading?.classList.toggle('hidden', !state.isWorkspaceBooting);
   refs.workspacePage?.setAttribute('aria-busy', String(state.isWorkspaceBooting));
+  if (refs.workspaceShell) {
+    if ('inert' in refs.workspaceShell) {
+      refs.workspaceShell.inert = state.isWorkspaceBooting;
+    }
+    refs.workspaceShell.setAttribute('aria-hidden', String(state.isWorkspaceBooting));
+  }
 
   if (refs.workspaceLoadingText && message) {
     refs.workspaceLoadingText.textContent = message;
@@ -1061,6 +1070,18 @@ function setCanvasOpen(open) {
   }
 }
 
+function setCanvasPreparing(preparing, options = {}) {
+  state.isCanvasPreparing = Boolean(preparing);
+  refs.canvasPane?.classList.toggle('canvas-preparing', state.isCanvasPreparing);
+  refs.canvasLoading?.classList.toggle('hidden', !state.isCanvasPreparing);
+  if (refs.canvasLoading && options.message) {
+    const text = refs.canvasLoading.querySelector('[data-canvas-loading-text]');
+    if (text) {
+      text.textContent = options.message;
+    }
+  }
+}
+
 function setCanvasWidthPct(nextPct, options = {}) {
   const clamped = Math.max(MIN_CANVAS_PCT, Math.min(MAX_CANVAS_PCT, Number(nextPct || DEFAULT_CANVAS_PCT)));
   state.canvasWidthPct = clamped;
@@ -1494,11 +1515,19 @@ function renderDashboardSummary(message) {
   openBtn.setAttribute('aria-label', 'Buka dashboard');
   openBtn.setAttribute('title', 'Buka dashboard');
   openBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v5h-7zM13 11h7v9h-7zM4 13h7v7H4z"></path></svg><span class="sr-only">Buka dashboard</span>';
+  const hasWidgets = Array.isArray(message.widgets) && message.widgets.length > 0;
+  if (!hasWidgets) {
+    openBtn.disabled = true;
+    openBtn.classList.add('is-disabled');
+    openBtn.setAttribute('aria-disabled', 'true');
+    openBtn.setAttribute('title', 'Dashboard sedang disiapkan');
+  }
   openBtn.addEventListener('click', () => {
     if (Array.isArray(message.widgets) && message.widgets.length > 0) {
       state.canvasWidgets = normalizeIncomingWidgets(message.widgets);
       state.canvasPagesCount = pageCountForWidgets(state.canvasWidgets);
       state.canvasPage = Math.max(1, Number(state.canvasWidgets[0]?.layout?.page || 1));
+      setCanvasPreparing(false);
       renderCanvas();
       scheduleCanvasSave();
     }
@@ -1917,18 +1946,25 @@ function setCanvasPage(page, rerender = true) {
 function updateCanvasPagination() {
   const total = allPages();
   state.canvasPagesCount = total;
+  const pending = state.isCanvasPreparing && (!Array.isArray(state.canvasWidgets) || state.canvasWidgets.length === 0);
   if (refs.canvasPageIndicator) {
-    refs.canvasPageIndicator.textContent = `Hal ${state.canvasPage} / ${total}`;
+    refs.canvasPageIndicator.textContent = pending ? 'Menyiapkan...' : `Hal ${state.canvasPage} / ${total}`;
   }
   if (refs.canvasPrevPage) {
-    refs.canvasPrevPage.disabled = state.canvasPage <= 1;
+    refs.canvasPrevPage.disabled = pending || state.canvasPage <= 1;
   }
   if (refs.canvasNextPage) {
-    refs.canvasNextPage.disabled = state.canvasPage >= total;
+    refs.canvasNextPage.disabled = pending || state.canvasPage >= total;
+  }
+  if (refs.canvasAddPage) {
+    refs.canvasAddPage.disabled = pending;
   }
 }
 
 function addCanvasPage() {
+  if (state.isCanvasPreparing) {
+    return;
+  }
   const total = allPages();
   state.canvasPagesCount = total + 1;
   state.canvasPage = state.canvasPagesCount;
@@ -2235,6 +2271,9 @@ function renderCanvas() {
   }
   state.isRenderingCanvas = true;
   try {
+    setCanvasPreparing(state.isCanvasPreparing, {
+      message: state.isCanvasPreparing ? 'Dashboard sedang disiapkan...' : '',
+    });
     ensureGrid();
     if (state.canvasPage > allPages()) {
       state.canvasPage = allPages();
@@ -2264,16 +2303,18 @@ async function refreshDashboards() {
   try {
     const response = await api('/api/dashboards');
     state.currentDashboard = (response.dashboards || [])[0] || null;
+    setCanvasPreparing(false);
 
     const components = state.currentDashboard?.config?.components;
+    const savedPages = Math.max(1, Number(state.currentDashboard?.config?.pages || 1));
     if (Array.isArray(components) && components.length > 0) {
       state.canvasWidgets = normalizeIncomingWidgets(components);
-      state.canvasPagesCount = pageCountForWidgets(state.canvasWidgets);
+      state.canvasPagesCount = Math.max(savedPages, pageCountForWidgets(state.canvasWidgets));
       state.canvasPage = Math.min(Math.max(1, state.canvasPage), state.canvasPagesCount);
       renderCanvas();
     } else {
       state.canvasWidgets = [];
-      state.canvasPagesCount = 1;
+      state.canvasPagesCount = savedPages;
       state.canvasPage = 1;
       renderCanvas();
     }
@@ -2388,6 +2429,7 @@ function resetConversationWorkspaceState({
   state.isLoadingConversation = false;
   state.isSendingMessage = false;
   state.isUploadingDataset = false;
+  setCanvasPreparing(false);
   setCanvasOpen(false);
   renderCanvas();
   renderThread();
@@ -2554,6 +2596,7 @@ async function refreshChatHistory(conversationId = state.conversationId) {
         : [],
       canvasPage: 1,
       canvasPagesCount: state.canvasPagesCount,
+      dashboardPagesCount: state.currentDashboard?.config?.pages,
     });
     state.canvasWidgets = nextCanvasState.canvasWidgets;
     state.canvasPagesCount = nextCanvasState.canvasPagesCount;
@@ -2561,6 +2604,7 @@ async function refreshChatHistory(conversationId = state.conversationId) {
     renderCanvas();
 
     renderThread();
+    setCanvasPreparing(false);
   } finally {
     state.isLoadingConversation = false;
     syncComposerChrome();
@@ -2849,6 +2893,12 @@ function applyAssistantResponse(response, options = {}) {
   const mode = response.presentation_mode || 'chat';
   const isSingleWidget = Array.isArray(widgets) && widgets.length === 1;
   const isSingleArtifact = !isSingleWidget && Array.isArray(artifacts) && artifacts.length === 1;
+  const isCanvasPending = mode === 'canvas' && (!Array.isArray(widgets) || widgets.length === 0);
+  if (mode === 'canvas') {
+    setCanvasPreparing(isCanvasPending, { message: 'Dashboard sedang disiapkan...' });
+  } else {
+    setCanvasPreparing(false);
+  }
 
   if (isSingleWidget) {
     const normalized = normalizeIncomingWidgets(widgets)[0];
@@ -2886,6 +2936,7 @@ function applyAssistantResponse(response, options = {}) {
       state.canvasWidgets = normalizeIncomingWidgets(widgets);
       state.canvasPagesCount = pageCountForWidgets(state.canvasWidgets);
       state.canvasPage = 1;
+      setCanvasPreparing(false);
       renderCanvas();
       updateChatHeader();
       scheduleCanvasSave();
@@ -3021,6 +3072,9 @@ async function sendChatMessage(userText) {
   if (state.timelineRunId) {
     finalizeTimeline(state.timelineRunId);
   }
+  if (needsTimeline) {
+    setCanvasPreparing(true, { message: 'Dashboard sedang disiapkan...' });
+  }
   state.isSendingMessage = true;
   syncComposerChrome();
   showTyping();
@@ -3060,6 +3114,7 @@ async function sendChatMessage(userText) {
     await refreshVerdict();
   } catch (error) {
     hideTyping();
+    setCanvasPreparing(false);
     finalizeTimeline(state.timelineRunId);
     const historyConversationId = error?.conversationId || state.conversationId;
     if ((error?.persistedInConversation || (error?.statusCode && error.statusCode < 500)) && historyConversationId) {
@@ -3445,6 +3500,14 @@ refs.chatFile.addEventListener('change', () => {
   syncComposerChrome();
 });
 
+refs.gateUploadInput?.addEventListener('change', () => {
+  const file = refs.gateUploadInput.files[0];
+  if (refs.gateUploadName) {
+    refs.gateUploadName.hidden = !file;
+    refs.gateUploadName.textContent = file ? file.name : '';
+  }
+});
+
 refs.gateUploadPickerBtn?.addEventListener('click', () => {
   refs.gateUploadInput?.click();
 });
@@ -3515,6 +3578,10 @@ refs.gateUploadBtn.addEventListener('click', async () => {
   try {
     await uploadDataset({ file });
     refs.gateUploadInput.value = '';
+    if (refs.gateUploadName) {
+      refs.gateUploadName.hidden = true;
+      refs.gateUploadName.textContent = '';
+    }
   } catch (error) {
     showToast(error.message);
   }
@@ -3523,6 +3590,10 @@ refs.gateUploadBtn.addEventListener('click', async () => {
 refs.gateDemoBtn.addEventListener('click', async () => {
   try {
     await uploadDataset({ demo: true });
+    if (refs.gateUploadName) {
+      refs.gateUploadName.hidden = true;
+      refs.gateUploadName.textContent = '';
+    }
   } catch (error) {
     showToast(error.message);
   }

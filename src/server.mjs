@@ -77,10 +77,12 @@ function getContentType(filePath) {
 
 function applyCors(req, res) {
   const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Vary', 'Origin');
+  }
   const allowedOrigin = resolveAllowedOrigin(origin);
   if (allowedOrigin) {
     res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
-    res.setHeader('Vary', 'Origin');
   }
 
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');

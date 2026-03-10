@@ -18,13 +18,13 @@ function validateRegisterBody(body) {
   return null;
 }
 
-function buildOtpSendPayload({ otpPreview = null } = {}) {
+function buildOtpSendPayload({ otpPreview = null, allowPreview = false } = {}) {
   const payload = {
     ok: true,
     message: 'Jika akun dan nomor telepon tersedia, OTP akan dikirim.',
   };
 
-  if (otpPreview && config.otpPreviewEnabled) {
+  if (otpPreview && config.otpPreviewEnabled && allowPreview) {
     payload.otp_preview = otpPreview;
   }
 
@@ -294,7 +294,10 @@ export function registerAuthRoutes(router) {
       },
     );
 
-    return sendJson(ctx.res, 200, buildOtpSendPayload({ otpPreview: code }));
+    return sendJson(ctx.res, 200, buildOtpSendPayload({
+      otpPreview: code,
+      allowPreview: Boolean(ctx.user && ctx.user.id === user.id),
+    }));
   });
 
   router.register('POST', '/api/auth/otp/verify', async (ctx) => {

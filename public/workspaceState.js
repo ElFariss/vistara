@@ -173,7 +173,7 @@ export function resolveDashboardResetState({
 
   const widgets = Array.isArray(canvasWidgets) ? canvasWidgets : [];
   const maxWidgetPage = widgets.reduce((max, widget) => Math.max(max, Number(widget?.layout?.page || 1)), 1);
-  const pagesCount = widgets.length > 0 ? Math.max(1, maxWidgetPage) : 1;
+  const pagesCount = Math.max(1, Number(canvasPagesCount || 1), maxWidgetPage);
   const page = Math.min(Math.max(1, Number(canvasPage || 1)), pagesCount);
 
   return {
@@ -189,14 +189,17 @@ export function resolveCanvasState({
   dashboardWidgets = [],
   canvasPage = 1,
   canvasPagesCount = 1,
+  dashboardPagesCount = 1,
 } = {}) {
-  const preferredWidgets = Array.isArray(messageWidgets) && messageWidgets.length > 0
+  const usingMessageWidgets = Array.isArray(messageWidgets) && messageWidgets.length > 0;
+  const preferredWidgets = usingMessageWidgets
     ? messageWidgets
     : (Array.isArray(dashboardWidgets) ? dashboardWidgets : []);
   const maxWidgetPage = preferredWidgets.reduce((max, widget) => Math.max(max, Number(widget?.layout?.page || 1)), 1);
+  const savedPages = Math.max(1, Number(dashboardPagesCount || 1), Number(canvasPagesCount || 1));
   const pagesCount = preferredWidgets.length > 0
-    ? Math.max(1, maxWidgetPage)
-    : 1;
+    ? (usingMessageWidgets ? Math.max(1, maxWidgetPage) : Math.max(1, maxWidgetPage, savedPages))
+    : savedPages;
 
   return {
     canvasWidgets: preferredWidgets,

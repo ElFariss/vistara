@@ -8,6 +8,10 @@ import {
   updateDashboard,
 } from '../services/dashboards.mjs';
 
+function isDashboardConfigObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value);
+}
+
 export function registerDashboardRoutes(router) {
   router.register(
     'GET',
@@ -38,6 +42,12 @@ export function registerDashboardRoutes(router) {
     '/api/dashboards',
     async (ctx) => {
       const body = await ctx.getBody();
+      if (!body.name || typeof body.name !== 'string') {
+        return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'name wajib diisi.');
+      }
+      if (body.config !== undefined && body.config !== null && !isDashboardConfigObject(body.config)) {
+        return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'config dashboard harus berupa object.');
+      }
       const dashboard = createDashboard(ctx.user.tenant_id, ctx.user.id, body.name, body.config || null);
       return sendJson(ctx.res, 201, { ok: true, dashboard });
     },
@@ -49,6 +59,12 @@ export function registerDashboardRoutes(router) {
     '/api/dashboards/:id',
     async (ctx) => {
       const body = await ctx.getBody();
+      if (body.name !== undefined && typeof body.name !== 'string') {
+        return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'name harus berupa string.');
+      }
+      if (body.config !== undefined && body.config !== null && !isDashboardConfigObject(body.config)) {
+        return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'config dashboard harus berupa object.');
+      }
       const dashboard = updateDashboard(ctx.user.tenant_id, ctx.user.id, ctx.params.id, {
         name: body.name,
         config: body.config,
