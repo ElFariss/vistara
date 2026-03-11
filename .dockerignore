@@ -4,6 +4,10 @@
 .env.local
 .env.production
 node_modules
+.blackboxcli
+.codex
+.tmp
+test-results
 data
 backups
 coverage

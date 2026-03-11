@@ -2,7 +2,7 @@
 
 This directory (`/src`) contains the primary backend logic for the Vistara Conversational Intelligence platform.
 
-The core application runs as a lightweight, no-dependency Node.js HTTP server. It is responsible for multi-tenant data isolation, generative AI orchestration via the Gemini API, and dynamic SQL query execution against local SQLite databases.
+The core application runs as a lightweight Node.js HTTP server without a heavy web framework (no Express). It is responsible for multi-tenant data isolation, generative AI orchestration via the Gemini API, and dynamic SQL query execution against local SQLite databases.
 
 - `server.mjs`: Entry point and HTTP server configuration.
 - `db.mjs`: SQLite connection pool and schema definitions.
