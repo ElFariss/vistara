@@ -18,13 +18,15 @@ export function resolveCanvasViewportTarget({
 
   const wideFocus = focus.width > viewport.width * startThreshold;
   const tallFocus = focus.height > viewport.height * startThreshold;
+  const centeredLeft = focus.left + Math.max(0, focus.width / 2) - viewport.width / 2;
+  const centeredTop = focus.top + Math.max(0, focus.height / 2) - viewport.height / 2;
 
   const rawLeft = wideFocus
-    ? focus.left - edgeMargin
+    ? centeredLeft
     : focus.left - Math.round((viewport.width - focus.width) / 2);
 
   const rawTop = tallFocus
-    ? focus.top - edgeMargin
+    ? centeredTop
     : focus.top - Math.round((viewport.height - focus.height) / 2);
 
   return {

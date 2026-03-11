@@ -1,16 +1,19 @@
 import { all, get, run } from '../db.mjs';
 import { generateId } from '../utils/ids.mjs';
-import { parseIntent } from './nlu.mjs';
 import { executeAnalyticsIntent } from './queryEngine.mjs';
-import { ensureDefaultDashboard, applyDashboardModification, getDashboard } from './dashboards.mjs';
-import { DashboardAgentError, runDashboardAgent } from './agentRuntime.mjs';
-import { getGeminiQuotaCooldownInfo } from './gemini.mjs';
+import { getDashboard, getLatestDashboard } from './dashboards.mjs';
 import { config } from '../config.mjs';
 import { generateReport } from './reports.mjs';
 import { createGoal } from './goals.mjs';
 import { logAudit } from './audit.mjs';
 import { inspectDatasetQuestion } from './dataProfile.mjs';
 import { resolvePublicErrorMessage } from '../http/response.mjs';
+import {
+  applyConversationApproval,
+  ConversationAgentError,
+  runConversationAgent,
+} from './conversationAgent.mjs';
+import { getConversationAgentState } from './conversationState.mjs';
 
 const DEFAULT_CONVERSATION_TITLE = 'Percakapan baru';
 const AUTO_TITLE_MAX_LENGTH = 56;
@@ -42,6 +45,141 @@ export class DatasetRequiredError extends ChatRequestError {
       400,
     );
   }
+}
+
+function normalizeTimelineEventTitle(value = '', fallback = 'Langkah agent') {
+  const normalized = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized || fallback;
+}
+
+function createBufferedTimelineStream(stream = null) {
+  if (!stream) {
+    return {
+      hooks: null,
+      finalize() {},
+    };
+  }
+
+  let timelineId = null;
+  let timelineVisible = false;
+  let timelineTitle = 'Proses analisis';
+  const bufferedSteps = [];
+  const seenAgents = new Set();
+
+  const startTimelineIfNeeded = () => {
+    if (timelineVisible || typeof stream.onTimelineStart !== 'function') {
+      return;
+    }
+    timelineVisible = true;
+    timelineId = timelineId || generateId();
+    stream.onTimelineStart({
+      timeline_id: timelineId,
+      title: timelineTitle,
+    });
+    for (const step of bufferedSteps) {
+      if (typeof stream.onTimelineStep === 'function') {
+        stream.onTimelineStep(step);
+      }
+    }
+    bufferedSteps.length = 0;
+  };
+
+  const markComplex = (nextTitle = 'Proses analisis') => {
+    if (String(nextTitle || '').trim()) {
+      timelineTitle = String(nextTitle).trim();
+    }
+    startTimelineIfNeeded();
+  };
+
+  const maybeMarkComplexFromEvent = (event = {}) => {
+    const title = String(event.title || event.label || '').toLowerCase();
+    if (
+      event.status === 'error'
+      || /retry|ulang|fallback|degrad|gagal|review/i.test(title)
+    ) {
+      markComplex();
+    }
+  };
+
+  const noteAgent = (agent) => {
+    const normalized = String(agent || '').trim().toLowerCase();
+    if (!normalized) {
+      return;
+    }
+    seenAgents.add(normalized);
+    if (seenAgents.size > 2) {
+      markComplex();
+    }
+  };
+
+  const pushStep = (step = {}) => {
+    const payload = {
+      timeline_id: timelineId || generateId(),
+      ...step,
+    };
+    timelineId = payload.timeline_id;
+    if (timelineVisible && typeof stream.onTimelineStep === 'function') {
+      stream.onTimelineStep(payload);
+      return;
+    }
+    bufferedSteps.push(payload);
+  };
+
+  return {
+    hooks: {
+      onAgentStart: (event) => {
+        noteAgent(event.agent);
+        pushStep({
+          id: `agent_start_${event.run_id || Date.now()}_${String(event.agent || 'agent').toLowerCase()}`,
+          agent: String(event.agent || 'agent').toLowerCase(),
+          status: 'pending',
+          title: normalizeTimelineEventTitle(event.title, `Memulai ${event.agent || 'agent'}`),
+        });
+      },
+      onAgentStep: (event) => {
+        noteAgent(event.agent);
+        maybeMarkComplexFromEvent(event);
+        pushStep({
+          id: `agent_step_${event.run_id || Date.now()}_${String(event.agent || 'agent').toLowerCase()}_${normalizeTimelineEventTitle(event.title, 'Langkah agent').toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+          agent: String(event.agent || 'agent').toLowerCase(),
+          status: event.status || 'done',
+          title: normalizeTimelineEventTitle(event.title),
+        });
+      },
+      onTimelineEvent: (event) => {
+        noteAgent(event.agent);
+        maybeMarkComplexFromEvent(event);
+        pushStep(event);
+      },
+      onDashboardPatch: (patch) => {
+        markComplex();
+        if (typeof stream.onDashboardPatch === 'function') {
+          stream.onDashboardPatch(patch);
+        }
+      },
+      onApprovalRequired: (payload) => {
+        markComplex();
+        if (typeof stream.onApprovalRequired === 'function') {
+          stream.onApprovalRequired(payload);
+        }
+        pushStep({
+          id: `approval_${payload.approval?.id || Date.now()}`,
+          agent: 'tala',
+          status: 'pending',
+          title: normalizeTimelineEventTitle(payload.approval?.title, 'Menunggu persetujuan perbaikan data'),
+        });
+      },
+    },
+    finalize() {
+      if (timelineVisible && typeof stream.onTimelineDone === 'function') {
+        stream.onTimelineDone({
+          timeline_id: timelineId,
+        });
+      }
+    },
+  };
 }
 
 function isDefaultConversationTitle(title) {
@@ -192,6 +330,22 @@ function createMessage({ conversationId, tenantId, userId, role, content, payloa
   );
 
   return id;
+}
+
+function persistAssistantMessage({
+  conversationId,
+  tenantId,
+  content,
+  payload,
+}) {
+  createMessage({
+    conversationId,
+    tenantId,
+    userId: null,
+    role: 'assistant',
+    content,
+    payload,
+  });
 }
 
 function persistAssistantErrorMessage({
@@ -522,48 +676,36 @@ function lookupUserDisplayName(tenantId, userId) {
   return name || null;
 }
 
-function buildSmalltalkAnswer(message, datasetReady, userDisplayName = null) {
-  const lower = String(message || '').toLowerCase();
-  const safeName = userDisplayName || 'Anda';
+async function generateConversationalReply({ message, history, datasetReady, userDisplayName }) {
+  const contextParts = [
+    'Kamu adalah Vistara, asisten AI analitik bisnis UMKM berbahasa Indonesia.',
+    'Jawab dengan singkat, ramah, dan natural. Maksimal 2-3 kalimat.',
+    'Jika user menyapa, balas sapaan dengan hangat.',
+    'Jika user bertanya kemampuanmu, jelaskan bahwa kamu bisa menganalisis data bisnis, membuat dashboard, menunjukkan tren penjualan, membandingkan performa, dan membuat laporan.',
+    'Jika user berterima kasih atau memberikan respon positif, balas dengan sopan.',
+    'Jika user bertanya nama mereka, ' + (userDisplayName ? `nama mereka adalah ${userDisplayName}.` : 'katakan bahwa kamu belum mengetahui nama mereka dan sarankan untuk mengisi profil di Pengaturan.'),
+    datasetReady
+      ? 'Dataset user sudah tersedia dan siap dianalisis.'
+      : 'Dataset user belum tersedia. Sarankan untuk upload dataset (CSV/JSON/XLSX/XLS) jika relevan, tapi jangan memaksa.',
+  ];
 
-  if (/\b(siapa nama saya|nama saya siapa|apa nama saya|namaku siapa|siapa saya|who am i)\b/i.test(lower)) {
-    if (userDisplayName) {
-      return `Nama Anda yang terdaftar saat ini: ${safeName}.`;
-    }
-    return 'Saya belum menemukan nama profil Anda di sesi ini. Anda bisa isi lewat Business Context atau Pengaturan.';
+  const historyContext = history.slice(-6).map((h) => `${h.role}: ${h.content}`).join('\n');
+  const userPrompt = historyContext
+    ? `Riwayat percakapan:\n${historyContext}\n\nPesan terbaru user: ${message}`
+    : `Pesan user: ${message}`;
+
+  const result = await generateTextWithGemini({
+    systemPrompt: contextParts.join(' '),
+    userPrompt,
+    temperature: 0.7,
+    maxOutputTokens: 150,
+  });
+
+  if (result.ok && result.text) {
+    return result.text.trim();
   }
 
-  if (/\b(thanks|thank you|makasih|terima kasih)\b/i.test(lower)) {
-    return 'Sama-sama.';
-  }
-
-  if (/\b(mantap|sip|sup)\b/i.test(lower)) {
-    return datasetReady
-      ? 'Siap. Kalau mau, saya lanjutkan ke insight berikutnya.'
-      : 'Siap. Tinggal upload dataset saat Anda siap.';
-  }
-
-  if (/\b(test|tes)\b/i.test(lower)) {
-    return 'Saya aktif.';
-  }
-
-  if (/\b(halo|hai|hi|hello|pagi|siang|sore|malam|hey|yo|woi|oi|permisi)\b/i.test(lower)) {
-    return datasetReady
-      ? 'Halo. Mau cek insight apa?'
-      : 'Halo. Upload dataset saat siap, lalu tanya insight bisnis Anda.';
-  }
-
-  if (/\b(apa kabar|gimana kabar|gimana kabarnya|how are you|what'?s up|lagi apa)\b/i.test(lower)) {
-    return datasetReady
-      ? 'Siap. Dataset Anda bisa langsung dianalisis.'
-      : 'Siap. Tinggal upload dataset untuk mulai analisis.';
-  }
-
-  if (!datasetReady && /\b(apa yang bisa kamu lakukan|bisa bantu apa|cara pakai|mulai dari mana)\b/i.test(lower)) {
-    return `Upload dataset dulu (CSV/JSON/XLSX/XLS), lalu saya bantu analisis untuk ${safeName}.`;
-  }
-
-  return null;
+  return 'Saya siap membantu. Ada yang bisa saya bantu terkait analisis bisnis Anda?';
 }
 
 function buildDashboardAgentError(error, options = {}) {
@@ -663,316 +805,54 @@ export async function processChatMessage({
     content: item.content,
   }));
 
-  const intent = await parseIntent(message, history);
   const datasetReady = hasDataset(tenantId);
   const userDisplayName = lookupUserDisplayName(tenantId, userId);
+  const savedDashboard = dashboardId
+    ? getDashboard(tenantId, userId, dashboardId)
+    : getLatestDashboard(tenantId, userId);
 
-  if (!datasetReady && intent.intent !== 'data_management' && intent.intent !== 'smalltalk' && intent.intent !== 'clarify') {
-    const error = new DatasetRequiredError();
-    persistAssistantErrorMessage({
+  let responsePayload = null;
+  const bufferedStream = createBufferedTimelineStream(stream);
+
+  try {
+    responsePayload = await runConversationAgent({
+      tenantId,
+      userId,
       conversationId: conversation.id,
-      tenantId,
-      error,
-      intent,
-    });
-    throw attachConversationContext(error, conversation.id);
-  }
-
-  let responsePayload = {
-    answer: 'Permintaan diproses.',
-    widgets: [],
-    artifacts: [],
-    intent,
-    presentation_mode: 'chat',
-  };
-
-  if (intent.intent === 'smalltalk') {
-    const answer = buildSmalltalkAnswer(message, datasetReady, userDisplayName);
-    if (!answer) {
-      const error = new ChatRequestError(
-        'CHAT_CLARIFICATION_REQUIRED',
-        'Permintaan belum cukup jelas. Tulis pertanyaan yang lebih spesifik atau minta insight/dashboard dari dataset Anda.',
-        400,
-      );
-      persistAssistantErrorMessage({
-        conversationId: conversation.id,
-        tenantId,
-        error,
-        intent,
-      });
-      throw attachConversationContext(error, conversation.id);
-    }
-    responsePayload = {
-      answer,
-      widgets: [],
-      artifacts: [],
-      intent,
-      presentation_mode: 'chat',
-    };
-  } else if (intent.intent === 'clarify') {
-    const error = new ChatRequestError(
-      'CHAT_CLARIFICATION_REQUIRED',
-      datasetReady
-        ? 'Permintaan belum cukup jelas. Coba sebut metrik, periode, atau minta dashboard yang ingin dibuat.'
-        : 'Permintaan belum cukup jelas. Upload dataset dulu atau jelaskan insight yang ingin dicari.',
-      400,
-    );
-    persistAssistantErrorMessage({
-      conversationId: conversation.id,
-      tenantId,
-      error,
-      intent,
-    });
-    throw attachConversationContext(error, conversation.id);
-  } else if (intent.intent === 'dataset_inspection') {
-    const inspection = await inspectDatasetQuestion({
-      tenantId,
+      dashboardId,
+      savedDashboard,
       message,
+      history,
+      datasetReady,
+      userDisplayName,
+      hooks: bufferedStream.hooks,
     });
-
-    responsePayload = {
-      answer: inspection.answer,
-      widgets: [],
-      artifacts: inspection.artifacts || [],
-      intent,
-      dataset_profile: inspection.profile,
-      presentation_mode: 'chat',
-    };
-  } else if (intent.intent === 'modify_dashboard') {
-    const dashboard = dashboardId
-      ? getDashboard(tenantId, userId, dashboardId)
-      : ensureDefaultDashboard(tenantId, userId);
-
-    const result = applyDashboardModification({
+  } catch (error) {
+    const fallbackIntent = error instanceof ConversationAgentError
+      ? { intent: 'conversation', nlu_source: 'atlas_gemini' }
+      : null;
+    persistAssistantErrorMessage({
+      conversationId: conversation.id,
       tenantId,
-      userId,
-      dashboard,
-      intent,
-      originalMessage: message,
+      error,
+      intent: fallbackIntent,
     });
-
-    responsePayload = {
-      answer: result.summary,
-      widgets: [],
-      artifacts: [],
-      intent,
-      dashboard: result.dashboard,
-      presentation_mode: 'canvas',
-    };
-  } else if (intent.intent === 'generate_report') {
-    const report = generateReport({
-      tenantId,
-      userId,
-      period: normalizeReportPeriod(intent),
-      title: intent.dashboard_name || null,
-    });
-
-    responsePayload = {
-      answer: `Laporan siap: ${report.title}`,
-      widgets: [],
-      artifacts: [
-        {
-          kind: 'text',
-          title: report.title,
-          content: report.content,
-        },
-      ],
-      intent,
-      report,
-      presentation_mode: 'chat',
-    };
-  } else if (intent.intent === 'set_goal') {
-    const targetValue = parseGoalFromMessage(message, intent);
-    if (targetValue && targetValue > 0) {
-      const metric = intent.metric?.includes('untung') ? 'profit' : intent.metric?.includes('margin') ? 'margin' : 'revenue';
-      const goal = createGoal({
-        tenantId,
-        userId,
-        metric,
-        targetValue,
-        startDate: new Date(),
-        endDate: new Date(new Date().setMonth(new Date().getMonth() + 1)),
-      });
-
-      responsePayload = {
-        answer: `Goal ${metric} berhasil dibuat dengan target ${targetValue.toLocaleString('id-ID')}.`,
-        widgets: [
-          {
-            type: 'GoalTracker',
-            title: `Goal ${metric}`,
-            target: goal.target_value,
-          },
-        ],
-        artifacts: [
-          {
-            kind: 'metric',
-            title: `Goal ${metric}`,
-            value: `${Number(goal.target_value || 0).toLocaleString('id-ID')}`,
-          },
-        ],
-        intent,
-        goal,
-        presentation_mode: 'chat',
-      };
-    } else {
-      responsePayload = {
-        answer: 'Sebutkan nilai target, contoh: "Target omzet 200000000".',
-        widgets: [],
-        artifacts: [],
-        intent,
-        presentation_mode: 'chat',
-      };
-    }
-  } else if (intent.intent === 'data_management') {
-    responsePayload = {
-      answer: 'Upload file data dari input workspace atau gunakan Demo Dataset untuk mulai analisis.',
-      widgets: [],
-      artifacts: [],
-      intent,
-      presentation_mode: 'chat',
-    };
-  } else {
-    const needsCanvas = isComplexDashboardRequest(message, intent);
-
-    if (needsCanvas) {
-      const timelineId = generateId();
-      if (stream && typeof stream.onTimelineStart === 'function') {
-        stream.onTimelineStart({
-          timeline_id: timelineId,
-          title: 'Proses analisis',
-        });
-      }
-      const quotaState = getGeminiQuotaCooldownInfo();
-      try {
-        if (!config.geminiApiKey) {
-          throw new DashboardAgentError({
-            code: 'AI_SERVICE_UNAVAILABLE',
-            message: 'Layanan AI belum tersedia untuk membuat dashboard.',
-            statusCode: 503,
-            retryable: false,
-            reason: 'missing_api_key',
-          });
-        }
-        if (quotaState.active) {
-          throw new DashboardAgentError({
-            code: 'AI_QUOTA_EXHAUSTED',
-            message: 'Kuota AI sedang habis. Coba lagi beberapa saat.',
-            statusCode: 429,
-            retryable: false,
-            reason: quotaState.reason || 'quota_exhausted',
-            details: {
-              quota_cooldown_until: quotaState.until || null,
-            },
-          });
-        }
-        const configuredTimeout = Number(config.dashboardAgentTimeoutMs || 120000);
-        const complexTimeoutMs = Math.min(180000, Math.max(30000, configuredTimeout));
-        const maxAttempts = Math.min(3, Math.max(1, Number(config.dashboardAgentMaxAttempts || 2)));
-        let complex = null;
-        let attempts = 0;
-        let lastError = null;
-
-        while (attempts < maxAttempts) {
-          attempts += 1;
-          const attemptController = new AbortController();
-          const timeoutId = setTimeout(() => {
-            attemptController.abort(new Error('dashboard_agent_timeout'));
-          }, complexTimeoutMs);
-          try {
-            complex = await runDashboardAgent({
-              tenantId,
-              userId,
-              dashboardId,
-              goal: message,
-              intent,
-              signal: attemptController.signal,
-              hooks: {
-                onTimelineEvent: (event) => {
-                  if (stream && typeof stream.onTimelineStep === 'function') {
-                    stream.onTimelineStep({
-                      timeline_id: timelineId,
-                      ...event,
-                    });
-                  }
-                },
-              },
-            });
-            break;
-          } catch (error) {
-            lastError = buildDashboardAgentError(error);
-            if (!shouldRetryDashboardFailure(lastError) || attempts >= maxAttempts) {
-              throw lastError;
-            }
-            if (stream && typeof stream.onTimelineStep === 'function') {
-              stream.onTimelineStep({
-                timeline_id: timelineId,
-                id: `dashboard_retry_${Date.now()}_${attempts}`,
-                agent: 'system',
-                status: 'pending',
-                title: `Percobaan ulang dashboard ${attempts + 1}/3`,
-              });
-            }
-          } finally {
-            clearTimeout(timeoutId);
-          }
-        }
-
-        if (!complex) {
-          throw lastError || new DashboardAgentError();
-        }
-
-        responsePayload = {
-          ...complex,
-          answer: complex.answer,
-          widgets: complex.widgets,
-          artifacts: complex.artifacts,
-          intent,
-          presentation_mode: complex.presentation_mode || 'canvas',
-        };
-      } catch (error) {
-        const dashboardError = buildDashboardAgentError(error);
-        if (stream && typeof stream.onTimelineStep === 'function') {
-          stream.onTimelineStep({
-            timeline_id: timelineId,
-            id: `dashboard_error_${Date.now()}`,
-            agent: 'system',
-            status: 'error',
-            title: dashboardError.message,
-          });
-        }
-        persistAssistantErrorMessage({
-          conversationId: conversation.id,
-          tenantId,
-          error: dashboardError,
-          intent,
-        });
-        throw attachConversationContext(dashboardError, conversation.id);
-      } finally {
-        if (stream && typeof stream.onTimelineDone === 'function') {
-          stream.onTimelineDone({
-            timeline_id: timelineId,
-          });
-        }
-      }
-    } else {
-      const analytics = executeAnalyticsIntent({ tenantId, userId, intent });
-      responsePayload = {
-        ...analytics,
-        artifacts: analytics.artifacts || widgetsToArtifacts(analytics.widgets),
-        intent,
-        presentation_mode: 'chat',
-      };
-    }
+    throw attachConversationContext(error, conversation.id);
+  } finally {
+    bufferedStream.finalize();
   }
 
-  createMessage({
+  persistAssistantMessage({
     conversationId: conversation.id,
     tenantId,
-    userId: null,
-    role: 'assistant',
     content: responsePayload.answer,
     payload: responsePayload,
   });
+
+  const intent = responsePayload.intent || {
+    intent: 'conversation',
+    nlu_source: 'atlas_gemini',
+  };
 
   logAudit({
     tenantId,
@@ -995,10 +875,46 @@ export async function processChatMessage({
 
 export function getChatHistory({ tenantId, userId, conversationId = null }) {
   const convo = ensureConversation(tenantId, userId, conversationId);
+  const agentState = getConversationAgentState({
+    tenantId,
+    userId,
+    conversationId: convo.id,
+  });
   return {
     conversation_id: convo.id,
     conversation: getConversationWithStats(tenantId, userId, convo.id),
     messages: historyForConversation(tenantId, userId, convo.id, 200),
+    agent_state: agentState,
+  };
+}
+
+export async function processConversationApproval({
+  tenantId,
+  userId,
+  conversationId,
+  approvalId,
+  decision,
+}) {
+  const conversation = ensureConversation(tenantId, userId, conversationId);
+  const responsePayload = await applyConversationApproval({
+    tenantId,
+    userId,
+    conversationId: conversation.id,
+    approvalId,
+    decision,
+  });
+
+  persistAssistantMessage({
+    conversationId: conversation.id,
+    tenantId,
+    content: responsePayload.answer,
+    payload: responsePayload,
+  });
+
+  return {
+    conversation_id: conversation.id,
+    conversation: getConversationWithStats(tenantId, userId, conversation.id),
+    ...responsePayload,
   };
 }
 

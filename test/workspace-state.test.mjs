@@ -125,6 +125,13 @@ test('shouldCenterComposer only centers a truly empty conversation with no pendi
     hasConversationId: true,
     hasPendingActivity: true,
   }), false);
+
+  assert.equal(shouldCenterComposer({
+    messageCount: 0,
+    persistedMessageCount: 0,
+    hasConversationId: true,
+    hasDraftDashboard: true,
+  }), false);
 });
 
 test('shouldDockLandingFinalCta only docks when the user reaches the bottom of landing', () => {

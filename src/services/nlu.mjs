@@ -79,25 +79,7 @@ function looksAnalyticsMessage(text) {
   return /(omzet|penjualan|revenue|untung|profit|laba|margin|biaya|pengeluaran|produk|cabang|grafik|chart|dashboard|canvas|tren|trend|laporan|report|target|goal|kpi|performa|analisis|top|terlaris|rank|ranking|compare|banding|vs|minggu|bulan|hari)/i.test(lower);
 }
 
-function looksSmalltalkMessage(text) {
-  const lower = toLowerAlnum(text);
-  if (/^(hi|halo|hello|hai|oi|oy|yo|woi|hey|pagi|siang|sore|malam|permisi|test|tes)\b/i.test(lower)) {
-    return true;
-  }
-  if (/\b(thanks|thank you|makasih|terima kasih|mantap|sip)\b/i.test(lower)) {
-    return true;
-  }
-  if (/\b(siapa nama saya|nama saya siapa|siapa saya|who am i|apa nama saya|namaku siapa)\b/i.test(lower)) {
-    return true;
-  }
-  if (/\b(apa kabar|gimana kabar|selamat pagi|selamat siang|selamat sore|selamat malam|how are you)\b/i.test(lower)) {
-    return true;
-  }
-  if (/\b(whats up|what's up|what s up|sup|lagi apa|lagi ngapain|gimana nih)\b/i.test(lower)) {
-    return true;
-  }
-  return false;
-}
+
 
 function looksDatasetInspectionMessage(text) {
   const lower = toLowerAlnum(text);
@@ -121,10 +103,9 @@ function looksDatasetInspectionMessage(text) {
 
 function fallbackIntent(message) {
   const lower = toLowerAlnum(message);
-  const isSmalltalk = looksSmalltalkMessage(message);
   const isDatasetInspection = looksDatasetInspectionMessage(message);
   const isAnalytics = looksAnalyticsMessage(message);
-  let intent = isSmalltalk ? 'smalltalk' : isAnalytics ? 'show_metric' : 'clarify';
+  let intent = isAnalytics ? 'show_metric' : 'smalltalk';
 
   if (isDatasetInspection) {
     intent = 'dataset_inspection';
@@ -215,23 +196,7 @@ function sanitizeIntent(raw, fallback) {
 
 export async function parseIntent(message, history = []) {
   const fallback = fallbackIntent(message);
-  const hasExplicitSmalltalk = looksSmalltalkMessage(message);
   const hasDatasetInspectionSignal = looksDatasetInspectionMessage(message);
-  const hasAnalyticsSignal = looksAnalyticsMessage(message);
-
-  // Fast-path untuk sapaan/smalltalk agar tidak salah klasifikasi oleh model.
-  // Ini juga menghemat kuota karena tidak perlu memanggil LLM.
-  if (hasExplicitSmalltalk && !hasAnalyticsSignal) {
-    return {
-      ...fallback,
-      intent: 'smalltalk',
-      metric: null,
-      visualization: null,
-      time_period: null,
-      limit: null,
-      nlu_source: 'rule_smalltalk',
-    };
-  }
 
   if (hasDatasetInspectionSignal) {
     return {

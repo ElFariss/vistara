@@ -833,6 +833,7 @@ label {
   margin-bottom: 0.35rem;
 }
 
+.agent-team,
 .differentiation,
 .faq {
   border: 1px solid var(--line);
@@ -847,6 +848,7 @@ label {
   margin: 0.2rem 0 0;
 }
 
+.agent-team-grid,
 .diff-grid,
 .faq-grid {
   margin-top: 1.05rem;
@@ -855,12 +857,31 @@ label {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.agent-team-grid article,
 .diff-grid article,
 .faq-grid article {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 1rem;
   background: var(--surface-hover);
+}
+
+.agent-team-grid strong {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0 0.7rem;
+  border-radius: 999px;
+  background: var(--accent-light);
+  color: var(--accent);
+  font-size: 0.92rem;
+  letter-spacing: 0.01em;
+}
+
+.agent-team-grid p {
+  margin: 0.7rem 0 0;
+  color: var(--ink-secondary);
+  line-height: 1.6;
 }
 
 .diff-grid h4,
@@ -3017,6 +3038,7 @@ label {
     grid-template-columns: 1fr;
   }
 
+  .agent-team-grid,
   .diff-grid,
   .faq-grid {
     grid-template-columns: 1fr;
@@ -3249,6 +3271,7 @@ label {
     padding-inline: 0.75rem;
   }
 
+  .agent-team-grid,
   .landing-features,
   .pain-strip,
   .faq-grid {
@@ -3319,6 +3342,7 @@ label {
 
   .landing-final-cta,
   .how-it-works,
+  .agent-team,
   .differentiation,
   .faq {
     padding-left: 1rem;

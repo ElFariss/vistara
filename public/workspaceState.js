@@ -118,8 +118,9 @@ export function shouldCenterComposer({
   isLoadingConversation = false,
   hasPendingActivity = false,
   hasDraftAttachment = false,
+  hasDraftDashboard = false,
 } = {}) {
-  if (Boolean(isLoadingConversation) || Boolean(hasPendingActivity) || Boolean(hasDraftAttachment)) {
+  if (Boolean(isLoadingConversation) || Boolean(hasPendingActivity) || Boolean(hasDraftAttachment) || Boolean(hasDraftDashboard)) {
     return false;
   }
 

@@ -65,6 +65,8 @@ export const config = {
   otpPreviewEnabled: toBoolean(process.env.OTP_PREVIEW_ENABLED, false),
   geminiApiKey: process.env.GEMINI_API_KEY || process.env.GEMINI_API || '',
   geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-pro',
+  geminiModelLight: process.env.GEMINI_MODEL_LIGHT || 'gemini-2.5-flash',
+  geminiVisionModel: process.env.GEMINI_VISION_MODEL || 'gemini-3-flash-preview',
   rawUploadAiFallbackEnabled: toBoolean(process.env.RAW_UPLOAD_AI_FALLBACK_ENABLED, false),
   pythonAgentUrl: process.env.PYTHON_AGENT_URL || '',
   pythonAgentToken: process.env.PYTHON_AGENT_TOKEN || '',

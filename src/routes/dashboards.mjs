@@ -7,9 +7,14 @@ import {
   listDashboards,
   updateDashboard,
 } from '../services/dashboards.mjs';
+import { renderDashboardPng } from '../services/dashboardImage.mjs';
 
 function isDashboardConfigObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isRenderWidgetArray(value) {
+  return Array.isArray(value) && value.every((item) => item && typeof item === 'object' && !Array.isArray(item));
 }
 
 export function registerDashboardRoutes(router) {
@@ -88,6 +93,37 @@ export function registerDashboardRoutes(router) {
         return sendError(ctx.res, 400, 'DASHBOARD_DELETE_FAILED', 'Dashboard tidak bisa dihapus.');
       }
       return sendNoContent(ctx.res);
+    },
+    { auth: true },
+  );
+
+  router.register(
+    'POST',
+    '/api/dashboards/render-image',
+    async (ctx) => {
+      const body = await ctx.getBody();
+      if (!isRenderWidgetArray(body.widgets)) {
+        return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'widgets wajib berupa array object.');
+      }
+
+      try {
+        const rendered = renderDashboardPng({
+          widgets: body.widgets,
+          page: body.page ? Number(body.page) : 1,
+          stackPages: Boolean(body.stack_pages),
+          title: typeof body.title === 'string' ? body.title : 'Dashboard Vistara',
+        });
+        ctx.res.writeHead(200, {
+          'Content-Type': 'image/png',
+          'Cache-Control': 'no-store',
+        });
+        ctx.res.end(rendered.buffer);
+      } catch (error) {
+        if (String(error?.code || '').startsWith('RENDER_')) {
+          return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'Payload render dashboard terlalu besar atau tidak valid.');
+        }
+        return sendError(ctx.res, 500, 'DASHBOARD_RENDER_FAILED', 'Gagal merender gambar dashboard.');
+      }
     },
     { auth: true },
   );

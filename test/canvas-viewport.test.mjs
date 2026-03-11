@@ -14,13 +14,13 @@ test('resolveCanvasViewportTarget centers compact content bounds', () => {
   assert.equal(result.scrollTop, 130);
 });
 
-test('resolveCanvasViewportTarget left-biases oversized content so mobile opens on usable widgets', () => {
+test('resolveCanvasViewportTarget centers oversized content around the active widget bounds', () => {
   const result = resolveCanvasViewportTarget({
     stageRect: { left: 220, top: 220, width: 1080, height: 608 },
     viewportRect: { width: 390, height: 700 },
     focusRect: { left: 262, top: 248, width: 760, height: 330 },
   });
 
-  assert.equal(result.scrollLeft, 238);
+  assert.equal(result.scrollLeft, 447);
   assert.equal(result.scrollTop, 63);
 });

@@ -5,6 +5,7 @@ import {
   deleteConversation,
   getChatHistory,
   listChatConversations,
+  processConversationApproval,
   processChatMessage,
   renameConversation,
   setChatFeedback,
@@ -188,6 +189,18 @@ export function registerChatRoutes(router) {
             onTimelineDone: (data) => {
               writeStreamEvent(ctx.res, 'timeline_done', data);
             },
+            onAgentStart: (data) => {
+              writeStreamEvent(ctx.res, 'agent_start', data);
+            },
+            onAgentStep: (data) => {
+              writeStreamEvent(ctx.res, 'agent_step', data);
+            },
+            onDashboardPatch: (patch) => {
+              writeStreamEvent(ctx.res, 'dashboard_patch', patch);
+            },
+            onApprovalRequired: (payload) => {
+              writeStreamEvent(ctx.res, 'approval_required', payload);
+            },
           },
         });
 
@@ -205,6 +218,35 @@ export function registerChatRoutes(router) {
         });
       } finally {
         ctx.res.end();
+      }
+    },
+    { auth: true },
+  );
+
+  router.register(
+    'POST',
+    '/api/chat/approvals/:approvalId',
+    async (ctx) => {
+      const body = await ctx.getBody();
+      if (!body.conversation_id || typeof body.conversation_id !== 'string') {
+        return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'conversation_id wajib diisi.');
+      }
+      if (!body.decision || typeof body.decision !== 'string') {
+        return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'decision wajib diisi.');
+      }
+
+      try {
+        const response = await processConversationApproval({
+          tenantId: ctx.user.tenant_id,
+          userId: ctx.user.id,
+          conversationId: body.conversation_id,
+          approvalId: ctx.params.approvalId,
+          decision: body.decision,
+        });
+
+        return sendJson(ctx.res, 200, { ok: true, ...response });
+      } catch (error) {
+        return handleChatError(ctx.res, error, 'CHAT_APPROVAL_FAILED', 'Gagal memproses keputusan approval.');
       }
     },
     { auth: true },

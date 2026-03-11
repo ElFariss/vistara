@@ -56,6 +56,29 @@ function buildPrompt(systemPrompt, userPrompt) {
   return `${systemPrompt}\n\n${userPrompt}`;
 }
 
+function buildInlineMediaParts({ systemPrompt = '', userPrompt = '', inlineFiles = [] }) {
+  const parts = [];
+  for (const file of Array.isArray(inlineFiles) ? inlineFiles : []) {
+    const mimeType = String(file?.mimeType || '').trim().toLowerCase();
+    const data = String(file?.data || '').trim();
+    if (!mimeType || !data) {
+      continue;
+    }
+    parts.push({
+      inlineData: {
+        mimeType,
+        data,
+      },
+    });
+  }
+
+  const prompt = buildPrompt(systemPrompt, userPrompt);
+  if (prompt) {
+    parts.push({ text: prompt });
+  }
+  return parts;
+}
+
 function extractTextResponse(data) {
   const candidates = data?.candidates;
   if (!Array.isArray(candidates) || candidates.length === 0) {
@@ -231,6 +254,163 @@ export async function generateJsonWithGemini({ systemPrompt = '', userPrompt, te
     };
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+export async function generateTextWithGemini({ systemPrompt = '', userPrompt, temperature = 0.7, maxOutputTokens = 200, modelOverride = null }) {
+  if (!config.geminiApiKey) {
+    return { ok: false, reason: 'missing_api_key', text: null };
+  }
+
+  if (isQuotaCooldownActive()) {
+    return { ok: false, reason: quotaCooldownReason || 'quota_exhausted', text: null };
+  }
+
+  const model = modelOverride || config.geminiModelLight || config.geminiModel;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  const prompt = buildPrompt(systemPrompt, userPrompt);
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': config.geminiApiKey,
+      },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature, maxOutputTokens },
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      logger.warn('gemini text request failed', { status: response.status, body: body.slice(0, 500) });
+      if (response.status === 429) {
+        activateQuotaCooldown(body);
+      }
+      return { ok: false, reason: `http_${response.status}`, text: null };
+    }
+
+    clearQuotaCooldown();
+    const json = await response.json();
+    const text = extractTextResponse(json);
+    return { ok: true, reason: null, text: text || '' };
+  } catch (error) {
+    logger.warn('gemini text request error', { error: error.message });
+    return { ok: false, reason: error.name === 'AbortError' ? 'timeout' : 'network_error', text: null };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function generateJsonWithGeminiMedia({
+  systemPrompt = '',
+  userPrompt,
+  inlineFiles = [],
+  temperature = 0.1,
+  maxOutputTokens = 1200,
+  modelOverride = null,
+  signal = null,
+}) {
+  if (!config.geminiApiKey) {
+    return {
+      ok: false,
+      reason: 'missing_api_key',
+      data: null,
+      rawText: null,
+    };
+  }
+
+  if (isQuotaCooldownActive()) {
+    return {
+      ok: false,
+      reason: quotaCooldownReason || 'quota_exhausted',
+      data: null,
+      rawText: null,
+    };
+  }
+
+  const model = modelOverride || config.geminiVisionModel || config.geminiModel;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60000);
+  const parts = buildInlineMediaParts({ systemPrompt, userPrompt, inlineFiles });
+  const abortOnExternalSignal = () => controller.abort(signal?.reason);
+
+  if (signal?.aborted) {
+    abortOnExternalSignal();
+  } else if (signal && typeof signal.addEventListener === 'function') {
+    signal.addEventListener('abort', abortOnExternalSignal, { once: true });
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': config.geminiApiKey,
+      },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts }],
+        generationConfig: {
+          temperature,
+          maxOutputTokens,
+          responseMimeType: 'application/json',
+        },
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      logger.warn('gemini media json request failed', { status: response.status, body: body.slice(0, 500) });
+      if (response.status === 429) {
+        activateQuotaCooldown(body);
+      }
+      return {
+        ok: false,
+        reason: `http_${response.status}`,
+        data: null,
+        rawText: body,
+      };
+    }
+
+    clearQuotaCooldown();
+    const json = await response.json();
+    const text = extractTextResponse(json);
+    const parsed = parseJsonObjectFromText(text);
+    if (!parsed) {
+      return {
+        ok: false,
+        reason: 'invalid_json',
+        data: null,
+        rawText: text,
+      };
+    }
+
+    return {
+      ok: true,
+      reason: null,
+      data: parsed,
+      rawText: text,
+    };
+  } catch (error) {
+    logger.warn('gemini media json request error', { error: error.message });
+    return {
+      ok: false,
+      reason: error.name === 'AbortError' ? 'timeout' : 'network_error',
+      data: null,
+      rawText: null,
+    };
+  } finally {
+    clearTimeout(timeout);
+    if (signal && typeof signal.removeEventListener === 'function') {
+      signal.removeEventListener('abort', abortOnExternalSignal);
+    }
   }
 }
 

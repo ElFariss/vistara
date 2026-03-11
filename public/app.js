@@ -86,6 +86,7 @@ const state = {
   conversations: [],
   messages: [],
   currentDashboard: null,
+  draftDashboard: null,
   canvasWidgets: [],
   workspaceLoaded: false,
   isWorkspaceBooting: false,
@@ -121,6 +122,9 @@ const state = {
   isLoadingConversation: false,
   isSendingMessage: false,
   isUploadingDataset: false,
+  canvasViewportMovedByUser: false,
+  canvasAutoCenteredRunId: null,
+  draftSaveDirty: false,
   landingRevealObserver: null,
   onboardingSlideIndex: 0,
   currentPage: 'landing',
@@ -221,6 +225,7 @@ const refs = {
   chatFileBtn: document.getElementById('chatFileBtn'),
   fileLabel: document.getElementById('fileLabel'),
 
+  persistDraftBtn: document.getElementById('persistDraftBtn'),
   saveCanvasBtn: document.getElementById('saveCanvasBtn'),
   closeCanvasBtn: document.getElementById('closeCanvasBtn'),
   toggleDataPaneBtn: document.getElementById('toggleDataPaneBtn'),
@@ -312,6 +317,7 @@ function syncHeaderActions() {
   const showThemeToggle = !workspaceVisible;
   const resolvedTheme = resolveThemeMode(state.settings.theme_mode);
   const showPublicCtas = !state.token && !authVisible;
+  const showHeaderStartCta = showPublicCtas && state.currentPage !== 'landing';
 
   if (refs.headerSettingsBtn) {
     refs.headerSettingsBtn.hidden = !showSettings;
@@ -320,7 +326,7 @@ function syncHeaderActions() {
     refs.headerLoginBtn.hidden = !showPublicCtas;
   }
   if (refs.headerCtaBtn) {
-    refs.headerCtaBtn.hidden = !showPublicCtas;
+    refs.headerCtaBtn.hidden = !showHeaderStartCta;
   }
   if (refs.themeToggle) {
     refs.themeToggle.hidden = !showThemeToggle;
@@ -343,6 +349,7 @@ function shouldUseCenteredComposerLayout() {
     isLoadingConversation: state.isLoadingConversation,
     hasPendingActivity: state.isSendingMessage || state.isUploadingDataset,
     hasDraftAttachment: Boolean(refs.chatFile?.files?.[0]),
+    hasDraftDashboard: Boolean(state.draftDashboard?.widgets?.length),
   });
 }
 
@@ -731,6 +738,42 @@ async function api(path, options = {}) {
   return payload;
 }
 
+async function apiBlob(path, options = {}) {
+  const requestUrl = /^https?:\/\//i.test(path)
+    ? path
+    : `${API_BASE_URL}${path}`;
+  const headers = new Headers(options.headers || {});
+  const isFormData = options.body instanceof FormData;
+
+  if (!isFormData && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  if (state.token) {
+    headers.set('Authorization', `Bearer ${state.token}`);
+  }
+
+  const response = await fetchWithRetry(requestUrl, {
+    ...options,
+    headers,
+  }, {
+    retries: 2,
+    baseDelayMs: 550,
+  });
+
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type') || '';
+    const payload = contentType.includes('application/json') ? await response.json() : await response.text();
+    throw createAppError(payload?.error?.message || response.statusText || 'Request gagal', {
+      code: payload?.error?.code || null,
+      statusCode: payload?.error?.status || response.status,
+      details: payload?.error?.details ?? null,
+    });
+  }
+
+  return response.blob();
+}
+
 function setAuth(token, user = null, options = {}) {
   const persist = options.persist !== false;
   const isDemo = Boolean(options.isDemo);
@@ -1077,7 +1120,7 @@ function setCanvasOpen(open) {
   }
 
   if (state.canvasOpen && state.grid) {
-    applyStageDimensions();
+    autoFitStageZoom();
     syncGridBounds();
     queueCanvasStageCenter();
     queueCanvasArtifactRefresh();
@@ -1268,6 +1311,8 @@ function bindCanvasViewportPan() {
       return;
     }
     isPanning = true;
+    state.canvasViewportMovedByUser = true;
+    window.clearTimeout(canvasStageCenterTimer);
     refs.canvasViewport.classList.add('is-panning');
     startX = event.clientX;
     startY = event.clientY;
@@ -1306,6 +1351,8 @@ function bindCanvasViewportPan() {
       return;
     }
     event.preventDefault();
+    state.canvasViewportMovedByUser = true;
+    window.clearTimeout(canvasStageCenterTimer);
     const direction = event.deltaY > 0 ? -1 : 1;
     setStageZoom(state.stageZoom + direction * ZOOM_STEP, {
       anchorX: event.clientX,
@@ -1321,6 +1368,30 @@ function syncStageZoomLabel() {
   refs.zoomLevelLabel.textContent = `${Math.round(state.stageZoom * 100)}%`;
 }
 
+function autoFitStageZoom() {
+  if (!refs.canvasViewport) {
+    applyStageDimensions();
+    return;
+  }
+
+  const vpWidth = refs.canvasViewport.clientWidth;
+  const vpHeight = refs.canvasViewport.clientHeight;
+
+  if (!vpWidth || !vpHeight) {
+    applyStageDimensions();
+    return;
+  }
+
+  const padFactor = 0.92;
+  const fitZoom = Math.min(
+    (vpWidth * padFactor) / STAGE_BASE_WIDTH,
+    (vpHeight * padFactor) / STAGE_BASE_HEIGHT,
+  );
+  const clamped = Math.max(MIN_STAGE_ZOOM, Math.min(MAX_STAGE_ZOOM, fitZoom));
+  state.stageZoom = clamped;
+  applyStageDimensions();
+}
+
 function applyStageDimensions() {
   if (!refs.canvasStage || !refs.canvasWorld || !refs.canvasViewport) {
     return;
@@ -1328,7 +1399,9 @@ function applyStageDimensions() {
 
   const width = Math.round(STAGE_BASE_WIDTH * state.stageZoom);
   const height = Math.round(STAGE_BASE_HEIGHT * state.stageZoom);
-  const worldPad = Math.max(220, Math.round(Math.min(width, height) * 0.35));
+  const viewportPadX = Math.round((refs.canvasViewport?.clientWidth || 0) * 0.5);
+  const viewportPadY = Math.round((refs.canvasViewport?.clientHeight || 0) * 0.5);
+  const worldPad = Math.max(220, viewportPadX, viewportPadY, Math.round(Math.min(width, height) * 0.35));
 
   refs.canvasStage.style.width = `${width}px`;
   refs.canvasStage.style.height = `${height}px`;
@@ -1341,10 +1414,57 @@ function applyStageDimensions() {
 }
 
 let canvasStageCenterTimer = null;
+let canvasStageCenterFollowupTimer = null;
 let canvasArtifactRefreshTimer = null;
 
-function centerCanvasStage() {
+function clearQueuedCanvasCenter() {
+  window.clearTimeout(canvasStageCenterTimer);
+  window.clearTimeout(canvasStageCenterFollowupTimer);
+  canvasStageCenterTimer = null;
+  canvasStageCenterFollowupTimer = null;
+}
+
+function layoutFocusRectForCurrentPage(stageRect) {
+  const widgets = pageWidgets();
+  if (!Array.isArray(widgets) || widgets.length === 0) {
+    return null;
+  }
+
+  const colWidth = stageRect.width / GRID_COLS;
+  const rowHeight = stageRect.height / GRID_ROWS;
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+
+  widgets.forEach((widget) => {
+    const layout = widget?.layout || null;
+    if (!layout) {
+      return;
+    }
+    left = Math.min(left, stageRect.left + Number(layout.x || 0) * colWidth);
+    top = Math.min(top, stageRect.top + Number(layout.y || 0) * rowHeight);
+    right = Math.max(right, stageRect.left + (Number(layout.x || 0) + Number(layout.w || 4)) * colWidth);
+    bottom = Math.max(bottom, stageRect.top + (Number(layout.y || 0) + Number(layout.h || 2)) * rowHeight);
+  });
+
+  if (!Number.isFinite(left) || !Number.isFinite(top) || !Number.isFinite(right) || !Number.isFinite(bottom)) {
+    return null;
+  }
+
+  return {
+    left,
+    top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
+  };
+}
+
+function centerCanvasStage(options = {}) {
   if (!refs.canvasViewport || !refs.canvasWorld || !refs.canvasStage) {
+    return;
+  }
+  if (state.canvasViewportMovedByUser && !options.force) {
     return;
   }
 
@@ -1358,9 +1478,9 @@ function centerCanvasStage() {
     height: refs.canvasStage.clientHeight,
   };
 
-  let focusRect = null;
+  let focusRect = layoutFocusRectForCurrentPage(stageRect);
   const widgetShells = Array.from(refs.canvasGrid?.querySelectorAll('.widget-shell') || []);
-  if (widgetShells.length > 0) {
+  if (!focusRect && widgetShells.length > 0) {
     let left = Number.POSITIVE_INFINITY;
     let top = Number.POSITIVE_INFINITY;
     let right = Number.NEGATIVE_INFINITY;
@@ -1396,11 +1516,16 @@ function centerCanvasStage() {
   refs.canvasViewport.scrollTo(target.scrollLeft, target.scrollTop);
 }
 
-function queueCanvasStageCenter() {
-  window.clearTimeout(canvasStageCenterTimer);
+function queueCanvasStageCenter(options = {}) {
+  clearQueuedCanvasCenter();
   canvasStageCenterTimer = window.setTimeout(() => {
     window.requestAnimationFrame(() => {
-      centerCanvasStage();
+      centerCanvasStage(options);
+      canvasStageCenterFollowupTimer = window.setTimeout(() => {
+        window.requestAnimationFrame(() => {
+          centerCanvasStage(options);
+        });
+      }, 180);
     });
   }, 50);
 }
@@ -1548,14 +1673,25 @@ function renderDashboardSummary(message) {
   }
   openBtn.addEventListener('click', () => {
     if (Array.isArray(message.widgets) && message.widgets.length > 0) {
-      state.canvasWidgets = normalizeIncomingWidgets(message.widgets);
-      state.canvasPagesCount = pageCountForWidgets(state.canvasWidgets);
-      state.canvasPage = Math.max(1, Number(state.canvasWidgets[0]?.layout?.page || 1));
+      setDraftDashboard({
+        ...buildDraftDashboardFromCanvas({
+          widgets: normalizeIncomingWidgets(message.widgets),
+          pages: pageCountForWidgets(message.widgets),
+          note: message.content || null,
+          status: 'ready',
+        }),
+        widgets: normalizeIncomingWidgets(message.widgets),
+        pages: pageCountForWidgets(message.widgets),
+      }, {
+        markDirty: true,
+        page: Math.max(1, Number(message.widgets[0]?.layout?.page || 1)),
+      });
       setCanvasPreparing(false);
       renderCanvas();
-      scheduleCanvasSave();
     }
+    state.canvasViewportMovedByUser = false;
     setCanvasOpen(true);
+    queueCanvasStageCenter({ force: true });
   });
   card.append(openBtn);
 
@@ -1778,6 +1914,48 @@ function pageCountForWidgets(widgets = []) {
   return widgets.reduce((max, widget) => Math.max(max, Number(widget?.layout?.page || 1)), 1);
 }
 
+function buildDraftDashboardFromCanvas(overrides = {}) {
+  const widgets = Array.isArray(overrides.widgets)
+    ? normalizeIncomingWidgets(overrides.widgets)
+    : normalizeIncomingWidgets(state.canvasWidgets);
+  return {
+    run_id: overrides.run_id || state.draftDashboard?.run_id || null,
+    status: overrides.status || state.draftDashboard?.status || 'drafting',
+    note: overrides.note ?? state.draftDashboard?.note ?? null,
+    name: overrides.name || state.draftDashboard?.name || state.currentDashboard?.name || 'Draft Dashboard',
+    saved_dashboard_id: overrides.saved_dashboard_id || state.draftDashboard?.saved_dashboard_id || state.currentDashboard?.id || null,
+    pages: Math.max(1, Number(overrides.pages || pageCountForWidgets(widgets) || state.canvasPagesCount || 1)),
+    widgets,
+    artifacts: Array.isArray(overrides.artifacts) ? overrides.artifacts : (state.draftDashboard?.artifacts || []),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function isDraftDisplayReady(status) {
+  const normalized = String(status || '').toLowerCase();
+  return normalized === 'ready' || normalized === 'needs_review';
+}
+
+function setDraftDashboard(draft = null, options = {}) {
+  state.draftDashboard = draft && typeof draft === 'object' ? {
+    ...draft,
+    pages: Math.max(1, Number(draft.pages || pageCountForWidgets(draft.widgets || []))),
+    widgets: Array.isArray(draft.widgets) ? normalizeIncomingWidgets(draft.widgets) : [],
+  } : null;
+
+  if (state.draftDashboard) {
+    state.canvasWidgets = state.draftDashboard.widgets;
+    state.canvasPagesCount = Math.max(1, Number(state.draftDashboard.pages || pageCountForWidgets(state.canvasWidgets)));
+    if (options.resetPage !== false) {
+      state.canvasPage = Math.min(Math.max(1, Number(options.page || 1)), state.canvasPagesCount);
+    }
+  }
+
+  if (options.markDirty !== undefined) {
+    state.draftSaveDirty = Boolean(options.markDirty);
+  }
+}
+
 function getCanvasConfig() {
   return {
     mode: 'manual',
@@ -1808,21 +1986,59 @@ let saveCanvasTimer = null;
 function scheduleCanvasSave() {
   window.clearTimeout(saveCanvasTimer);
   saveCanvasTimer = window.setTimeout(async () => {
-    try {
-      const dashboard = await ensureDashboard();
-      const updated = await api(`/api/dashboards/${dashboard.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          name: dashboard.name || 'Dashboard Utama',
-          config: getCanvasConfig(),
-        }),
-      });
-      state.currentDashboard = updated.dashboard;
-      showToast('Layout canvas tersimpan.');
-    } catch (error) {
-      showToast(`Gagal simpan canvas: ${error.message}`);
-    }
-  }, 700);
+    setDraftDashboard(buildDraftDashboardFromCanvas(), {
+      markDirty: true,
+      resetPage: false,
+      page: state.canvasPage,
+    });
+    updateChatHeader();
+  }, 90);
+}
+
+function applyDraftDashboardPayload(draft = null, options = {}) {
+  if (!draft || typeof draft !== 'object') {
+    return;
+  }
+
+  const nextDraft = {
+    ...draft,
+    widgets: Array.isArray(draft.widgets) ? draft.widgets : [],
+    pages: Math.max(1, Number(draft.pages || pageCountForWidgets(draft.widgets || []))),
+  };
+  state.canvasViewportMovedByUser = Boolean(options.preserveViewport) ? state.canvasViewportMovedByUser : false;
+  state.canvasAutoCenteredRunId = options.runId || nextDraft.run_id || null;
+  setDraftDashboard(nextDraft, {
+    markDirty: options.markDirty ?? Boolean(nextDraft.status && nextDraft.status !== 'ready'),
+    resetPage: options.resetPage !== false,
+    page: options.page || state.canvasPage || 1,
+  });
+  setCanvasPreparing(!isDraftDisplayReady(nextDraft.status), {
+    message: nextDraft.note || 'Dashboard sedang disiapkan...',
+  });
+  renderCanvas();
+  updateChatHeader();
+  if (options.openCanvas && state.canvasWidgets.length > 0) {
+    setCanvasOpen(true);
+  }
+  if (!state.canvasViewportMovedByUser && (options.forceCenter || options.runId)) {
+    queueCanvasStageCenter({ force: true });
+  }
+}
+
+function applyDashboardPatch(patch = {}) {
+  if (!patch || !patch.draft_dashboard) {
+    return;
+  }
+
+  applyDraftDashboardPayload(patch.draft_dashboard, {
+    openCanvas: true,
+    preserveViewport: state.canvasViewportMovedByUser,
+    markDirty: true,
+    resetPage: state.canvasWidgets.length === 0,
+    page: state.canvasPage || 1,
+    runId: patch.run_id || patch.draft_dashboard.run_id || null,
+    forceCenter: !state.canvasViewportMovedByUser && state.canvasAutoCenteredRunId !== (patch.run_id || null),
+  });
 }
 
 function renderCanvasItem(item) {
@@ -2001,7 +2217,7 @@ function setCanvasPage(page, rerender = true) {
     updateCanvasPagination();
   }
   if (state.canvasOpen) {
-    queueCanvasStageCenter();
+    queueCanvasStageCenter({ force: true });
   }
 }
 
@@ -2367,14 +2583,22 @@ async function refreshDashboards() {
     state.currentDashboard = (response.dashboards || [])[0] || null;
     setCanvasPreparing(false);
 
+    if (state.draftDashboard && Array.isArray(state.draftDashboard.widgets) && state.draftDashboard.widgets.length > 0) {
+      renderCanvas();
+      updateChatHeader();
+      return;
+    }
+
     const components = state.currentDashboard?.config?.components;
     const savedPages = Math.max(1, Number(state.currentDashboard?.config?.pages || 1));
     if (Array.isArray(components) && components.length > 0) {
+      state.draftSaveDirty = false;
       state.canvasWidgets = normalizeIncomingWidgets(components);
       state.canvasPagesCount = Math.max(savedPages, pageCountForWidgets(state.canvasWidgets));
       state.canvasPage = Math.min(Math.max(1, state.canvasPage), state.canvasPagesCount);
       renderCanvas();
     } else {
+      state.draftSaveDirty = false;
       state.canvasWidgets = [];
       state.canvasPagesCount = savedPages;
       state.canvasPage = 1;
@@ -2460,6 +2684,12 @@ function updateChatHeader() {
   if (refs.openCanvasBtn) {
     refs.openCanvasBtn.hidden = !hasCanvasWidgets;
   }
+  if (refs.persistDraftBtn) {
+    refs.persistDraftBtn.hidden = !hasCanvasWidgets;
+    refs.persistDraftBtn.classList.toggle('is-active', Boolean(state.draftSaveDirty));
+    refs.persistDraftBtn.setAttribute('title', state.draftSaveDirty ? 'Simpan draft dashboard' : 'Dashboard sudah tersimpan');
+    refs.persistDraftBtn.setAttribute('aria-label', state.draftSaveDirty ? 'Simpan draft dashboard' : 'Dashboard sudah tersimpan');
+  }
   if (refs.chatPaneHead) {
     refs.chatPaneHead.hidden = !shouldShowChatHeader({ hasCanvasWidgets });
   }
@@ -2485,6 +2715,7 @@ function resetConversationWorkspaceState({
     canvasPagesCount: state.canvasPagesCount,
   });
   state.currentDashboard = dashboardState.currentDashboard;
+  state.draftDashboard = null;
   state.canvasWidgets = dashboardState.canvasWidgets;
   state.canvasPage = dashboardState.canvasPage;
   state.canvasPagesCount = dashboardState.canvasPagesCount;
@@ -2648,12 +2879,23 @@ async function refreshChatHistory(conversationId = state.conversationId) {
 
     state.conversationMessageCount = state.messages.filter((entry) => entry.mode !== 'timeline').length;
 
+    const draftDashboard = response.agent_state?.draft_dashboard || null;
+    state.draftDashboard = draftDashboard
+      ? {
+          ...draftDashboard,
+          widgets: Array.isArray(draftDashboard.widgets) ? normalizeIncomingWidgets(draftDashboard.widgets) : [],
+        }
+      : null;
+    state.draftSaveDirty = Boolean(state.draftDashboard);
+
     const lastCanvas = [...state.messages]
       .reverse()
       .find((item) => item.mode === 'canvas' && Array.isArray(item.widgets) && item.widgets.length > 0);
 
     const nextCanvasState = resolveCanvasState({
-      messageWidgets: lastCanvas ? normalizeIncomingWidgets(lastCanvas.widgets) : [],
+      messageWidgets: state.draftDashboard?.widgets?.length
+        ? state.draftDashboard.widgets
+        : (lastCanvas ? normalizeIncomingWidgets(lastCanvas.widgets) : []),
       dashboardWidgets: Array.isArray(state.currentDashboard?.config?.components)
         ? normalizeIncomingWidgets(state.currentDashboard.config.components)
         : [],
@@ -2940,12 +3182,43 @@ function hydrateTimelineFromTrace(agent) {
   finalizeTimeline(runId);
 }
 
+function shouldHydrateTimelineFromResponse(response = {}) {
+  if (!response || typeof response !== 'object') {
+    return false;
+  }
+
+  if (response.pending_approval) {
+    return true;
+  }
+
+  if (response.presentation_mode === 'canvas') {
+    return true;
+  }
+
+  const routeAction = String(response.agent?.route?.action || '').toLowerCase();
+  if (['analyze', 'inspect_dataset', 'create_dashboard', 'edit_dashboard'].includes(routeAction)) {
+    return true;
+  }
+
+  const trace = Array.isArray(response.agent?.trace) ? response.agent.trace : [];
+  return trace.length > 1;
+}
+
 function applyAssistantResponse(response, options = {}) {
   state.conversationId = response.conversation_id;
   state.conversationTitle = response.conversation?.title || state.conversationTitle || 'Percakapan baru';
   upsertConversation(response.conversation);
   if (response.dashboard) {
     state.currentDashboard = response.dashboard;
+  }
+  if (response.draft_dashboard) {
+    state.draftDashboard = {
+      ...response.draft_dashboard,
+      widgets: Array.isArray(response.draft_dashboard.widgets)
+        ? normalizeIncomingWidgets(response.draft_dashboard.widgets)
+        : [],
+    };
+    state.draftSaveDirty = response.save_required !== false;
   }
 
   if (options.needsTimeline && !options.skipTraceHydration && !state.timelineRunId) {
@@ -2997,13 +3270,20 @@ function applyAssistantResponse(response, options = {}) {
 
   if (mode === 'canvas' && Array.isArray(widgets) && widgets.length > 0) {
     try {
-      state.canvasWidgets = normalizeIncomingWidgets(widgets);
-      state.canvasPagesCount = pageCountForWidgets(state.canvasWidgets);
-      state.canvasPage = 1;
-      setCanvasPreparing(false);
-      renderCanvas();
-      updateChatHeader();
-      scheduleCanvasSave();
+      applyDraftDashboardPayload(response.draft_dashboard || buildDraftDashboardFromCanvas({
+        widgets: normalizeIncomingWidgets(widgets),
+        pages: pageCountForWidgets(widgets),
+        note: response.answer || null,
+        status: 'ready',
+      }), {
+        openCanvas: Boolean(state.canvasOpen),
+        preserveViewport: state.canvasViewportMovedByUser,
+        markDirty: Boolean(response.save_required !== false),
+        resetPage: true,
+        page: 1,
+        runId: response.draft_dashboard?.run_id || null,
+        forceCenter: !state.canvasViewportMovedByUser,
+      });
     } catch (error) {
       console.warn('applyAssistantResponse_canvas_failed', error);
       showToast('Jawaban masuk, tapi render canvas gagal. Coba buka ulang Canvas.');
@@ -3025,7 +3305,7 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
     body: JSON.stringify({
       message: userText,
       conversation_id: state.conversationId,
-      dashboard_id: state.currentDashboard?.id || null,
+      dashboard_id: state.currentDashboard?.id || state.draftDashboard?.saved_dashboard_id || null,
       client_preferences: state.settings,
     }),
   }, {
@@ -3077,6 +3357,16 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
         streamState.seenEventKeys.clear();
         streamState.visualStepKeys.clear();
         ensureTimeline(runId, normalizeTimelineTitle(event.title));
+      } else if (event.type === 'agent_start' || event.type === 'agent_step') {
+        const runId = streamState.runId || event.run_id || state.timelineRunId || `timeline_${Date.now()}`;
+        streamState.hadTimeline = true;
+        streamState.runId = runId;
+        ensureTimeline(runId, 'Tim agent sedang bekerja');
+        upsertTimelineStep(runId, {
+          id: `${event.type}_${String(event.agent || 'agent').toLowerCase()}_${String(event.title || 'langkah').toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+          title: event.title || 'Langkah agent',
+          status: event.type === 'agent_start' ? 'pending' : (event.status || 'done'),
+        });
       } else if (event.type === 'timeline_step') {
         const step = event.step || {};
         const runId = step.timeline_id || streamState.runId || state.timelineRunId || `timeline_${Date.now()}`;
@@ -3103,6 +3393,12 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
           upsertVisualAggregateTimeline(runId, streamState, 'done');
         }
         finalizeTimeline(runId);
+      } else if (event.type === 'dashboard_patch') {
+        applyDashboardPatch(event);
+      } else if (event.type === 'approval_required') {
+        if (event.approval?.prompt) {
+          showToast(event.approval.prompt);
+        }
       } else if (event.type === 'final') {
         finalPayload = event.payload || null;
       } else if (event.type === 'error') {
@@ -3132,12 +3428,8 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
 }
 
 async function sendChatMessage(userText) {
-  const needsTimeline = /dashboard|grafik|chart|visual|canvas/i.test(userText);
   if (state.timelineRunId) {
     finalizeTimeline(state.timelineRunId);
-  }
-  if (needsTimeline) {
-    setCanvasPreparing(true, { message: 'Dashboard sedang disiapkan...' });
   }
   state.isSendingMessage = true;
   syncComposerChrome();
@@ -3161,7 +3453,7 @@ async function sendChatMessage(userText) {
         body: JSON.stringify({
           message: userText,
           conversation_id: state.conversationId,
-          dashboard_id: state.currentDashboard?.id || null,
+          dashboard_id: state.currentDashboard?.id || state.draftDashboard?.saved_dashboard_id || null,
           client_preferences: state.settings,
         }),
       });
@@ -3169,10 +3461,10 @@ async function sendChatMessage(userText) {
 
     hideTyping();
     applyAssistantResponse(response, {
-      needsTimeline,
+      needsTimeline: !streamTimelineSeen && shouldHydrateTimelineFromResponse(response),
       skipTraceHydration: streamTimelineSeen,
     });
-    if (needsTimeline && state.timelineRunId) {
+    if (state.timelineRunId) {
       finalizeTimeline(state.timelineRunId);
     }
     await refreshVerdict();
@@ -3377,13 +3669,6 @@ async function downloadCanvasAsJpg() {
     return;
   }
 
-  const width = 1600;
-  const height = 900;
-  const outerPad = 24;
-  const gap = 10;
-  const cellWidth = (width - outerPad * 2 - gap * (GRID_COLS - 1)) / GRID_COLS;
-  const cellHeight = (height - outerPad * 2 - gap * (GRID_ROWS - 1)) / GRID_ROWS;
-
   const pageItems = state.canvasWidgets
     .filter((widget) => Number(widget.layout?.page || 1) === state.canvasPage)
     .map((widget) => ({
@@ -3396,37 +3681,115 @@ async function downloadCanvasAsJpg() {
     return;
   }
 
-  const scale = 1;
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(width * scale);
-  canvas.height = Math.round(height * scale);
-  const context = canvas.getContext('2d');
-  if (!context) {
-    showToast('Browser tidak mendukung export JPG.');
+  try {
+    const pngBlob = await apiBlob('/api/dashboards/render-image', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: state.draftDashboard?.name || state.currentDashboard?.name || 'Dashboard Vistara',
+        page: state.canvasPage,
+        widgets: pageItems,
+      }),
+    });
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    if (!context) {
+      throw createAppError('Browser tidak mendukung export JPG.', {
+        code: 'DASHBOARD_EXPORT_UNSUPPORTED',
+      });
+    }
+
+    if (typeof createImageBitmap === 'function') {
+      const imageBitmap = await createImageBitmap(pngBlob);
+      try {
+        canvas.width = imageBitmap.width;
+        canvas.height = imageBitmap.height;
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(imageBitmap, 0, 0);
+      } finally {
+        if (typeof imageBitmap.close === 'function') {
+          imageBitmap.close();
+        }
+      }
+    } else {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(createAppError('Gagal memuat render dashboard.', {
+          code: 'DASHBOARD_RENDER_FAILED',
+        }));
+        reader.readAsDataURL(pngBlob);
+      });
+      const image = await new Promise((resolve, reject) => {
+        const nextImage = new Image();
+        nextImage.onload = () => resolve(nextImage);
+        nextImage.onerror = () => reject(createAppError('Gagal memuat render dashboard.', {
+          code: 'DASHBOARD_RENDER_FAILED',
+        }));
+        nextImage.src = dataUrl;
+      });
+      canvas.width = image.width;
+      canvas.height = image.height;
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0);
+    }
+
+    const anchor = document.createElement('a');
+    anchor.href = canvas.toDataURL('image/jpeg', 0.94);
+    anchor.download = `vistara-dashboard-hal-${state.canvasPage}.jpg`;
+    anchor.click();
+    showToast('JPG dashboard berhasil diunduh.');
+  } catch (error) {
+    showToast(error?.message || 'Gagal membuat export JPG dashboard.');
+  }
+}
+
+async function persistDraftDashboard() {
+  if (!state.canvasWidgets.length) {
+    showToast('Belum ada draft dashboard untuk disimpan.');
     return;
   }
 
-  context.fillStyle = '#ffffff';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.scale(scale, scale);
-  context.fillStyle = '#f8fafc';
-  drawRoundedRect(context, 0, 0, width, height, 0);
-  context.fill();
-
-  pageItems.forEach((widget) => {
-    const layout = widget.layout;
-    const x = outerPad + layout.x * (cellWidth + gap);
-    const y = outerPad + layout.y * (cellHeight + gap);
-    const w = layout.w * cellWidth + (layout.w - 1) * gap;
-    const h = layout.h * cellHeight + (layout.h - 1) * gap;
-    drawWidgetOnExport(context, widget, { x, y, w, h });
+  const draft = buildDraftDashboardFromCanvas({
+    status: 'ready',
   });
+  const targetDashboard = state.currentDashboard?.id
+    ? state.currentDashboard
+    : (draft.saved_dashboard_id ? { id: draft.saved_dashboard_id, name: draft.name } : null);
 
-  const anchor = document.createElement('a');
-  anchor.href = canvas.toDataURL('image/jpeg', 0.92);
-  anchor.download = `vistara-dashboard-hal-${state.canvasPage}.jpg`;
-  anchor.click();
-  showToast('JPG dashboard berhasil diunduh.');
+  try {
+    let saved;
+    if (targetDashboard?.id) {
+      saved = await api(`/api/dashboards/${targetDashboard.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: draft.name || targetDashboard.name || 'Dashboard Utama',
+          config: getCanvasConfig(),
+        }),
+      });
+    } else {
+      saved = await api('/api/dashboards', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: draft.name || 'Dashboard Utama',
+          config: getCanvasConfig(),
+        }),
+      });
+    }
+
+    state.currentDashboard = saved.dashboard;
+    state.draftDashboard = {
+      ...draft,
+      saved_dashboard_id: saved.dashboard?.id || draft.saved_dashboard_id || null,
+      updated_at: new Date().toISOString(),
+    };
+    state.draftSaveDirty = false;
+    updateChatHeader();
+    showToast('Draft dashboard berhasil disimpan.');
+  } catch (error) {
+    showToast(`Gagal simpan dashboard: ${error.message}`);
+  }
 }
 
 function bindHintTooltips() {
@@ -3628,7 +3991,9 @@ if (refs.brandHomeLink) {
 if (refs.openCanvasBtn) {
   refs.openCanvasBtn.addEventListener('click', () => {
     if (Array.isArray(state.canvasWidgets) && state.canvasWidgets.length > 0) {
+      state.canvasViewportMovedByUser = false;
       setCanvasOpen(true);
+      queueCanvasStageCenter({ force: true });
     }
   });
 }
@@ -3708,6 +4073,12 @@ if (refs.saveCanvasBtn) {
     } catch (error) {
       showToast(`Gagal export JPG: ${error.message}`);
     }
+  });
+}
+
+if (refs.persistDraftBtn) {
+  refs.persistDraftBtn.addEventListener('click', async () => {
+    await persistDraftDashboard();
   });
 }
 
@@ -4219,6 +4590,7 @@ refs.logoutBtn.addEventListener('click', () => {
   state.conversations = [];
   state.messages = [];
   state.currentDashboard = null;
+  state.draftDashboard = null;
   state.canvasWidgets = [];
   state.canvasPage = 1;
   state.canvasPagesCount = 1;
@@ -4227,6 +4599,9 @@ refs.logoutBtn.addEventListener('click', () => {
   state.datasetReady = false;
   state.dataPaneCollapsed = true;
   state.configPaneCollapsed = true;
+  state.canvasViewportMovedByUser = false;
+  state.canvasAutoCenteredRunId = null;
+  state.draftSaveDirty = false;
   state.timelineRunId = null;
   state.timelineMessageId = null;
 

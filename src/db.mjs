@@ -198,6 +198,22 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS conversation_agent_state (
+  conversation_id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  memory_json TEXT,
+  dataset_profile_json TEXT,
+  draft_dashboard_json TEXT,
+  pending_approval_json TEXT,
+  active_run_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS dashboards (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,
@@ -255,6 +271,7 @@ CREATE INDEX IF NOT EXISTS idx_transactions_tenant_date ON transactions(tenant_i
 CREATE INDEX IF NOT EXISTS idx_transactions_tenant_branch ON transactions(tenant_id, branch_id);
 CREATE INDEX IF NOT EXISTS idx_source_files_tenant ON source_files(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_messages_tenant_created ON chat_messages(tenant_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_conversation_agent_state_tenant_user ON conversation_agent_state(tenant_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_goals_tenant_status ON goals(tenant_id, status);
 `;
 

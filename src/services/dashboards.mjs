@@ -105,6 +105,24 @@ export function getDashboard(tenantId, userId, dashboardId) {
   return parseDashboard(row);
 }
 
+export function getLatestDashboard(tenantId, userId) {
+  const row = get(
+    `
+      SELECT *
+      FROM dashboards
+      WHERE tenant_id = :tenant_id AND user_id = :user_id
+      ORDER BY is_default DESC, updated_at DESC
+      LIMIT 1
+    `,
+    {
+      tenant_id: tenantId,
+      user_id: userId,
+    },
+  );
+
+  return parseDashboard(row);
+}
+
 export function createDashboard(tenantId, userId, name, config) {
   const id = generateId();
   const now = new Date().toISOString();

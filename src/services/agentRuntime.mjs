@@ -1,10 +1,17 @@
 import { generateId } from '../utils/ids.mjs';
 import { parseIndonesianNumber } from '../utils/parse.mjs';
 import { executeAnalyticsIntent, executeBuilderQuery, getBuilderSchema } from './queryEngine.mjs';
-import { ensureDefaultDashboard, getDashboard } from './dashboards.mjs';
+import { getDashboard, getLatestDashboard } from './dashboards.mjs';
 import { runPythonSnippet } from './pythonRuntime.mjs';
-import { generateWithGeminiTools } from './gemini.mjs';
-import { normalizeDashboardLayout, packDashboardLayout } from '../../public/dashboard-layout.js';
+import { generateJsonWithGeminiMedia, generateWithGeminiTools } from './gemini.mjs';
+import { renderDashboardPng } from './dashboardImage.mjs';
+import {
+  DASHBOARD_GRID_COLS,
+  layoutsIntersect,
+  normalizeDashboardLayout,
+  packDashboardLayout,
+  suggestDashboardLayout,
+} from '../../public/dashboard-layout.js';
 
 const VISTARA_SYSTEM_PROMPT = `
 Kamu adalah Vistara AI, asisten analitik bisnis. Fokus pada insight bisnis, bukan kode atau topik di luar data.
@@ -26,6 +33,10 @@ const REVIEWER_THINKING_BUDGET = 2048;
 const PLANNER_MAX_OUTPUT_TOKENS = 1600;
 const WORKER_MAX_OUTPUT_TOKENS = 1800;
 const REVIEWER_MAX_OUTPUT_TOKENS = 1000;
+const MIN_PAGE_WIDTH_COVERAGE = 0.9;
+const MIN_PAGE_COVERAGE_DENSITY = 0.6;
+const MAX_REVIEW_REVISIONS = 1;
+const MAX_ADDITIONAL_WIDGETS_FOR_COVERAGE = 2;
 
 const COMPLEX_TEMPLATE_COMPONENTS = [
   { type: 'MetricCard', title: 'Omzet', metric: 'revenue' },
@@ -265,6 +276,20 @@ function emitTimelineEvent(hooks, event) {
   }
 }
 
+function emitDashboardPatch(hooks, patch) {
+  if (!hooks || typeof hooks.onDashboardPatch !== 'function') {
+    return;
+  }
+  try {
+    hooks.onDashboardPatch({
+      ...patch,
+      ts: new Date().toISOString(),
+    });
+  } catch {
+    // Patch emission must not break dashboard generation flow.
+  }
+}
+
 function summarizeThoughtForTimeline(thoughts = [], fallback = '') {
   if (!Array.isArray(thoughts) || thoughts.length === 0) {
     return fallback;
@@ -322,7 +347,20 @@ function dashboardFromContext(tenantId, userId, dashboardId = null) {
       return specific;
     }
   }
-  return ensureDefaultDashboard(tenantId, userId);
+  const latest = getLatestDashboard(tenantId, userId);
+  if (latest) {
+    return latest;
+  }
+  return {
+    id: `draft_${generateId()}`,
+    name: 'Draft Dashboard',
+    config: {
+      mode: 'ai',
+      pages: 1,
+      components: COMPLEX_TEMPLATE_COMPONENTS.slice(0, 4).map((component) => cloneComponent(component)),
+      updated_by: 'agent',
+    },
+  };
 }
 
 function normalizeScope(intent = {}) {
@@ -1257,6 +1295,380 @@ function finalizeBalancedWidgets(widgets = [], layoutPlan = null) {
   };
 }
 
+function coverageRightEdgeThreshold() {
+  return Math.max(1, Math.ceil(DASHBOARD_GRID_COLS * MIN_PAGE_WIDTH_COVERAGE));
+}
+
+function normalizePackedWidgets(widgets = []) {
+  return packDashboardLayout(widgets.map((widget) => ({
+    ...widget,
+    kind: widget.artifact?.kind || widget.kind || 'chart',
+  }))).map((widget) => ({
+    ...widget,
+    layout: normalizeDashboardLayout(widget.layout || {}, {
+      page: Number(widget.layout?.page || 1),
+      kind: widget.artifact?.kind || widget.kind || 'chart',
+    }),
+  }));
+}
+
+function pageCoverageStats(widgets = []) {
+  const pages = new Map();
+  for (const widget of widgets) {
+    const page = Number(widget?.layout?.page || 1);
+    const layout = normalizeDashboardLayout(widget.layout || {}, {
+      page,
+      kind: widget?.artifact?.kind || widget?.kind || 'chart',
+    });
+    const stats = pages.get(page) || {
+      page,
+      rightEdge: 0,
+      coveragePct: 0,
+      densityPct: 0,
+      widgetCount: 0,
+      occupiedArea: 0,
+      contentHeight: 0,
+    };
+    stats.rightEdge = Math.max(stats.rightEdge, layout.x + layout.w);
+    stats.contentHeight = Math.max(stats.contentHeight, layout.y + layout.h);
+    stats.occupiedArea += layout.w * layout.h;
+    stats.widgetCount += 1;
+    pages.set(page, stats);
+  }
+
+  for (const stats of pages.values()) {
+    stats.coveragePct = stats.rightEdge / DASHBOARD_GRID_COLS;
+    const bandArea = Math.max(1, stats.rightEdge * Math.max(1, stats.contentHeight));
+    stats.densityPct = stats.occupiedArea / bandArea;
+  }
+
+  return Array.from(pages.values()).sort((a, b) => a.page - b.page);
+}
+
+function underfilledCoveragePages(widgets = []) {
+  const threshold = coverageRightEdgeThreshold();
+  return pageCoverageStats(widgets).filter((stats) => (
+    stats.rightEdge < threshold
+    || stats.densityPct < MIN_PAGE_COVERAGE_DENSITY
+  ));
+}
+
+function widgetExpansionPriority(widget = {}) {
+  const kind = String(widget?.artifact?.kind || widget?.kind || '').toLowerCase();
+  const chartType = String(widget?.artifact?.chart_type || '').toLowerCase();
+  if (kind === 'chart' && chartType === 'line') {
+    return 0;
+  }
+  if (kind === 'chart') {
+    return 1;
+  }
+  if (kind === 'table') {
+    return 2;
+  }
+  if (kind === 'metric') {
+    return 4;
+  }
+  return 3;
+}
+
+function tryExpandWidgetToRight(widget, siblings = []) {
+  const layout = normalizeDashboardLayout(widget.layout || {}, {
+    page: Number(widget.layout?.page || 1),
+    kind: widget?.artifact?.kind || widget?.kind || 'chart',
+  });
+
+  let next = layout;
+  for (let width = layout.w + 1; layout.x + width <= DASHBOARD_GRID_COLS; width += 1) {
+    const candidate = normalizeDashboardLayout({
+      ...layout,
+      w: width,
+    }, {
+      page: layout.page,
+      kind: widget?.artifact?.kind || widget?.kind || 'chart',
+    });
+    const collides = siblings.some((entry) => layoutsIntersect(candidate, entry));
+    if (collides) {
+      break;
+    }
+    next = candidate;
+  }
+
+  return {
+    ...widget,
+    layout: next,
+  };
+}
+
+function expandWidgetsToFillCoverage(widgets = []) {
+  let nextWidgets = normalizePackedWidgets(widgets);
+  const threshold = coverageRightEdgeThreshold();
+
+  for (const stats of underfilledCoveragePages(nextWidgets)) {
+    const pageWidgets = nextWidgets
+      .filter((widget) => Number(widget.layout?.page || 1) === stats.page)
+      .sort((left, right) => widgetExpansionPriority(left) - widgetExpansionPriority(right));
+
+    for (const candidate of pageWidgets) {
+      const widgetIndex = nextWidgets.findIndex((widget) => widget.id === candidate.id);
+      if (widgetIndex < 0) {
+        continue;
+      }
+
+      const siblings = nextWidgets
+        .filter((widget, index) => index !== widgetIndex && Number(widget.layout?.page || 1) === stats.page)
+        .map((widget) => normalizeDashboardLayout(widget.layout || {}, {
+          page: stats.page,
+          kind: widget?.artifact?.kind || widget?.kind || 'chart',
+        }));
+
+      nextWidgets[widgetIndex] = tryExpandWidgetToRight(nextWidgets[widgetIndex], siblings);
+      nextWidgets = normalizePackedWidgets(nextWidgets);
+
+      const updatedStats = pageCoverageStats(nextWidgets).find((entry) => entry.page === stats.page);
+      if (updatedStats && updatedStats.rightEdge >= threshold) {
+        break;
+      }
+    }
+  }
+
+  return nextWidgets;
+}
+
+function expandWidgetsByTitle(widgets = [], titles = []) {
+  const normalizedTitles = new Set(
+    (Array.isArray(titles) ? titles : [])
+      .map((value) => normalizeLayoutTitle(value))
+      .filter(Boolean),
+  );
+  if (normalizedTitles.size === 0) {
+    return normalizePackedWidgets(widgets);
+  }
+
+  let nextWidgets = normalizePackedWidgets(widgets);
+  for (let index = 0; index < nextWidgets.length; index += 1) {
+    const title = normalizeLayoutTitle(nextWidgets[index]?.title || nextWidgets[index]?.artifact?.title);
+    if (!normalizedTitles.has(title)) {
+      continue;
+    }
+    const page = Number(nextWidgets[index]?.layout?.page || 1);
+    const siblings = nextWidgets
+      .filter((widget, siblingIndex) => siblingIndex !== index && Number(widget.layout?.page || 1) === page)
+      .map((widget) => normalizeDashboardLayout(widget.layout || {}, {
+        page,
+        kind: widget?.artifact?.kind || widget?.kind || 'chart',
+      }));
+    nextWidgets[index] = tryExpandWidgetToRight(nextWidgets[index], siblings);
+  }
+  return normalizePackedWidgets(nextWidgets);
+}
+
+function componentCoverageKey(component = {}) {
+  const queryComponent = component?.query && typeof component.query === 'object'
+    ? [
+        normalizeKeyText(component.query.dataset || ''),
+        normalizeKeyText(component.query.measure || ''),
+        normalizeKeyText(component.query.group_by || ''),
+        normalizeKeyText(component.query.visualization || ''),
+      ].join(':')
+    : normalizeTemplateId(component.metric || component.title || component.type || '');
+  return queryComponent || componentMetricKey(component);
+}
+
+function widgetCoverageKey(widget = {}) {
+  const query = widget?.query && typeof widget.query === 'object' ? widget.query : null;
+  if (query && (query.dataset || query.measure || query.group_by || query.visualization)) {
+    return [
+      normalizeKeyText(query.dataset || ''),
+      normalizeKeyText(query.measure || ''),
+      normalizeKeyText(query.group_by || ''),
+      normalizeKeyText(query.visualization || ''),
+    ].join(':');
+  }
+
+  const templateKey = normalizeTemplateId(
+    query?.template_id
+    || query?.metric
+    || widget?.artifact?.template_id
+    || widget?.artifact?.metric
+    || widget?.metric
+    || widget?.title
+    || widget?.artifact?.title,
+  );
+  return templateKey || widgetLayoutKey(widget);
+}
+
+function currentWidgetCoverageKeys(widgets = []) {
+  return new Set(widgets.map((widget) => widgetCoverageKey(widget)).filter(Boolean));
+}
+
+function preferredCoverageComponents(components = [], widgets = [], preferredTemplateIds = []) {
+  const currentKeys = currentWidgetCoverageKeys(widgets);
+  const preferred = Array.isArray(preferredTemplateIds)
+    ? preferredTemplateIds.map((value) => normalizeTemplateId(value)).filter(Boolean)
+    : [];
+  const pool = dedupeComponents([
+    ...(Array.isArray(components) ? components : []),
+    ...COMPLEX_TEMPLATE_COMPONENTS.map(cloneComponent),
+  ]);
+
+  const ranked = pool
+    .filter((component) => {
+      const key = componentCoverageKey(component);
+      return key && !currentKeys.has(key);
+    })
+    .sort((left, right) => {
+      const leftKey = componentCoverageKey(left);
+      const rightKey = componentCoverageKey(right);
+      const leftPreferred = preferred.includes(leftKey) ? 0 : 1;
+      const rightPreferred = preferred.includes(rightKey) ? 0 : 1;
+      if (leftPreferred !== rightPreferred) {
+        return leftPreferred - rightPreferred;
+      }
+      return widgetExpansionPriority({ artifact: { kind: left.type === 'MetricCard' ? 'metric' : left.type === 'TopList' ? 'table' : 'chart' } })
+        - widgetExpansionPriority({ artifact: { kind: right.type === 'MetricCard' ? 'metric' : right.type === 'TopList' ? 'table' : 'chart' } });
+    });
+
+  return ranked;
+}
+
+async function fetchAdditionalCoverageWidgets({
+  tenantId,
+  userId,
+  scope,
+  components,
+  widgets,
+  hooks = null,
+  trace,
+  preferredTemplateIds = [],
+  targetPage = 1,
+}) {
+  const additions = [];
+  const candidates = preferredCoverageComponents(components, widgets, preferredTemplateIds);
+
+  for (const component of candidates) {
+    if (additions.length >= MAX_ADDITIONAL_WIDGETS_FOR_COVERAGE) {
+      break;
+    }
+
+    const call = toolCallFromComponent(component, scope);
+    if (!call) {
+      continue;
+    }
+
+    const stepId = `coverage_add_${Date.now()}_${additions.length + 1}`;
+    emitTimelineEvent(hooks, {
+      id: stepId,
+      status: 'pending',
+      title: `Menambah widget pendukung ${safeText(component.title || component.metric || 'tambahan', 'tambahan', 48)}`,
+      agent: 'analyst',
+    });
+
+    const execution = executeToolCall({ tenantId, userId, call });
+    const artifact = (execution.artifacts || []).find((item) => !artifactLooksEmpty(item));
+    if (!artifact) {
+      emitTimelineEvent(hooks, {
+        id: stepId,
+        status: 'error',
+        title: `Widget ${safeText(component.title || component.metric || 'tambahan', 'tambahan', 48)} tidak cukup kuat`,
+        agent: 'analyst',
+      });
+      continue;
+    }
+
+    const preferredPage = Math.max(1, Number(targetPage || 1));
+    const seededLayout = suggestDashboardLayout([
+      ...widgets,
+      ...additions,
+    ], artifact.kind || 'chart', preferredPage);
+
+    additions.push({
+      id: generateId(),
+      title: artifact.title || component.title || `Widget ${widgets.length + additions.length + 1}`,
+      artifact,
+      query: execution.query || call.args || null,
+      layout: seededLayout,
+      _layoutSource: 'coverage',
+    });
+
+    pushTrace(trace, {
+      step: `tool:${call.tool}`,
+      source: 'coverage_repair',
+      produced: 1,
+      template: componentCoverageKey(component),
+    });
+    emitTimelineEvent(hooks, {
+      id: stepId,
+      status: 'done',
+      title: `${safeText(artifact.title || component.title || 'Widget tambahan', 'Widget tambahan', 48)} ditambahkan`,
+      agent: 'analyst',
+    });
+  }
+
+  return additions;
+}
+
+async function enforceDashboardCoverage({
+  tenantId,
+  userId,
+  scope,
+  components,
+  widgets,
+  layoutPlan = null,
+  trace,
+  hooks = null,
+  preferredTemplateIds = [],
+}) {
+  let currentWidgets = normalizePackedWidgets(widgets);
+  let gaps = underfilledCoveragePages(currentWidgets);
+  const hasPreferredAdditions = Array.isArray(preferredTemplateIds) && preferredTemplateIds.length > 0;
+  if (gaps.length === 0 && !hasPreferredAdditions) {
+    return finalizeBalancedWidgets(currentWidgets, layoutPlan);
+  }
+
+  const coverageStepId = `coverage_${Date.now()}`;
+  emitTimelineEvent(hooks, {
+    id: coverageStepId,
+    status: 'pending',
+    title: 'Citra merapikan penggunaan lebar dashboard',
+    agent: 'creator',
+  });
+
+  currentWidgets = expandWidgetsToFillCoverage(currentWidgets);
+  gaps = underfilledCoveragePages(currentWidgets);
+
+  if ((gaps.length > 0 || hasPreferredAdditions) && currentWidgets.length < MAX_WIDGETS) {
+    const preferredPage = Number(gaps[0]?.page || currentWidgets[0]?.layout?.page || 1);
+    const additions = await fetchAdditionalCoverageWidgets({
+      tenantId,
+      userId,
+      scope,
+      components,
+      widgets: currentWidgets,
+      hooks,
+      trace,
+      preferredTemplateIds,
+      targetPage: preferredPage,
+    });
+
+    if (additions.length > 0) {
+      currentWidgets = finalizeBalancedWidgets([...currentWidgets, ...additions], layoutPlan).widgets;
+      currentWidgets = expandWidgetsToFillCoverage(currentWidgets);
+    }
+  }
+
+  gaps = underfilledCoveragePages(currentWidgets);
+  emitTimelineEvent(hooks, {
+    id: coverageStepId,
+    status: gaps.length === 0 ? 'done' : 'error',
+    title: gaps.length === 0
+      ? `Lebar dashboard ${Math.round((pageCoverageStats(currentWidgets)[0]?.coveragePct || 0) * 100)}% dan kepadatan ${Math.round((pageCoverageStats(currentWidgets)[0]?.densityPct || 0) * 100)}%`
+      : 'Masih ada area kosong yang perlu ditinjau reviewer',
+    agent: 'creator',
+  });
+
+  return finalizeBalancedWidgets(currentWidgets, layoutPlan);
+}
+
 function buildWidgetsFromArtifacts({ artifacts, calls, components = [], layoutPlan = null }) {
   const widgets = [];
 
@@ -1960,6 +2372,27 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
       },
     });
 
+    const draft = buildWidgetsFromArtifacts({
+      artifacts: artifactGroups,
+      calls: callRecords,
+      components,
+      layoutPlan: finalLayoutPlan,
+    });
+
+    emitDashboardPatch(hooks, {
+      status: 'drafting',
+      note: firstArtifact?.title
+        ? `Citra menambahkan ${safeText(firstArtifact.title, 'widget', 80)} ke draft dashboard.`
+        : 'Citra menambahkan visual baru ke draft dashboard.',
+      widgets: draft.widgets,
+      artifacts: draft.artifacts,
+      changed_widgets: draft.widgets.slice(-Math.max(1, artifacts.length)).map((widget) => ({
+        id: widget.id,
+        title: widget.title || widget.artifact?.title || 'Widget',
+      })),
+      page_count: draft.pageCount || 1,
+    });
+
     if (artifactGroups.length >= MAX_WIDGETS || callRecords.length >= maxUniqueToolCalls) {
       break;
     }
@@ -2080,6 +2513,17 @@ function classifyDashboardFailure(reason = 'dashboard_agent_failed', details = n
       retryable: false,
       reason: normalizedReason,
       message: 'Dashboard belum bisa dibuat karena visual yang dihasilkan kosong atau tidak cukup kuat untuk ditampilkan.',
+      details,
+    });
+  }
+
+  if (normalizedReason === 'dashboard_visual_review_failed') {
+    return new DashboardAgentError({
+      code: 'DASHBOARD_REVIEW_FAILED',
+      statusCode: 422,
+      retryable: false,
+      reason: normalizedReason,
+      message: 'Dashboard belum cukup rapi atau lengkap untuk ditampilkan.',
       details,
     });
   }
@@ -2253,6 +2697,15 @@ function normalizeReviewResult(raw) {
     return null;
   }
 
+  const rawVerdict = safeText(raw.verdict, 'fail', 24).toLowerCase();
+  const verdict = ['pass', 'needs_revision', 'fail'].includes(rawVerdict)
+    ? rawVerdict
+    : ['good', 'high'].includes(rawVerdict)
+      ? 'pass'
+      : ['medium', 'revise', 'needs_fix'].includes(rawVerdict)
+        ? 'needs_revision'
+        : 'fail';
+
   return {
     total_widgets: toNumber(raw.total_widgets, 0),
     non_empty_widgets: toNumber(raw.non_empty_widgets, 0),
@@ -2260,12 +2713,47 @@ function normalizeReviewResult(raw) {
     table_rows: toNumber(raw.table_rows, 0),
     chart_points: toNumber(raw.chart_points, 0),
     completeness_pct: toNumber(raw.completeness_pct, 0),
-    verdict: safeText(raw.verdict, 'unknown', 24),
+    verdict,
+    summary: safeText(raw.summary || '', '', 280) || null,
+    issues: Array.isArray(raw.issues)
+      ? raw.issues.map((item) => safeText(item, '', 180)).filter(Boolean).slice(0, 6)
+      : [],
+    directives: {
+      expand_titles: Array.isArray(raw?.directives?.expand_titles)
+        ? raw.directives.expand_titles.map((item) => safeText(item, '', 80)).filter(Boolean).slice(0, 4)
+        : [],
+      add_templates: Array.isArray(raw?.directives?.add_templates)
+        ? raw.directives.add_templates.map((item) => normalizeTemplateId(item)).filter(Boolean).slice(0, 2)
+        : [],
+      notes: Array.isArray(raw?.directives?.notes)
+        ? raw.directives.notes.map((item) => safeText(item, '', 140)).filter(Boolean).slice(0, 4)
+        : [],
+    },
   };
 }
 
-async function runReviewerAgent({ goal, scope, artifacts, trace, memory, hooks = null, signal = null }) {
-  let pythonResult = null;
+async function buildVisualReviewerInput({ widgets = [], goal = '', scope = {}, artifacts = [] }) {
+  const rendered = renderDashboardPng({
+    widgets,
+    stackPages: true,
+    title: goal || 'Dashboard Vistara',
+  });
+  return {
+    inlineFile: {
+      mimeType: 'image/png',
+      data: rendered.buffer.toString('base64'),
+    },
+    rendered,
+    metadata: {
+      page_coverage: pageCoverageStats(widgets),
+      artifacts: compactArtifacts(artifacts),
+      goal,
+      scope,
+    },
+  };
+}
+
+async function runReviewerAgent({ goal, scope, artifacts, widgets, trace, memory, hooks = null, signal = null }) {
   const reviewStepId = `reviewer_${Date.now()}`;
   emitTimelineEvent(hooks, {
     id: reviewStepId,
@@ -2273,146 +2761,109 @@ async function runReviewerAgent({ goal, scope, artifacts, trace, memory, hooks =
     title: 'Menilai kualitas dashboard',
     agent: 'reviewer',
   });
+  throwIfDashboardAborted(signal);
 
-  for (let stepIndex = 0; stepIndex < MAX_REVIEWER_STEPS; stepIndex += 1) {
-    throwIfDashboardAborted(signal);
-    const response = await generateWithGeminiTools({
-      systemPrompt: [
-        VISTARA_SYSTEM_PROMPT,
-        'Kamu reviewer agent untuk dashboard analytics.',
-        'Gunakan python_exec bila perlu untuk menghitung kualitas dashboard.',
-        'Akhiri dengan submit_review.',
-      ].join(' '),
-      userPrompt: JSON.stringify({
-        goal,
-        scope,
-        artifacts: compactArtifacts(artifacts),
-        python_result: pythonResult,
-      }),
-      tools: REVIEWER_TOOL_DECLARATIONS,
-      temperature: 0.1,
-      maxOutputTokens: REVIEWER_MAX_OUTPUT_TOKENS,
-      thinkingBudget: REVIEWER_THINKING_BUDGET,
-      includeThoughts: false,
-      functionCallingMode: 'ANY',
-      allowedFunctionNames: REVIEWER_TOOL_DECLARATIONS.map((tool) => tool.name),
-      signal,
-    });
+  const python = await reviewArtifactsWithPython(artifacts);
+  const pythonResult = normalizeReviewResult(python.result);
+  const visualInput = await buildVisualReviewerInput({
+    widgets,
+    goal,
+    scope,
+    artifacts,
+  });
 
-    if (!response.ok) {
-      pushTrace(trace, {
-        step: 'reviewer',
-        ok: false,
-        reason: response.reason,
-      });
-      emitTimelineEvent(hooks, {
-        id: reviewStepId,
-        status: 'error',
-        title: 'Reviewer gagal, lanjutkan fallback Python',
-        agent: 'reviewer',
-      });
-      break;
-    }
-
-    const reviewerThought = summarizeThoughtForTimeline(response.thoughts, '');
-    if (reviewerThought) {
-      emitTimelineEvent(hooks, {
-        id: `reviewer_thinking_${stepIndex + 1}`,
-        status: 'done',
-        title: reviewerThought,
-        agent: 'reviewer',
-      });
-    }
-
-    const call = (response.functionCalls || [])[0];
-    if (!call) {
-      if (stepIndex >= 1) {
-        break;
-      }
-      continue;
-    }
-
-    if (call.name === 'python_exec') {
-      const code = safeText(call.args?.code || PYTHON_REVIEW_CODE, PYTHON_REVIEW_CODE, 8000);
-      const execution = await runPythonSnippet({
-        code,
-        context: { artifacts },
-      });
-
-      pythonResult = execution.ok ? execution.result : null;
-
-      pushTrace(trace, {
-        step: 'tool:python_exec',
-        ok: execution.ok,
-        reason: execution.reason || null,
-      });
-      emitTimelineEvent(hooks, {
-        id: `reviewer_python_${stepIndex + 1}_${Date.now()}`,
-        status: execution.ok ? 'done' : 'error',
-        title: execution.ok ? 'Validasi Python selesai' : 'Validasi Python gagal',
-        agent: 'reviewer',
-      });
-      continue;
-    }
-
-    if (call.name === 'submit_review') {
-      const reviewed = normalizeReviewResult(pythonResult);
-      const result = {
-        verdict: safeText(call.args?.verdict || reviewed?.verdict || 'unknown', 'unknown', 24),
-        completeness_pct: toNumber(call.args?.completeness_pct, reviewed?.completeness_pct || 0),
-        summary: safeText(call.args?.summary || 'Review selesai.', 'Review selesai.', 240),
-        ...(reviewed || {}),
-      };
-
-      memory.steps.push({
-        agent: 'reviewer',
-        source: 'gemini_tool_call',
-        result,
-      });
-      emitTimelineEvent(hooks, {
-        id: reviewStepId,
-        status: 'done',
-        title: `Review selesai (${toNumber(result.completeness_pct, 0)}%)`,
-        agent: 'reviewer',
-      });
-
-      return {
-        ok: true,
-        source: 'gemini_tool_call',
-        result,
-        python: {
-          ok: Boolean(pythonResult),
-          reason: pythonResult ? null : 'not_used',
+  const reviewResponse = await generateJsonWithGeminiMedia({
+    systemPrompt: [
+      VISTARA_SYSTEM_PROMPT,
+      'Kamu reviewer visual untuk dashboard analytics.',
+      'Nilai gambar dashboard yang diberikan, metadata layout, dan kualitas artefak.',
+      'Perhatikan dead space di kanan, duplikasi widget, label chart terpotong, hierarki lemah, visual kosong, dan export yang tidak terbaca.',
+      'Jika dashboard masih bisa diperbaiki, kembalikan verdict needs_revision dengan directives yang konkret.',
+      'Jika dashboard sudah kuat, kembalikan verdict pass.',
+      'Jika dashboard terlalu lemah atau menyesatkan, kembalikan verdict fail.',
+      'Jawab hanya dengan JSON object.',
+    ].join(' '),
+    userPrompt: JSON.stringify({
+      goal,
+      scope,
+      layout: pageCoverageStats(widgets),
+      artifacts: compactArtifacts(artifacts),
+      python_result: pythonResult,
+      required_shape: {
+        verdict: 'pass | needs_revision | fail',
+        completeness_pct: 'number 0-100',
+        summary: 'string',
+        issues: ['string'],
+        directives: {
+          expand_titles: ['string'],
+          add_templates: ['total_revenue | total_profit | margin_percentage | revenue_trend | top_products | branch_performance | total_expense'],
+          notes: ['string'],
         },
-      };
-    }
+      },
+    }),
+    inlineFiles: [visualInput.inlineFile],
+    temperature: 0.1,
+    maxOutputTokens: REVIEWER_MAX_OUTPUT_TOKENS,
+    signal,
+  });
+
+  if (!reviewResponse.ok) {
+    pushTrace(trace, {
+      step: 'reviewer_visual',
+      ok: false,
+      reason: reviewResponse.reason,
+    });
+    emitTimelineEvent(hooks, {
+      id: reviewStepId,
+      status: 'error',
+      title: 'Reviewer visual gagal membaca dashboard',
+      agent: 'reviewer',
+    });
+    return {
+      ok: false,
+      source: 'visual_gemini',
+      reason: reviewResponse.reason,
+      result: pythonResult,
+      python: {
+        ok: python.ok,
+        reason: python.reason || null,
+      },
+    };
   }
 
-  const fallback = await reviewArtifactsWithPython(artifacts);
-  const result = normalizeReviewResult(fallback.result);
+  const mergedResult = normalizeReviewResult({
+    ...(pythonResult || {}),
+    ...(reviewResponse.data || {}),
+    completeness_pct: toNumber(reviewResponse.data?.completeness_pct, pythonResult?.completeness_pct || 0),
+  });
 
   memory.steps.push({
     agent: 'reviewer',
-    source: 'fallback_python',
-    result,
-    reason: fallback.reason || null,
+    source: 'visual_gemini',
+    result: mergedResult,
   });
   emitTimelineEvent(hooks, {
     id: reviewStepId,
-    status: fallback.ok ? 'done' : 'error',
-    title: fallback.ok
-      ? `Review fallback selesai (${toNumber(result?.completeness_pct, 0)}%)`
-      : 'Review fallback gagal',
+    status: 'done',
+    title: mergedResult?.verdict === 'needs_revision'
+      ? 'Reviewer meminta satu revisi visual'
+      : mergedResult?.verdict === 'fail'
+        ? 'Reviewer menemukan area yang masih perlu dirapikan'
+        : `Review selesai (${toNumber(mergedResult?.completeness_pct, 0)}%)`,
     agent: 'reviewer',
   });
 
   return {
-    ok: Boolean(result),
-    source: 'fallback_python',
-    result,
+    ok: Boolean(mergedResult),
+    source: 'visual_gemini',
+    result: mergedResult,
     python: {
-      ok: fallback.ok,
-      reason: fallback.reason || null,
+      ok: python.ok,
+      reason: python.reason || null,
+    },
+    rendered: {
+      width: visualInput.rendered.width,
+      height: visualInput.rendered.height,
     },
   };
 }
@@ -2439,12 +2890,14 @@ export async function runDashboardAgent({
   dashboardId = null,
   dashboard: inputDashboard = null,
   goal = '',
+  request = null,
   intent = {},
   hooks = null,
   signal = null,
 }) {
   throwIfDashboardAborted(signal);
-  const scope = normalizeScope(intent);
+  const routingScope = request && typeof request === 'object' ? request : intent;
+  const scope = normalizeScope(routingScope);
   const trace = [];
   const memory = {
     goal,
@@ -2454,7 +2907,7 @@ export async function runDashboardAgent({
 
   const dashboard = inputDashboard || dashboardFromContext(tenantId, userId, dashboardId);
   const baseComponents = normalizeTemplateComponents(dashboard);
-  const components = isFullDashboardGoal(goal, intent) ? mergeWithComplexDefaults(baseComponents) : baseComponents;
+  const components = isFullDashboardGoal(goal, routingScope) ? mergeWithComplexDefaults(baseComponents) : baseComponents;
   const templateStepId = `template_${Date.now()}`;
 
   emitTimelineEvent(hooks, {
@@ -2533,27 +2986,125 @@ export async function runDashboardAgent({
     });
   }
 
-  const reviewer = await runReviewerAgent({
+  let reviewedDraft = await enforceDashboardCoverage({
+    tenantId,
+    userId,
+    scope,
+    components,
+    widgets: worker.widgets,
+    layoutPlan: worker.layoutPlan,
+    trace,
+    hooks,
+  });
+  let reviewer = await runReviewerAgent({
     goal,
     scope,
-    artifacts: worker.artifacts,
+    artifacts: reviewedDraft.artifacts,
+    widgets: reviewedDraft.widgets,
     trace,
     memory,
     hooks,
     signal,
   });
+  let reviewerBlockingIssue = null;
 
-  const baseAnswer = buildDashboardFindings({
-    artifacts: worker.artifacts,
+  for (let revisionIndex = 0; revisionIndex < MAX_REVIEW_REVISIONS; revisionIndex += 1) {
+    if (!reviewer.ok) {
+      reviewerBlockingIssue = {
+        stage: 'reviewer',
+        source: reviewer.source,
+        reason: reviewer.reason || 'dashboard_visual_review_failed',
+      };
+      break;
+    }
+
+    if (reviewer.result?.verdict === 'pass') {
+      break;
+    }
+
+    if (reviewer.result?.verdict === 'needs_revision') {
+      const directedWidgets = expandWidgetsByTitle(
+        reviewedDraft.widgets,
+        reviewer.result?.directives?.expand_titles || [],
+      );
+      reviewedDraft = await enforceDashboardCoverage({
+        tenantId,
+        userId,
+        scope,
+        components,
+        widgets: directedWidgets,
+        layoutPlan: worker.layoutPlan,
+        trace,
+        hooks,
+        preferredTemplateIds: reviewer.result?.directives?.add_templates || [],
+      });
+      reviewer = await runReviewerAgent({
+        goal,
+        scope,
+        artifacts: reviewedDraft.artifacts,
+        widgets: reviewedDraft.widgets,
+        trace,
+        memory,
+        hooks,
+        signal,
+      });
+      continue;
+    }
+
+    reviewerBlockingIssue = {
+      stage: 'reviewer',
+      source: reviewer.source,
+      review: reviewer.result,
+      reason: 'dashboard_visual_review_failed',
+    };
+    break;
+  }
+
+  if (reviewerBlockingIssue) {
+    pushTrace(trace, {
+      step: 'reviewer_degraded',
+      ...reviewerBlockingIssue,
+    });
+    emitTimelineEvent(hooks, {
+      id: `reviewer_degraded_${Date.now()}`,
+      status: 'done',
+      title: reviewerBlockingIssue.reason === 'dashboard_visual_review_failed'
+        ? 'Draft terbaik ditampilkan sambil menunggu penyempurnaan reviewer'
+        : 'Reviewer visual tidak tersedia, gunakan draft terbaik saat ini',
+      agent: 'reviewer',
+    });
+  }
+
+  const reviewerNeedsAttention = reviewerBlockingIssue?.reason === 'dashboard_visual_review_failed';
+
+  let baseAnswer = buildDashboardFindings({
+    artifacts: reviewedDraft.artifacts,
     scope,
   }) || worker.summary || 'Dashboard siap ditinjau di canvas.';
 
+  if (reviewerNeedsAttention) {
+    baseAnswer = `${baseAnswer}\n\nDraft dashboard sudah dibuat, tetapi reviewer visual masih melihat beberapa area yang perlu dirapikan sebelum dianggap final.`;
+  }
+
+  emitDashboardPatch(hooks, {
+    status: reviewerNeedsAttention ? 'needs_review' : 'ready',
+    note: baseAnswer,
+    widgets: reviewedDraft.widgets,
+    artifacts: reviewedDraft.artifacts,
+    changed_widgets: reviewedDraft.widgets.map((widget) => ({
+      id: widget.id,
+      title: widget.title || widget.artifact?.title || 'Widget',
+    })),
+    page_count: reviewedDraft.pageCount || 1,
+  });
+
   return {
     answer: baseAnswer,
-    widgets: worker.widgets,
-    artifacts: worker.artifacts,
+    widgets: reviewedDraft.widgets,
+    artifacts: reviewedDraft.artifacts,
     dashboard,
     presentation_mode: 'canvas',
+    draft_status: reviewerNeedsAttention ? 'needs_review' : 'ready',
     agent: {
       mode: 'multi_agent_runtime',
       trace,
@@ -2571,12 +3122,13 @@ export async function runDashboardAgent({
         ok: worker.ok,
         reason: worker.reason || null,
         source: worker.source,
-        pages: worker.pageCount || 0,
+        pages: reviewedDraft.pageCount || worker.pageCount || 0,
       },
       reviewer: reviewer.result || null,
       reviewer_meta: {
         ok: reviewer.ok,
         source: reviewer.source,
+        requires_attention: reviewerNeedsAttention,
       },
       python_tool: {
         ok: reviewer.python?.ok || false,
