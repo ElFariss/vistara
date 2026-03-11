@@ -6,6 +6,7 @@ import { initializeDatabase, run } from '../src/db.mjs';
 import { layoutsIntersect } from '../public/dashboard-layout.js';
 import { executeAnalyticsIntent } from '../src/services/queryEngine.mjs';
 import { DashboardAgentError, runDashboardAgent } from '../src/services/agentRuntime.mjs';
+import { resetGeminiQuotaCooldown } from '../src/services/gemini.mjs';
 
 function uid(prefix) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
@@ -156,6 +157,7 @@ async function withMockGeminiToolResponses(responses, runTest) {
   const queue = [...responses];
   const requests = [];
 
+  resetGeminiQuotaCooldown();
   config.geminiApiKey = 'test-key';
   config.geminiModel = 'gemini-test';
   globalThis.fetch = async (_url, options = {}) => {
@@ -178,6 +180,7 @@ async function withMockGeminiToolResponses(responses, runTest) {
   try {
     return await runTest({ requests });
   } finally {
+    resetGeminiQuotaCooldown();
     globalThis.fetch = previousFetch;
     config.geminiApiKey = previousGeminiApiKey;
     config.geminiModel = previousGeminiModel;

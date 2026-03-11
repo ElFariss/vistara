@@ -11,7 +11,7 @@ import { registerAuthRoutes } from '../src/routes/auth.mjs';
 import { resolveAllowedOrigin } from '../src/http/cors.mjs';
 import { resolveClientIp } from '../src/http/request.mjs';
 import { resolveHttpError, resolvePublicErrorMessage } from '../src/http/response.mjs';
-import { generateJsonWithGemini, generateWithGeminiTools } from '../src/services/gemini.mjs';
+import { generateJsonWithGemini, generateWithGeminiTools, resetGeminiQuotaCooldown } from '../src/services/gemini.mjs';
 import { parseDataset } from '../src/services/ingestion.mjs';
 
 initializeDatabase();
@@ -178,6 +178,7 @@ test('Gemini requests use x-goog-api-key header instead of query string', async 
   const previousModel = config.geminiModel;
   const requests = [];
 
+  resetGeminiQuotaCooldown();
   config.geminiApiKey = 'secret-key';
   config.geminiModel = 'gemini-test-model';
   global.fetch = async (url, options = {}) => {
@@ -205,6 +206,7 @@ test('Gemini requests use x-goog-api-key header instead of query string', async 
       assert.equal(request.options.headers['Content-Type'], 'application/json');
     }
   } finally {
+    resetGeminiQuotaCooldown();
     global.fetch = originalFetch;
     config.geminiApiKey = previousApiKey;
     config.geminiModel = previousModel;
