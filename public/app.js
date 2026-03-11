@@ -97,6 +97,7 @@ const state = {
   canvasOpen: false,
   selectedWidgetId: null,
   editMode: false,
+  pendingMessageId: null,
   timelineMessageId: null,
   timelineRunId: null,
   canvasPage: 1,
@@ -337,7 +338,7 @@ function syncHeaderActions() {
 }
 
 function currentConversationMessageCount() {
-  const visiblePersistedMessages = state.messages.filter((entry) => entry.mode !== 'timeline').length;
+  const visiblePersistedMessages = state.messages.filter((entry) => entry.mode !== 'timeline' && entry.mode !== 'pending').length;
   return Math.max(Number(state.conversationMessageCount || 0), visiblePersistedMessages);
 }
 
@@ -1610,14 +1611,95 @@ function appendMessage(message) {
     timeline: message.timeline || null,
     collapsed: Boolean(message.collapsed),
     timelineRunId: message.timelineRunId || null,
+    timelineTitle: message.timelineTitle || null,
     error: Boolean(message.error),
   };
 
   state.messages.push(nextMessage);
-  if (nextMessage.mode !== 'timeline') {
+  if (nextMessage.mode !== 'timeline' && nextMessage.mode !== 'pending') {
     state.conversationMessageCount += 1;
   }
 
+  renderThread();
+}
+
+function findPendingAssistantMessage() {
+  return state.messages.find((entry) => entry.id === state.pendingMessageId && entry.mode === 'pending')
+    || state.messages.find((entry) => entry.mode === 'pending' && entry.role === 'assistant')
+    || null;
+}
+
+function ensurePendingAssistantMessage(content = 'Sedang menyiapkan jawaban...') {
+  const existing = findPendingAssistantMessage();
+  if (existing) {
+    existing.content = String(content || existing.content || 'Sedang menyiapkan jawaban...').trim();
+    state.pendingMessageId = existing.id;
+    renderThread();
+    return existing;
+  }
+
+  const id = generateMessageId();
+  appendMessage({
+    id,
+    role: 'assistant',
+    content,
+    mode: 'pending',
+    timeline: [],
+    collapsed: false,
+    showTimelineDetails: false,
+  });
+  state.pendingMessageId = id;
+  return state.messages.find((entry) => entry.id === id) || null;
+}
+
+function clearPendingAssistantMessage() {
+  const pending = findPendingAssistantMessage();
+  if (!pending) {
+    state.pendingMessageId = null;
+    return;
+  }
+  state.messages = state.messages.filter((entry) => entry.id !== pending.id);
+  state.pendingMessageId = null;
+  renderThread();
+}
+
+function commitAssistantMessage(message) {
+  const nextMessage = {
+    id: message.id || generateMessageId(),
+    role: message.role || 'assistant',
+    content: message.content || '',
+    fileName: message.fileName || null,
+    mode: message.mode || 'chat',
+    widgets: Array.isArray(message.widgets) ? message.widgets : [],
+    artifacts: Array.isArray(message.artifacts) ? message.artifacts : [],
+    timeline: message.timeline || null,
+    collapsed: Boolean(message.collapsed),
+    timelineRunId: message.timelineRunId || null,
+    timelineTitle: message.timelineTitle || null,
+    showTimelineDetails: Boolean(message.showTimelineDetails),
+    error: Boolean(message.error),
+  };
+
+  const pending = findPendingAssistantMessage();
+  if (!pending) {
+    appendMessage(nextMessage);
+    return;
+  }
+
+  const index = state.messages.findIndex((entry) => entry.id === pending.id);
+  if (index >= 0) {
+    state.messages.splice(index, 1, nextMessage);
+    if (nextMessage.mode !== 'timeline' && nextMessage.mode !== 'pending') {
+      state.conversationMessageCount += 1;
+    }
+  } else {
+    state.messages.push(nextMessage);
+    if (nextMessage.mode !== 'timeline' && nextMessage.mode !== 'pending') {
+      state.conversationMessageCount += 1;
+    }
+  }
+
+  state.pendingMessageId = null;
   renderThread();
 }
 
@@ -1626,12 +1708,14 @@ function scrollToBottom() {
 }
 
 function showTyping() {
-  refs.typingIndicator.classList.remove('hidden');
+  ensurePendingAssistantMessage('Sedang menyiapkan jawaban...');
   scrollToBottom();
 }
 
 function hideTyping() {
-  refs.typingIndicator.classList.add('hidden');
+  if (refs.typingIndicator) {
+    refs.typingIndicator.classList.add('hidden');
+  }
 }
 
 function renderDashboardSummary(message) {
@@ -1705,7 +1789,7 @@ function renderTimeline(message) {
   const header = document.createElement('div');
   header.className = 'timeline-head';
   const title = document.createElement('strong');
-  title.textContent = normalizeTimelineTitle(message.content);
+  title.textContent = normalizeTimelineTitle(message.timelineTitle || message.content);
   const toggle = document.createElement('button');
   toggle.type = 'button';
   toggle.className = 'ghost timeline-toggle';
@@ -1748,9 +1832,31 @@ function renderThread() {
     const bubble = document.createElement('div');
     bubble.className = 'msg-bubble';
     bubble.classList.toggle('is-error', Boolean(message.error));
+    bubble.classList.toggle('is-pending', message.mode === 'pending');
 
     if (message.mode === 'timeline') {
       bubble.append(renderTimeline(message));
+      row.append(bubble);
+      refs.chatMessages.append(row);
+      continue;
+    }
+
+    if (message.mode === 'pending') {
+      const text = document.createElement('div');
+      text.className = 'pending-message-text';
+      text.textContent = message.content || 'Sedang menyiapkan jawaban...';
+      bubble.append(text);
+
+      const loader = document.createElement('div');
+      loader.className = 'bubble-loader';
+      loader.setAttribute('aria-hidden', 'true');
+      loader.innerHTML = '<span></span><span></span><span></span>';
+      bubble.append(loader);
+
+      if (Boolean(message.showTimelineDetails) && Array.isArray(message.timeline) && message.timeline.length > 0) {
+        bubble.append(renderTimeline(message));
+      }
+
       row.append(bubble);
       refs.chatMessages.append(row);
       continue;
@@ -2028,6 +2134,12 @@ function applyDraftDashboardPayload(draft = null, options = {}) {
 function applyDashboardPatch(patch = {}) {
   if (!patch || !patch.draft_dashboard) {
     return;
+  }
+
+  const pending = findPendingAssistantMessage();
+  if (pending) {
+    pending.content = String(patch.note || pending.content || 'Dashboard sedang disusun...').trim();
+    pending.showTimelineDetails = true;
   }
 
   applyDraftDashboardPayload(patch.draft_dashboard, {
@@ -2339,6 +2451,17 @@ function selectWidget(widgetId) {
 
 function ensureTimeline(runId, title = 'Proses analisis') {
   if (!runId) return;
+  const pending = ensurePendingAssistantMessage('Sedang menyiapkan jawaban...');
+  if (pending) {
+    pending.timeline = Array.isArray(pending.timeline) ? pending.timeline : [];
+    pending.timelineRunId = runId;
+    pending.timelineTitle = normalizeTimelineTitle(title);
+    state.timelineMessageId = pending.id;
+    state.timelineRunId = runId;
+    renderThread();
+    return pending;
+  }
+
   const existing = state.messages.find((entry) => entry.mode === 'timeline' && entry.timelineRunId === runId);
   if (existing) {
     state.timelineMessageId = existing.id;
@@ -2424,7 +2547,9 @@ function upsertTimelineStep(runId, step = {}) {
 
 function finalizeTimeline(runId) {
   if (!runId) return;
-  const timeline = state.messages.find((entry) => entry.mode === 'timeline' && entry.timelineRunId === runId);
+  const timeline = state.messages.find((entry) => (
+    (entry.mode === 'timeline' || entry.mode === 'pending') && entry.timelineRunId === runId
+  ));
   if (!timeline || !Array.isArray(timeline.timeline)) {
     state.timelineMessageId = null;
     state.timelineRunId = null;
@@ -2447,7 +2572,32 @@ function createTimelineStreamState() {
     runId: null,
     seenEventKeys: new Set(),
     visualStepKeys: new Set(),
+    agentKeys: new Set(),
+    complex: false,
   };
+}
+
+function revealPendingTimeline(runId = null) {
+  const pending = findPendingAssistantMessage();
+  if (!pending) {
+    return;
+  }
+  if (runId && pending.timelineRunId && pending.timelineRunId !== runId) {
+    return;
+  }
+  if (!pending.showTimelineDetails) {
+    pending.showTimelineDetails = true;
+    renderThread();
+  }
+}
+
+function markStreamComplexity(streamState, runId = null) {
+  if (!streamState) {
+    return;
+  }
+  streamState.complex = true;
+  streamState.hadTimeline = true;
+  revealPendingTimeline(runId || streamState.runId || null);
 }
 
 function timelineEventKey(runId, step = {}) {
@@ -2705,6 +2855,7 @@ function resetConversationWorkspaceState({
   state.conversationMessageCount = 0;
   state.openConversationMenuId = null;
   state.messages = [];
+  state.pendingMessageId = null;
   state.timelineRunId = null;
   state.timelineMessageId = null;
   const dashboardState = resolveDashboardResetState({
@@ -2877,7 +3028,8 @@ async function refreshChatHistory(conversationId = state.conversationId) {
       })
       .filter((entry) => !(entry.role === 'assistant' && entry.mode === 'chat' && /^selamat datang/i.test(entry.content || '')));
 
-    state.conversationMessageCount = state.messages.filter((entry) => entry.mode !== 'timeline').length;
+    state.conversationMessageCount = state.messages.filter((entry) => entry.mode !== 'timeline' && entry.mode !== 'pending').length;
+    state.pendingMessageId = null;
 
     const draftDashboard = response.agent_state?.draft_dashboard || null;
     state.draftDashboard = draftDashboard
@@ -3221,7 +3373,7 @@ function applyAssistantResponse(response, options = {}) {
     state.draftSaveDirty = response.save_required !== false;
   }
 
-  if (options.needsTimeline && !options.skipTraceHydration && !state.timelineRunId) {
+  if (options.needsTimeline && !options.skipTraceHydration && !state.timelineRunId && !findPendingAssistantMessage()) {
     hydrateTimelineFromTrace(response.agent);
   }
 
@@ -3239,7 +3391,7 @@ function applyAssistantResponse(response, options = {}) {
 
   if (isSingleWidget) {
     const normalized = normalizeIncomingWidgets(widgets)[0];
-    appendMessage({
+    commitAssistantMessage({
       role: 'assistant',
       content: response.answer || 'Berikut insight cepat.',
       mode: 'chat',
@@ -3250,7 +3402,7 @@ function applyAssistantResponse(response, options = {}) {
   }
 
   if (isSingleArtifact) {
-    appendMessage({
+    commitAssistantMessage({
       role: 'assistant',
       content: response.answer || 'Berikut insight cepat.',
       mode: 'chat',
@@ -3260,7 +3412,7 @@ function applyAssistantResponse(response, options = {}) {
     return;
   }
 
-  appendMessage({
+  commitAssistantMessage({
     role: 'assistant',
     content: response.answer || 'Selesai.',
     mode,
@@ -3352,15 +3504,20 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
 
       if (event.type === 'timeline_start') {
         const runId = event.timeline_id || `timeline_${Date.now()}`;
-        streamState.hadTimeline = true;
         streamState.runId = runId;
         streamState.seenEventKeys.clear();
         streamState.visualStepKeys.clear();
         ensureTimeline(runId, normalizeTimelineTitle(event.title));
       } else if (event.type === 'agent_start' || event.type === 'agent_step') {
         const runId = streamState.runId || event.run_id || state.timelineRunId || `timeline_${Date.now()}`;
-        streamState.hadTimeline = true;
         streamState.runId = runId;
+        const agentKey = String(event.agent || 'agent').trim().toLowerCase();
+        if (agentKey) {
+          streamState.agentKeys.add(agentKey);
+        }
+        if (streamState.agentKeys.size > 2) {
+          markStreamComplexity(streamState, runId);
+        }
         ensureTimeline(runId, 'Tim agent sedang bekerja');
         upsertTimelineStep(runId, {
           id: `${event.type}_${String(event.agent || 'agent').toLowerCase()}_${String(event.title || 'langkah').toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
@@ -3370,7 +3527,6 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
       } else if (event.type === 'timeline_step') {
         const step = event.step || {};
         const runId = step.timeline_id || streamState.runId || state.timelineRunId || `timeline_${Date.now()}`;
-        streamState.hadTimeline = true;
         streamState.runId = runId;
         const eventKey = timelineEventKey(runId, step);
         if (streamState.seenEventKeys.has(eventKey)) {
@@ -3379,6 +3535,7 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
         streamState.seenEventKeys.add(eventKey);
         ensureTimeline(runId, 'Proses analisis');
         if (isVisualTimelineStep(step)) {
+          markStreamComplexity(streamState, runId);
           streamState.visualStepKeys.add(timelineStepId(step));
           upsertVisualAggregateTimeline(runId, streamState, step.status === 'error' ? 'error' : 'pending');
           continue;
@@ -3394,8 +3551,10 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
         }
         finalizeTimeline(runId);
       } else if (event.type === 'dashboard_patch') {
+        markStreamComplexity(streamState, event.run_id || streamState.runId || null);
         applyDashboardPatch(event);
       } else if (event.type === 'approval_required') {
+        markStreamComplexity(streamState, event.run_id || streamState.runId || null);
         if (event.approval?.prompt) {
           showToast(event.approval.prompt);
         }
@@ -3476,13 +3635,14 @@ async function sendChatMessage(userText) {
     if ((error?.persistedInConversation || (error?.statusCode && error.statusCode < 500)) && historyConversationId) {
       state.conversationId = historyConversationId;
       try {
+        clearPendingAssistantMessage();
         await refreshChatHistory(historyConversationId);
         return;
       } catch (refreshError) {
         console.warn('refreshChatHistory_after_error_failed', refreshError);
       }
     }
-    appendMessage({
+    commitAssistantMessage({
       role: 'assistant',
       content: `Error: ${error.message || 'Permintaan tidak dapat diproses.'}`,
       mode: 'chat',

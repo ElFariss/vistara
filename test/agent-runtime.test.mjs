@@ -188,6 +188,7 @@ function createDashboardAgentResponses({
   timePeriod = '30 hari terakhir',
   finalSummary = 'Omzet stabil dengan kontribusi kuat dari produk utama.',
   templates = ['total_revenue', 'total_profit', 'revenue_trend', 'top_products'],
+  analysisFindings = null,
   plannerFunctionCalls = [
     {
       name: 'submit_plan',
@@ -207,7 +208,66 @@ function createDashboardAgentResponses({
     { title: 'Produk Terlaris', page: 1, x: 8, y: 2, w: 8, h: 4, kind: 'table' },
   ],
 } = {}) {
+  const defaultFindings = (Array.isArray(analysisFindings) ? analysisFindings : templates).map((templateId, index) => {
+    const normalized = String(templateId || '').trim().toLowerCase();
+    if (normalized === 'revenue_trend') {
+      return {
+        id: `finding_${index + 1}`,
+        candidate_id: templateId,
+        insight: 'Tren omzet perlu ditampilkan untuk melihat arah perubahan penjualan.',
+        evidence: 'Perubahan nilai omzet harian terlihat jelas pada periode aktif.',
+        why_it_matters: 'agar pola naik turun harian dan titik puncak cepat terbaca',
+        recommended_visual: 'line',
+        priority: index === 0 ? 'primary' : 'supporting',
+      };
+    }
+    if (normalized === 'top_products') {
+      return {
+        id: `finding_${index + 1}`,
+        candidate_id: templateId,
+        insight: 'Produk terlaris perlu ditampilkan untuk melihat kontributor utama omzet.',
+        evidence: 'Ada perbedaan kontribusi yang jelas antar produk.',
+        why_it_matters: 'agar produk yang paling mendorong omzet bisa dikenali tanpa membuka tabel mentah',
+        recommended_visual: 'table',
+        priority: 'supporting',
+      };
+    }
+    if (normalized === 'total_profit') {
+      return {
+        id: `finding_${index + 1}`,
+        candidate_id: templateId,
+        insight: 'Untung bersih perlu ditampilkan agar penjualan tidak dibaca tanpa konteks laba.',
+        evidence: 'Nilai profit tersedia untuk periode aktif.',
+        why_it_matters: 'agar user bisa membedakan penjualan yang ramai dengan hasil bersih yang benar-benar tersisa',
+        recommended_visual: 'metric',
+        priority: index === 0 ? 'primary' : 'supporting',
+      };
+    }
+    return {
+      id: `finding_${index + 1}`,
+      candidate_id: templateId,
+      insight: 'Omzet utama perlu ditampilkan sebagai acuan performa inti.',
+      evidence: 'Nilai omzet total tersedia untuk periode aktif.',
+      why_it_matters: 'agar user langsung tahu skala omzet pada periode ini sebelum masuk ke rincian lain',
+      recommended_visual: 'metric',
+      priority: index === 0 ? 'primary' : 'supporting',
+    };
+  });
+
   return [
+    geminiToolPayload({
+      functionCalls: [
+        {
+          name: 'submit_analysis_brief',
+          args: {
+            headline: defaultFindings[0]?.insight || 'Temuan utama tersedia.',
+            business_goal: 'Buat dashboard bisnis yang ringkas.',
+            time_scope: timePeriod,
+            findings: defaultFindings,
+          },
+        },
+      ],
+    }),
     geminiToolPayload({
       functionCalls: plannerFunctionCalls,
     }),
@@ -306,6 +366,11 @@ test('runDashboardAgent returns canvas widgets with findings instead of generic 
     assert.ok(Array.isArray(response.widgets));
     assert.ok(response.widgets.length > 0);
     assert.equal(response.agent.fallback_used, false);
+    assert.ok(response.analysis_brief);
+    assert.ok(Array.isArray(response.analysis_brief.findings));
+    assert.ok(response.analysis_brief.findings.length > 0);
+    assert.ok(response.widgets.every((widget) => typeof widget.finding_id === 'string' && widget.finding_id.length > 0));
+    assert.ok(response.widgets.every((widget) => typeof widget.rationale === 'string' && widget.rationale.length > 0));
 
     const paragraphs = String(response.answer || '')
       .split(/\n\s*\n/)
@@ -385,8 +450,15 @@ test('runDashboardAgent repairs overlapping worker-authored layouts before retur
       }),
     );
 
-    assert.equal(response.widgets.length, 2);
-    assert.equal(layoutsIntersect(response.widgets[0].layout, response.widgets[1].layout), false);
+    assert.ok(response.widgets.length >= 2);
+    const titles = response.widgets.map((widget) => widget.title);
+    assert.ok(titles.includes('Omzet'));
+    assert.ok(titles.includes('Untung'));
+    for (let index = 0; index < response.widgets.length; index += 1) {
+      for (let other = index + 1; other < response.widgets.length; other += 1) {
+        assert.equal(layoutsIntersect(response.widgets[index].layout, response.widgets[other].layout), false);
+      }
+    }
   } finally {
     cleanupTenant(tenantId);
   }
@@ -483,7 +555,9 @@ test('runDashboardAgent falls back to deterministic planner steps when submit_pl
       }),
     );
 
-    assert.equal(response.widgets.length, 2);
+    assert.ok(response.widgets.length >= 2);
+    assert.ok(response.widgets.some((widget) => widget.title === 'Omzet'));
+    assert.ok(response.widgets.some((widget) => widget.title === 'Trend Omzet'));
     assert.equal(response.agent.planner.source, 'fallback');
     assert.equal(response.agent.planner.ok, true);
     assert.equal(response.agent.planner.reason, 'missing_submit_plan_call');
@@ -500,6 +574,29 @@ test('runDashboardAgent dedupes repeated worker outputs and collapses unused sec
 
     const response = await withMockGeminiToolResponses(
       [
+        geminiToolPayload({
+          functionCalls: [
+            {
+              name: 'submit_analysis_brief',
+              args: {
+                headline: 'Omzet utama perlu ditampilkan sebagai acuan performa inti.',
+                business_goal: 'Buat dashboard ringkas omzet.',
+                time_scope: '7 hari terakhir',
+                findings: [
+                  {
+                    id: 'finding_1',
+                    candidate_id: 'total_revenue',
+                    insight: 'Omzet utama perlu ditampilkan sebagai acuan performa inti.',
+                    evidence: 'Nilai omzet total tersedia untuk periode aktif.',
+                    why_it_matters: 'agar user langsung tahu skala omzet pada periode ini sebelum masuk ke rincian lain',
+                    recommended_visual: 'metric',
+                    priority: 'primary',
+                  },
+                ],
+              },
+            },
+          ],
+        }),
         geminiToolPayload({
           functionCalls: [
             {
@@ -596,6 +693,29 @@ test('runDashboardAgent stops after repeated duplicate worker calls instead of i
         geminiToolPayload({
           functionCalls: [
             {
+              name: 'submit_analysis_brief',
+              args: {
+                headline: 'Omzet utama perlu ditampilkan sebagai acuan performa inti.',
+                business_goal: 'Buat dashboard omzet singkat.',
+                time_scope: '7 hari terakhir',
+                findings: [
+                  {
+                    id: 'finding_1',
+                    candidate_id: 'total_revenue',
+                    insight: 'Omzet utama perlu ditampilkan sebagai acuan performa inti.',
+                    evidence: 'Nilai omzet total tersedia untuk periode aktif.',
+                    why_it_matters: 'agar user langsung tahu skala omzet pada periode ini sebelum masuk ke rincian lain',
+                    recommended_visual: 'metric',
+                    priority: 'primary',
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        geminiToolPayload({
+          functionCalls: [
+            {
               name: 'submit_plan',
               args: {
                 steps: [
@@ -674,7 +794,7 @@ test('runDashboardAgent stops after repeated duplicate worker calls instead of i
   }
 });
 
-test('runDashboardAgent expands layout to use at least 90% of the page width', async () => {
+test('runDashboardAgent expands layout to use at least 96% of the page width', async () => {
   const { tenantId, userId } = seedTenantUser();
   try {
     seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
@@ -717,8 +837,8 @@ test('runDashboardAgent expands layout to use at least 90% of the page width', a
     ), 0);
     const densityPct = occupiedArea / Math.max(1, rightEdge * contentHeight);
 
-    assert.ok(rightEdge >= 15);
-    assert.ok(densityPct >= 0.6);
+    assert.ok(rightEdge >= 16);
+    assert.ok(densityPct >= 0.72);
   } finally {
     cleanupTenant(tenantId);
   }

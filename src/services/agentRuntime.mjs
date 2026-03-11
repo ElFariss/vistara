@@ -27,16 +27,19 @@ const MAX_WIDGETS = 8;
 const MAX_TRACE = 64;
 const MAX_WORKER_STEPS = 8;
 const MAX_REVIEWER_STEPS = 2;
+const MAX_ANALYST_CANDIDATES = 6;
 const PLANNER_THINKING_BUDGET = 4096;
+const ANALYST_THINKING_BUDGET = 4096;
 const WORKER_THINKING_BUDGET = 6144;
 const REVIEWER_THINKING_BUDGET = 2048;
 const PLANNER_MAX_OUTPUT_TOKENS = 1600;
+const ANALYST_MAX_OUTPUT_TOKENS = 1800;
 const WORKER_MAX_OUTPUT_TOKENS = 1800;
 const REVIEWER_MAX_OUTPUT_TOKENS = 1000;
-const MIN_PAGE_WIDTH_COVERAGE = 0.9;
-const MIN_PAGE_COVERAGE_DENSITY = 0.6;
+const MIN_PAGE_WIDTH_COVERAGE = 0.96;
+const MIN_PAGE_COVERAGE_DENSITY = 0.72;
 const MAX_REVIEW_REVISIONS = 1;
-const MAX_ADDITIONAL_WIDGETS_FOR_COVERAGE = 2;
+const MAX_ADDITIONAL_WIDGETS_FOR_COVERAGE = 1;
 
 const COMPLEX_TEMPLATE_COMPONENTS = [
   { type: 'MetricCard', title: 'Omzet', metric: 'revenue' },
@@ -61,6 +64,38 @@ const PLANNER_TOOL_DECLARATIONS = [
         },
       },
       required: ['steps'],
+    },
+  },
+];
+
+const ANALYST_TOOL_DECLARATIONS = [
+  {
+    name: 'submit_analysis_brief',
+    description: 'Submit a structured analyst brief grounded in real query results.',
+    parameters: {
+      type: 'object',
+      properties: {
+        headline: { type: 'string' },
+        business_goal: { type: 'string' },
+        time_scope: { type: 'string' },
+        findings: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              candidate_id: { type: 'string' },
+              insight: { type: 'string' },
+              evidence: { type: 'string' },
+              why_it_matters: { type: 'string' },
+              recommended_visual: { type: 'string' },
+              priority: { type: 'string', enum: ['primary', 'supporting'] },
+            },
+            required: ['id', 'candidate_id', 'insight', 'evidence', 'why_it_matters', 'recommended_visual', 'priority'],
+          },
+        },
+      },
+      required: ['headline', 'business_goal', 'time_scope', 'findings'],
     },
   },
 ];
@@ -1537,13 +1572,24 @@ async function fetchAdditionalCoverageWidgets({
   scope,
   components,
   widgets,
+  analysisBrief = null,
   hooks = null,
   trace,
   preferredTemplateIds = [],
   targetPage = 1,
 }) {
   const additions = [];
-  const candidates = preferredCoverageComponents(components, widgets, preferredTemplateIds);
+  const usedFindingIds = new Set((Array.isArray(widgets) ? widgets : []).map((widget) => String(widget?.finding_id || '').trim()).filter(Boolean));
+  const unusedSupportingFindings = Array.isArray(analysisBrief?.findings)
+    ? analysisBrief.findings.filter((finding) => finding.priority === 'supporting' && !usedFindingIds.has(String(finding?.id || '').trim()))
+    : [];
+  const derivedPreferredTemplateIds = [
+    ...(Array.isArray(preferredTemplateIds) ? preferredTemplateIds : []),
+    ...(unusedSupportingFindings
+        .map((finding) => findingTemplateKey(finding))
+      ),
+  ].filter(Boolean);
+  const candidates = preferredCoverageComponents(components, widgets, derivedPreferredTemplateIds);
 
   for (const component of candidates) {
     if (additions.length >= MAX_ADDITIONAL_WIDGETS_FOR_COVERAGE) {
@@ -1588,6 +1634,15 @@ async function fetchAdditionalCoverageWidgets({
       query: execution.query || call.args || null,
       layout: seededLayout,
       _layoutSource: 'coverage',
+      finding_id: unusedSupportingFindings.find((finding) => findingTemplateKey(finding) === componentCoverageKey(component))?.id
+        || findingTemplateKey({
+          recommended_visual: artifact.kind === 'chart' ? artifact.chart_type || 'chart' : artifact.kind,
+          insight: artifact.title || component.title || '',
+          evidence: artifactEvidenceSummary(artifact),
+        }),
+      rationale: unusedSupportingFindings.find((finding) => findingTemplateKey(finding) === componentCoverageKey(component))?.why_it_matters
+        || inferWhyItMatters(artifact),
+      importance: unusedSupportingFindings.find((finding) => findingTemplateKey(finding) === componentCoverageKey(component))?.priority || 'supporting',
     });
 
     pushTrace(trace, {
@@ -1613,12 +1668,14 @@ async function enforceDashboardCoverage({
   scope,
   components,
   widgets,
+  analysisBrief = null,
   layoutPlan = null,
   trace,
   hooks = null,
   preferredTemplateIds = [],
 }) {
   let currentWidgets = normalizePackedWidgets(widgets);
+  const currentPageCount = currentWidgets.reduce((max, widget) => Math.max(max, Number(widget?.layout?.page || 1)), 1);
   let gaps = underfilledCoveragePages(currentWidgets);
   const hasPreferredAdditions = Array.isArray(preferredTemplateIds) && preferredTemplateIds.length > 0;
   if (gaps.length === 0 && !hasPreferredAdditions) {
@@ -1636,7 +1693,11 @@ async function enforceDashboardCoverage({
   currentWidgets = expandWidgetsToFillCoverage(currentWidgets);
   gaps = underfilledCoveragePages(currentWidgets);
 
-  if ((gaps.length > 0 || hasPreferredAdditions) && currentWidgets.length < MAX_WIDGETS) {
+  const mayAddCoverageWidgets = currentWidgets.length < MAX_WIDGETS
+    && currentPageCount <= 1
+    && Number(layoutPlan?.pages || currentPageCount || 1) <= 1;
+
+  if ((gaps.length > 0 || hasPreferredAdditions) && mayAddCoverageWidgets) {
     const preferredPage = Number(gaps[0]?.page || currentWidgets[0]?.layout?.page || 1);
     const additions = await fetchAdditionalCoverageWidgets({
       tenantId,
@@ -1644,6 +1705,7 @@ async function enforceDashboardCoverage({
       scope,
       components,
       widgets: currentWidgets,
+      analysisBrief,
       hooks,
       trace,
       preferredTemplateIds,
@@ -1669,7 +1731,7 @@ async function enforceDashboardCoverage({
   return finalizeBalancedWidgets(currentWidgets, layoutPlan);
 }
 
-function buildWidgetsFromArtifacts({ artifacts, calls, components = [], layoutPlan = null }) {
+function buildWidgetsFromArtifacts({ artifacts, calls, components = [], layoutPlan = null, analysisBrief = null }) {
   const widgets = [];
 
   for (let i = 0; i < calls.length; i += 1) {
@@ -1696,7 +1758,11 @@ function buildWidgetsFromArtifacts({ artifacts, calls, components = [], layoutPl
 
   const seededWidgets = applyComponentLayouts(widgets, components);
   const plannedWidgets = applyWorkerLayoutPlan(seededWidgets, layoutPlan);
-  return finalizeBalancedWidgets(plannedWidgets, layoutPlan);
+  const finalized = finalizeBalancedWidgets(plannedWidgets, layoutPlan);
+  return {
+    ...finalized,
+    widgets: attachAnalysisBriefToWidgets(finalized.widgets, analysisBrief),
+  };
 }
 
 function normalizeTemplateComponents(dashboard) {
@@ -1822,6 +1888,436 @@ function compactArtifacts(artifacts) {
   });
 }
 
+function artifactEvidenceSummary(artifact = {}) {
+  if (!artifact || typeof artifact !== 'object') {
+    return 'Artefak tidak tersedia.';
+  }
+
+  if (artifact.kind === 'metric') {
+    const raw = parseArtifactNumber(artifact.raw_value ?? artifact.value);
+    const formatted = raw === null
+      ? safeText(artifact.value || '-', '-', 32)
+      : formatInsightNumber(raw, {
+          currency: !artifactLooksPercent(artifact),
+          percent: artifactLooksPercent(artifact),
+        });
+    return `${safeText(artifact.title || 'Metrik', 'Metrik', 48)}: ${formatted}${artifact.delta ? ` (${safeText(artifact.delta, '', 40)})` : ''}`;
+  }
+
+  if (artifact.kind === 'chart') {
+    const insight = chartInsight(artifact);
+    return insight || `Chart ${safeText(artifact.title || 'tanpa judul', 'tanpa judul', 48)}`;
+  }
+
+  if (artifact.kind === 'table') {
+    const insight = tableInsight(artifact);
+    return insight || `Tabel ${safeText(artifact.title || 'tanpa judul', 'tanpa judul', 48)}`;
+  }
+
+  return safeText(artifact.title || JSON.stringify(artifact), 'Artefak ringkas tidak tersedia.', 180);
+}
+
+function candidateTitle(component = {}, artifact = null, fallbackIndex = 1) {
+  return safeText(
+    artifact?.title
+      || component?.title
+      || component?.metric
+      || component?.query?.title
+      || `Temuan ${fallbackIndex}`,
+    `Temuan ${fallbackIndex}`,
+    80,
+  );
+}
+
+function candidateIdForComponent(component = {}, fallbackIndex = 1) {
+  const templateId = normalizeTemplateId(
+    component?.metric
+    || component?.title
+    || component?.query?.measure
+    || component?.query?.title
+    || '',
+  );
+  if (templateId) {
+    return `finding_${templateId}_${fallbackIndex}`;
+  }
+
+  const base = normalizeKeyText(component?.query?.title || component?.title || component?.query?.measure || `temuan_${fallbackIndex}`)
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+  return `finding_${base || fallbackIndex}`;
+}
+
+function recommendedVisualForArtifact(artifact = {}) {
+  if (artifact.kind === 'metric') {
+    return 'metric';
+  }
+  if (artifact.kind === 'table') {
+    return 'table';
+  }
+  return safeText(artifact.chart_type || 'chart', 'chart', 16).toLowerCase();
+}
+
+function inferWhyItMatters(artifact = {}) {
+  const title = safeText(artifact.title || 'visual ini', 'visual ini', 64).toLowerCase();
+  const evidence = artifactEvidenceSummary(artifact).toLowerCase();
+  if (title.includes('omzet') || title.includes('revenue')) {
+    return evidence.includes('turun')
+      ? 'pendapatan utama sedang melemah, jadi user perlu melihat seberapa besar pelemahan itu dan kapan mulai terjadi'
+      : 'pendapatan utama adalah indikator pertama yang paling cepat menunjukkan kesehatan bisnis pada periode ini';
+  }
+  if (title.includes('untung') || title.includes('profit') || title.includes('laba')) {
+    return 'penjualan yang naik belum tentu menghasilkan keuntungan, jadi visual ini menunjukkan apakah pertumbuhan benar-benar sehat';
+  }
+  if (title.includes('margin')) {
+    return 'margin membantu membedakan bisnis yang sekadar ramai dari bisnis yang benar-benar efisien';
+  }
+  if (title.includes('produk')) {
+    return 'peringkat produk membantu user melihat konsentrasi penjualan dan menentukan produk mana yang layak diprioritaskan';
+  }
+  if (title.includes('cabang')) {
+    return 'perbandingan cabang membantu menunjukkan area operasional mana yang paling kuat dan mana yang perlu perhatian';
+  }
+  if (title.includes('trend') || title.includes('tren')) {
+    return evidence.includes('stabil')
+      ? 'tren waktu dipakai untuk memastikan performa tidak hanya terlihat besar, tetapi juga konsisten'
+      : 'tren waktu dipakai supaya user bisa melihat arah perubahan dan momen puncak atau pelemahannya';
+  }
+  return 'Visual ini dipilih karena memberi konteks pendukung untuk keputusan bisnis pada periode yang diminta.';
+}
+
+function inferPriorityForArtifact(artifact = {}, index = 0) {
+  if (index === 0) {
+    return 'primary';
+  }
+  const title = safeText(artifact.title || '', '', 64).toLowerCase();
+  if (title.includes('omzet') || title.includes('profit') || title.includes('margin') || title.includes('trend')) {
+    return 'primary';
+  }
+  return 'supporting';
+}
+
+function normalizeAnalysisFinding(raw = {}, fallback = {}) {
+  const priority = safeText(raw.priority || fallback.priority || 'supporting', 'supporting', 16).toLowerCase();
+  return {
+    id: safeText(raw.id || fallback.id || generateId(), generateId(), 64),
+    candidate_id: safeText(raw.candidate_id || fallback.candidate_id || '', fallback.candidate_id || '', 64),
+    title: safeText(raw.title || fallback.title || '', fallback.title || '', 96),
+    artifact_key: safeText(raw.artifact_key || fallback.artifact_key || '', fallback.artifact_key || '', 120),
+    insight: safeText(raw.insight || fallback.insight || '', fallback.insight || '', 220),
+    evidence: safeText(raw.evidence || fallback.evidence || '', fallback.evidence || '', 220),
+    why_it_matters: safeText(raw.why_it_matters || fallback.why_it_matters || '', fallback.why_it_matters || '', 220),
+    recommended_visual: safeText(raw.recommended_visual || fallback.recommended_visual || 'chart', fallback.recommended_visual || 'chart', 24).toLowerCase(),
+    priority: priority === 'primary' ? 'primary' : 'supporting',
+  };
+}
+
+function buildDeterministicAnalysisBrief({ goal, scope, candidates = [] }) {
+  const strongCandidates = candidates.filter((candidate) => candidate?.artifact && !artifactLooksEmpty(candidate.artifact)).slice(0, 6);
+  const findings = strongCandidates.map((candidate, index) => normalizeAnalysisFinding({}, {
+    id: candidate.finding_id || candidateIdForComponent(candidate.component, index + 1),
+    candidate_id: candidate.candidate_id,
+    title: candidateTitle(candidate.component, candidate.artifact, index + 1),
+    artifact_key: artifactSemanticKey(candidate.artifact) || '',
+    insight: artifactEvidenceSummary(candidate.artifact),
+    evidence: candidate.evidence,
+    why_it_matters: inferWhyItMatters(candidate.artifact),
+    recommended_visual: recommendedVisualForArtifact(candidate.artifact),
+    priority: inferPriorityForArtifact(candidate.artifact, index),
+  }));
+
+  return {
+    headline: findings[0]?.insight || 'Belum ada temuan dashboard yang cukup kuat.',
+    business_goal: safeText(goal || 'Dashboard bisnis', 'Dashboard bisnis', 140),
+    time_scope: safeText(scope?.time_period || '30 hari terakhir', '30 hari terakhir', 64),
+    findings,
+  };
+}
+
+async function runAnalystAgent({ tenantId, userId, goal, scope, components, trace, memory, hooks = null, signal = null }) {
+  throwIfDashboardAborted(signal);
+  const analystStepId = `analyst_${Date.now()}`;
+  emitTimelineEvent(hooks, {
+    id: analystStepId,
+    status: 'pending',
+    title: 'Raka menyusun temuan utama sebelum dashboard dibuat',
+    agent: 'analyst',
+  });
+
+  const candidates = [];
+  const dedupedComponents = dedupeComponents(Array.isArray(components) ? components : []).slice(0, MAX_WIDGETS);
+  for (let index = 0; index < dedupedComponents.length; index += 1) {
+    const component = dedupedComponents[index];
+    const call = toolCallFromComponent(component, scope);
+    if (!call) {
+      continue;
+    }
+    const execution = executeToolCall({ tenantId, userId, call });
+    const artifact = (execution.artifacts || []).find((item) => !artifactLooksEmpty(item));
+    if (!artifact) {
+      continue;
+    }
+    const candidateId = safeText(`${call.tool}_${normalizeTemplateId(call.args?.template_id || component.metric || component.title || '') || index + 1}`, `candidate_${index + 1}`, 64);
+    candidates.push({
+      candidate_id: candidateId,
+      finding_id: candidateIdForComponent(component, index + 1),
+      component,
+      call,
+      query: execution.query || call.args || null,
+      artifact,
+      evidence: artifactEvidenceSummary(artifact),
+    });
+    pushTrace(trace, {
+      step: `analyst:${call.tool}`,
+      candidate_id: candidateId,
+      title: artifact.title || component.title || null,
+    });
+  }
+
+  const fallbackBrief = buildDeterministicAnalysisBrief({
+    goal,
+    scope,
+    candidates,
+  });
+
+  if (candidates.length === 0) {
+    emitTimelineEvent(hooks, {
+      id: analystStepId,
+      status: 'error',
+      title: 'Raka belum menemukan temuan yang cukup kuat dari dataset',
+      agent: 'analyst',
+    });
+    memory.steps.push({
+      agent: 'analyst',
+      source: 'fallback',
+      findings: 0,
+    });
+    return {
+      ok: true,
+      source: 'fallback',
+      brief: fallbackBrief,
+      candidates,
+    };
+  }
+
+  const response = await generateWithGeminiTools({
+    systemPrompt: [
+      VISTARA_SYSTEM_PROMPT,
+      'Kamu adalah Raka, analyst agent untuk dashboard bisnis.',
+      'Tugasmu memilih temuan yang paling layak ditampilkan di dashboard berdasarkan hasil query nyata.',
+      'Setiap finding harus menjelaskan insight, evidence, kenapa itu penting, dan visual yang paling cocok.',
+      'Jangan membuat temuan di luar kandidat yang tersedia.',
+      'Wajib gunakan function call submit_analysis_brief.',
+    ].join(' '),
+    userPrompt: JSON.stringify({
+      goal,
+      scope,
+      candidates: candidates.map((candidate) => ({
+        candidate_id: candidate.candidate_id,
+        title: candidateTitle(candidate.component, candidate.artifact),
+        evidence: candidate.evidence,
+        query: candidate.query,
+        artifact: compactArtifacts([candidate.artifact])[0] || null,
+      })),
+    }),
+    tools: ANALYST_TOOL_DECLARATIONS,
+    temperature: 0.1,
+    maxOutputTokens: ANALYST_MAX_OUTPUT_TOKENS,
+    thinkingBudget: ANALYST_THINKING_BUDGET,
+    functionCallingMode: 'ANY',
+    allowedFunctionNames: ['submit_analysis_brief'],
+    signal,
+  });
+
+  if (!response.ok) {
+    emitTimelineEvent(hooks, {
+      id: analystStepId,
+      status: 'done',
+      title: `Raka memakai brief fallback (${fallbackBrief.findings.length} temuan)`,
+      agent: 'analyst',
+    });
+    memory.steps.push({
+      agent: 'analyst',
+      source: 'fallback',
+      findings: fallbackBrief.findings.length,
+      reason: response.reason,
+    });
+    return {
+      ok: true,
+      source: 'fallback',
+      brief: fallbackBrief,
+      candidates,
+    };
+  }
+
+  const payload = (response.functionCalls || []).find((call) => call.name === 'submit_analysis_brief')?.args
+    || response.data
+    || null;
+  const rawFindings = Array.isArray(payload?.findings) ? payload.findings : [];
+  const candidateMap = new Map(candidates.map((candidate) => [candidate.candidate_id, candidate]));
+  const normalizedFindings = rawFindings
+    .map((finding, index) => {
+      const candidate = candidateMap.get(String(finding?.candidate_id || '').trim()) || candidates[index] || null;
+      if (!candidate) {
+        return null;
+      }
+      return normalizeAnalysisFinding(finding, {
+        id: candidate.finding_id,
+        candidate_id: candidate.candidate_id,
+        title: candidateTitle(candidate.component, candidate.artifact, index + 1),
+        artifact_key: artifactSemanticKey(candidate.artifact) || '',
+        insight: artifactEvidenceSummary(candidate.artifact),
+        evidence: candidate.evidence,
+        why_it_matters: inferWhyItMatters(candidate.artifact),
+        recommended_visual: recommendedVisualForArtifact(candidate.artifact),
+        priority: inferPriorityForArtifact(candidate.artifact, index),
+      });
+    })
+    .filter(Boolean)
+    .slice(0, 6);
+
+  const brief = normalizedFindings.length > 0
+    ? {
+        headline: safeText(payload?.headline || normalizedFindings[0]?.insight || fallbackBrief.headline, fallbackBrief.headline, 220),
+        business_goal: safeText(payload?.business_goal || goal || fallbackBrief.business_goal, fallbackBrief.business_goal, 180),
+        time_scope: safeText(payload?.time_scope || scope?.time_period || fallbackBrief.time_scope, fallbackBrief.time_scope, 64),
+        findings: normalizedFindings,
+      }
+    : fallbackBrief;
+
+  emitTimelineEvent(hooks, {
+    id: analystStepId,
+    status: 'done',
+    title: `Raka menemukan ${brief.findings.length} insight untuk dashboard`,
+    agent: 'analyst',
+  });
+  memory.steps.push({
+    agent: 'analyst',
+    source: normalizedFindings.length > 0 ? 'gemini_tool_call' : 'fallback',
+    findings: brief.findings.length,
+  });
+
+  return {
+    ok: true,
+    source: normalizedFindings.length > 0 ? 'gemini_tool_call' : 'fallback',
+    brief,
+    candidates,
+  };
+}
+
+function selectComponentsFromAnalystBrief(components = [], analyst = null) {
+  const findings = Array.isArray(analyst?.brief?.findings) ? analyst.brief.findings : [];
+  if (findings.length === 0) {
+    return components;
+  }
+
+  const componentMap = new Map(
+    (Array.isArray(analyst?.candidates) ? analyst.candidates : [])
+      .map((candidate) => [candidate.candidate_id, candidate.component]),
+  );
+
+  const selected = findings
+    .map((finding) => componentMap.get(finding.candidate_id))
+    .filter(Boolean);
+
+  return selected.length > 0 ? dedupeComponents(selected).slice(0, MAX_WIDGETS) : components;
+}
+
+function supportingTemplateIdsFromAnalystBrief(analysisBrief = null) {
+  return Array.from(new Set(
+    (Array.isArray(analysisBrief?.findings) ? analysisBrief.findings : [])
+      .filter((finding) => finding.priority === 'supporting')
+      .map((finding) => findingTemplateKey(finding))
+      .filter(Boolean),
+  ));
+}
+
+function findingTemplateKey(finding = {}) {
+  const visual = safeText(finding.recommended_visual || '', '', 24).toLowerCase();
+  const insight = `${finding.insight || ''} ${finding.evidence || ''}`.toLowerCase();
+  if (visual === 'metric' && /margin/.test(insight)) return 'margin_percentage';
+  if (visual === 'metric' && /(untung|profit|laba)/.test(insight)) return 'total_profit';
+  if (visual === 'metric' && /(biaya|expense)/.test(insight)) return 'total_expense';
+  if (/produk/.test(insight)) return 'top_products';
+  if (/cabang/.test(insight)) return 'branch_performance';
+  if (visual === 'line' || /trend|tren|harian|mingguan|bulanan/.test(insight)) return 'revenue_trend';
+  return 'total_revenue';
+}
+
+function matchFindingForWidget(widget = {}, analysisBrief = null) {
+  const findings = Array.isArray(analysisBrief?.findings) ? analysisBrief.findings : [];
+  if (findings.length === 0) {
+    return null;
+  }
+
+  const widgetKey = widgetCoverageKey(widget);
+  const widgetTitle = normalizeLayoutTitle(widget?.title || widget?.artifact?.title);
+
+  return findings.find((finding) => {
+    const candidateKey = normalizeTemplateId(finding.candidate_id || '') || findingTemplateKey(finding);
+    const titleKey = normalizeLayoutTitle(finding.insight || '');
+    return candidateKey === widgetKey || (widgetTitle && titleKey && titleKey.includes(widgetTitle));
+  }) || null;
+}
+
+function annotateWidgetsWithFindings(widgets = [], analysisBrief = null) {
+  return widgets.map((widget) => {
+    const finding = matchFindingForWidget(widget, analysisBrief);
+    if (!finding) {
+      return widget;
+    }
+    return {
+      ...widget,
+      finding_id: finding.id,
+      rationale: finding.why_it_matters,
+      importance: finding.priority,
+    };
+  });
+}
+
+function attachAnalysisBriefToWidgets(input = [], analysisBriefArg = null) {
+  if (Array.isArray(input)) {
+    return annotateWidgetsWithFindings(input, analysisBriefArg);
+  }
+
+  const widgets = Array.isArray(input?.widgets) ? input.widgets : [];
+  const analysisBrief = input?.analysisBrief || analysisBriefArg || null;
+  return annotateWidgetsWithFindings(widgets, analysisBrief);
+}
+
+function buildDashboardSummaryFromBrief({ analysisBrief = null, scope = {} }) {
+  const findings = Array.isArray(analysisBrief?.findings) ? analysisBrief.findings.filter(Boolean) : [];
+  if (findings.length === 0) {
+    return null;
+  }
+
+  const primary = findings.find((finding) => finding.priority === 'primary') || findings[0];
+  const supporting = findings.filter((finding) => finding.id !== primary.id).slice(0, 2);
+  const primaryTitle = safeText(primary.title || 'fokus utama', 'fokus utama', 96);
+  const firstParagraph = [
+    `Dashboard ini memusatkan perhatian pada ${primaryTitle.toLowerCase()} karena ${safeText(primary.why_it_matters, 'temuan ini paling mempengaruhi keputusan bisnis pada periode ini.', 180).toLowerCase()}`,
+    safeText(primary.insight, 'Temuan utama belum tersedia.', 220),
+  ].filter(Boolean).join(' ').trim();
+  if (supporting.length === 0) {
+    return firstParagraph;
+  }
+
+  const secondParagraph = supporting
+    .map((finding) => {
+      const title = safeText(finding.title || finding.recommended_visual || 'visual pendukung', 'visual pendukung', 96);
+      const rationale = safeText(finding.why_it_matters, '', 160).toLowerCase();
+      const evidence = safeText(finding.insight || finding.evidence || '', '', 180);
+      return `${title} ikut ditampilkan untuk ${rationale}. ${evidence}`.trim();
+    })
+    .join(' ');
+
+  return `${firstParagraph}\n\n${safeText(secondParagraph, '', 280)}`.trim();
+}
+
+function buildDashboardAnswerFromBrief(analysisBrief = null, scope = {}) {
+  return buildDashboardSummaryFromBrief({ analysisBrief, scope });
+}
+
 function defaultPlannerSteps(components) {
   const catalog = componentCatalog(components);
   const top = catalog.slice(0, 4).map((entry) => entry.title).join(', ');
@@ -1895,7 +2391,7 @@ function throwIfDashboardAborted(signal = null) {
   }
 }
 
-async function runPlannerAgent({ goal, scope, components, trace, memory, hooks = null, signal = null }) {
+async function runPlannerAgent({ goal, scope, components, analysisBrief = null, trace, memory, hooks = null, signal = null }) {
   throwIfDashboardAborted(signal);
   const fallback = defaultPlannerSteps(components);
   const catalog = componentCatalog(components);
@@ -1930,6 +2426,7 @@ async function runPlannerAgent({ goal, scope, components, trace, memory, hooks =
       scope,
       components: catalog,
       eda_profile: edaProfile,
+      analysis_brief: analysisBrief,
       constraints: {
         max_steps: 5,
         must_focus_on_data_non_empty: true,
@@ -2024,7 +2521,7 @@ async function runPlannerAgent({ goal, scope, components, trace, memory, hooks =
   };
 }
 
-function runTemplateComponentsDeterministic({ tenantId, userId, components, scope, trace, hooks = null }) {
+function runTemplateComponentsDeterministic({ tenantId, userId, components, scope, analysisBrief = null, trace, hooks = null }) {
   const calls = [];
   const artifactGroups = [];
   let adjustedPeriodCount = 0;
@@ -2079,7 +2576,7 @@ function runTemplateComponentsDeterministic({ tenantId, userId, components, scop
     });
   }
 
-  const built = buildWidgetsFromArtifacts({ artifacts: artifactGroups, calls, components });
+  const built = buildWidgetsFromArtifacts({ artifacts: artifactGroups, calls, components, analysisBrief });
 
   return {
     ok: true,
@@ -2093,7 +2590,20 @@ function runTemplateComponentsDeterministic({ tenantId, userId, components, scop
   };
 }
 
-async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, scope, components, planner, trace, memory, hooks = null, signal = null }) {
+async function runWorkerAgentWithGemini({
+  tenantId,
+  userId,
+  dashboard,
+  goal,
+  scope,
+  components,
+  planner,
+  analysisBrief = null,
+  trace,
+  memory,
+  hooks = null,
+  signal = null,
+}) {
   const toolHistory = [];
   const callRecords = [];
   const artifactGroups = [];
@@ -2117,6 +2627,7 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
       goal,
       scope,
       planner_steps: planner.steps,
+      analysis_brief: analysisBrief,
       dashboard_id: dashboard.id,
       available_components: componentCatalog(components),
       eda_profile: edaProfile,
@@ -2142,6 +2653,7 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
         'Jangan panggil read_dashboard_template lebih dari sekali.',
         'Jangan jalankan query/template yang sama berulang.',
         'Gunakan kebijakan balanced dashboard: utamakan 1 halaman, gunakan halaman 2 hanya jika ada >6 widget kuat atau pemisahan KPI vs tren/ranking memang membuat dashboard lebih mudah dibaca.',
+        'Pilih widget terutama dari analysis_brief. Jangan tampilkan visual yang tidak punya alasan bisnis yang jelas.',
         'Saat finalize_dashboard, sertakan layout_plan bila perlu. Layout_plan boleh menentukan page/x/y/w/h per widget, tetapi hanya untuk widget yang benar-benar kuat dan berguna.',
         'Setelah widget unik yang cukup terkumpul, segera finalize_dashboard.',
         'Panggil finalize_dashboard saat cukup data terkumpul.',
@@ -2377,6 +2889,7 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
       calls: callRecords,
       components,
       layoutPlan: finalLayoutPlan,
+      analysisBrief,
     });
 
     emitDashboardPatch(hooks, {
@@ -2403,6 +2916,7 @@ async function runWorkerAgentWithGemini({ tenantId, userId, dashboard, goal, sco
     calls: callRecords,
     components,
     layoutPlan: finalLayoutPlan,
+    analysisBrief,
   });
 
   memory.steps.push({
@@ -2685,6 +3199,151 @@ function buildDashboardFindings({ artifacts = [], scope = {} }) {
   return `Belum ada temuan dashboard yang cukup kuat untuk diringkas pada periode ${safeText(scope.time_period || 'yang diminta', 'yang diminta', 48)}.`;
 }
 
+function findingSortRank(artifact = {}) {
+  const semantic = artifactSemanticKey(artifact);
+  if (semantic === 'total_revenue') return 0;
+  if (semantic === 'total_profit') return 1;
+  if (semantic === 'margin_percentage') return 2;
+  if (semantic === 'revenue_trend') return 3;
+  if (semantic === 'top_products') return 4;
+  if (semantic === 'branch_performance') return 5;
+  if (semantic === 'total_expense') return 6;
+  if (artifact.kind === 'metric') return 7;
+  if (artifact.kind === 'chart') return 8;
+  if (artifact.kind === 'table') return 9;
+  return 10;
+}
+
+function findingWhyItMatters(artifact = {}) {
+  const semantic = artifactSemanticKey(artifact);
+  switch (semantic) {
+    case 'total_revenue':
+      return 'agar user langsung tahu skala omzet pada periode ini sebelum masuk ke rincian lain';
+    case 'total_profit':
+      return 'agar user bisa membedakan penjualan yang ramai dengan hasil bersih yang benar-benar tersisa';
+    case 'margin_percentage':
+      return 'agar efisiensi tetap terlihat, bukan hanya angka omzet';
+    case 'revenue_trend':
+      return 'agar pola naik turun harian dan titik puncak cepat terbaca';
+    case 'top_products':
+      return 'agar produk yang paling mendorong omzet bisa dikenali tanpa membuka tabel mentah';
+    case 'branch_performance':
+      return 'agar cabang yang paling kuat atau tertinggal bisa langsung dibandingkan';
+    case 'total_expense':
+      return 'agar tekanan biaya tidak tertutup oleh angka penjualan';
+    default:
+      if (artifact.kind === 'table') {
+        return 'agar urutan kontributor utama tetap mudah dibaca oleh user non-teknis';
+      }
+      if (artifact.kind === 'chart') {
+        return 'agar perubahan pola lebih mudah terlihat daripada hanya membaca angka';
+      }
+      return 'agar insight utama tetap cepat dipahami';
+  }
+}
+
+function findingEvidence(artifact = {}, scope = {}) {
+  const semantic = artifactSemanticKey(artifact);
+  if (artifact.kind === 'metric') {
+    const rawValue = parseArtifactNumber(artifact.raw_value ?? artifact.value);
+    return {
+      metric_key: semantic,
+      period: safeText(scope.time_period || 'periode aktif', 'periode aktif', 48),
+      value: rawValue === null
+        ? safeText(artifact.value || '-', '-', 32)
+        : formatInsightNumber(rawValue, {
+            currency: !artifactLooksPercent(artifact),
+            percent: artifactLooksPercent(artifact),
+          }),
+      delta: safeText(artifact.delta || '', '', 48) || null,
+    };
+  }
+
+  if (artifact.kind === 'chart') {
+    const series = Array.isArray(artifact.series) ? artifact.series : [];
+    const values = (series[0]?.values || []).map((value) => Number(value || 0)).filter((value) => Number.isFinite(value));
+    const labels = Array.isArray(artifact.labels) ? artifact.labels : [];
+    const latestValue = values.length > 0 ? values[values.length - 1] : null;
+    const peakValue = values.length > 0 ? Math.max(...values) : null;
+    const peakIndex = peakValue === null ? -1 : values.indexOf(peakValue);
+    return {
+      metric_key: semantic,
+      period: safeText(scope.time_period || 'periode aktif', 'periode aktif', 48),
+      latest_label: safeText(labels[values.length - 1] || '', '', 40) || null,
+      latest_value: latestValue === null ? null : formatInsightNumber(latestValue, {
+        currency: !artifactLooksPercent(artifact),
+        percent: artifactLooksPercent(artifact),
+      }),
+      peak_label: safeText(labels[peakIndex] || '', '', 40) || null,
+      peak_value: peakValue === null ? null : formatInsightNumber(peakValue, {
+        currency: !artifactLooksPercent(artifact),
+        percent: artifactLooksPercent(artifact),
+      }),
+    };
+  }
+
+  if (artifact.kind === 'table') {
+    const topRow = Array.isArray(artifact.rows) ? artifact.rows[0] || null : null;
+    const leader = safeText(topRow?.name || topRow?.label || topRow?.branch || topRow?.product || '', '', 40) || null;
+    const rawValue = parseArtifactNumber(
+      topRow?.value ?? topRow?.total_revenue ?? topRow?.revenue ?? topRow?.total_profit ?? topRow?.profit,
+    );
+    return {
+      metric_key: semantic,
+      period: safeText(scope.time_period || 'periode aktif', 'periode aktif', 48),
+      leader,
+      leader_value: rawValue === null ? null : formatInsightNumber(rawValue),
+    };
+  }
+
+  return {
+    metric_key: semantic,
+    period: safeText(scope.time_period || 'periode aktif', 'periode aktif', 48),
+  };
+}
+
+function buildFindingFromArtifact(artifact = {}, scope = {}, index = 0) {
+  const insight = metricClause(artifact)
+    || chartInsight(artifact)
+    || tableInsight(artifact)
+    || `Pantau ${safeText(artifact.title || 'visual ini', 'visual ini', 48)} untuk membaca perubahan utama pada ${safeText(scope.time_period || 'periode aktif', 'periode aktif', 48)}.`;
+  return {
+    id: `finding_${index + 1}`,
+    candidate_id: artifactSemanticKey(artifact) || normalizeKeyText(artifact.title || '') || `candidate_${index + 1}`,
+    insight,
+    evidence: findingEvidence(artifact, scope),
+    why_it_matters: findingWhyItMatters(artifact),
+    recommended_visual: artifact.kind === 'chart'
+      ? safeText(artifact.chart_type || 'chart', 'chart', 24)
+      : artifact.kind === 'table'
+        ? 'table'
+        : 'metric',
+    priority: findingSortRank(artifact) <= 3 || index === 0 ? 'primary' : 'supporting',
+    title: safeText(artifact.title || `Temuan ${index + 1}`, `Temuan ${index + 1}`, 80),
+    artifact_key: artifactSemanticKey(artifact) || normalizeKeyText(artifact.title || ''),
+  };
+}
+
+function buildAnalysisBrief({ goal = '', artifacts = [], scope = {} }) {
+  const rankedArtifacts = dedupeArtifacts(artifacts)
+    .filter((artifact) => artifact && !artifactLooksEmpty(artifact))
+    .sort((left, right) => findingSortRank(left) - findingSortRank(right))
+    .slice(0, MAX_WIDGETS);
+
+  const findings = rankedArtifacts.map((artifact, index) => buildFindingFromArtifact(artifact, scope, index));
+  if (findings.length === 0) {
+    return null;
+  }
+
+  return {
+    headline: findings[0]?.insight || null,
+    business_goal: safeText(goal || 'Ringkas performa bisnis', 'Ringkas performa bisnis', 140),
+    time_scope: safeText(scope.time_period || 'periode aktif', 'periode aktif', 48),
+    findings,
+  };
+}
+
+
 async function reviewArtifactsWithPython(artifacts) {
   return runPythonSnippet({
     code: PYTHON_REVIEW_CODE,
@@ -2934,10 +3593,25 @@ export async function runDashboardAgent({
     component_count: components.length,
   });
 
-  const planner = await runPlannerAgent({
+  const analyst = await runAnalystAgent({
+    tenantId,
+    userId,
     goal,
     scope,
     components,
+    trace,
+    memory,
+    hooks,
+    signal,
+  });
+  const dashboardComponents = selectComponentsFromAnalystBrief(components, analyst);
+  const analystSupportingTemplateIds = supportingTemplateIdsFromAnalystBrief(analyst.brief);
+
+  const planner = await runPlannerAgent({
+    goal,
+    scope,
+    components: dashboardComponents,
+    analysisBrief: analyst.brief,
     trace,
     memory,
     hooks,
@@ -2950,8 +3624,9 @@ export async function runDashboardAgent({
     dashboard,
     goal,
     scope,
-    components,
+    components: dashboardComponents,
     planner,
+    analysisBrief: analyst.brief,
     trace,
     memory,
     hooks,
@@ -2991,10 +3666,12 @@ export async function runDashboardAgent({
     userId,
     scope,
     components,
-    widgets: worker.widgets,
+    widgets: attachAnalysisBriefToWidgets(worker.widgets, analyst.brief),
+    analysisBrief: analyst.brief,
     layoutPlan: worker.layoutPlan,
     trace,
     hooks,
+    preferredTemplateIds: analystSupportingTemplateIds,
   });
   let reviewer = await runReviewerAgent({
     goal,
@@ -3033,10 +3710,14 @@ export async function runDashboardAgent({
         scope,
         components,
         widgets: directedWidgets,
+        analysisBrief: analyst.brief,
         layoutPlan: worker.layoutPlan,
         trace,
         hooks,
-        preferredTemplateIds: reviewer.result?.directives?.add_templates || [],
+        preferredTemplateIds: [
+          ...analystSupportingTemplateIds,
+          ...(reviewer.result?.directives?.add_templates || []),
+        ],
       });
       reviewer = await runReviewerAgent({
         goal,
@@ -3077,7 +3758,10 @@ export async function runDashboardAgent({
 
   const reviewerNeedsAttention = reviewerBlockingIssue?.reason === 'dashboard_visual_review_failed';
 
-  let baseAnswer = buildDashboardFindings({
+  let baseAnswer = buildDashboardSummaryFromBrief({
+    analysisBrief: analyst.brief,
+    scope,
+  }) || buildDashboardFindings({
     artifacts: reviewedDraft.artifacts,
     scope,
   }) || worker.summary || 'Dashboard siap ditinjau di canvas.';
@@ -3091,6 +3775,7 @@ export async function runDashboardAgent({
     note: baseAnswer,
     widgets: reviewedDraft.widgets,
     artifacts: reviewedDraft.artifacts,
+    analysis_brief: analyst.brief,
     changed_widgets: reviewedDraft.widgets.map((widget) => ({
       id: widget.id,
       title: widget.title || widget.artifact?.title || 'Widget',
@@ -3102,6 +3787,7 @@ export async function runDashboardAgent({
     answer: baseAnswer,
     widgets: reviewedDraft.widgets,
     artifacts: reviewedDraft.artifacts,
+    analysis_brief: analyst.brief,
     dashboard,
     presentation_mode: 'canvas',
     draft_status: reviewerNeedsAttention ? 'needs_review' : 'ready',
@@ -3112,6 +3798,11 @@ export async function runDashboardAgent({
       fallback_used: false,
       period_adjusted_steps: worker.adjustedPeriodCount,
       tool_calls: worker.calls.length,
+      analyst: {
+        ok: analyst.ok,
+        source: analyst.source,
+        findings: Array.isArray(analyst.brief?.findings) ? analyst.brief.findings.length : 0,
+      },
       planner: {
         ok: planner.ok,
         reason: planner.reason || null,

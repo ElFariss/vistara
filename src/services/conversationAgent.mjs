@@ -1,5 +1,5 @@
 import { generateId } from '../utils/ids.mjs';
-import { generateTextWithGemini, generateWithGeminiTools } from './gemini.mjs';
+import { generateWithGeminiTools } from './gemini.mjs';
 import { executeAnalyticsIntent } from './queryEngine.mjs';
 import { inspectDatasetQuestion, getDatasetProfile } from './dataProfile.mjs';
 import { repairLatestSourceIfNeeded } from './ingestion.mjs';
@@ -199,6 +199,37 @@ const SURFACE_INCOMPLETE_TAILS = [
   'mau',
   'akan',
   'bisa',
+  'sepertinya',
+  'kayaknya',
+  'mungkin',
+  'tolong',
+  'coba',
+  'memul',
+  'mul',
+  'lanjut',
+  'jelaskan',
+];
+
+const SURFACE_REPLY_TOOL_DECLARATIONS = [
+  {
+    name: 'reply_user',
+    description: 'Kirim jawaban final untuk user dalam satu pikiran yang utuh.',
+    parameters: {
+      type: 'object',
+      properties: {
+        answer: { type: 'string' },
+        reply_kind: { type: 'string', enum: ['smalltalk', 'capability', 'clarification'] },
+        complete: { type: 'boolean' },
+      },
+      required: ['answer', 'reply_kind', 'complete'],
+    },
+  },
+];
+
+const SURFACE_INCOMPLETE_PATTERNS = [
+  /\b(untuk|karena|agar|supaya|sepertinya|mungkin|kalau|jika|dengan|bahwa|dan|atau|jadi|mau|ingin|perlu|bisa|akan)\.$/i,
+  /\b(untuk|karena|agar|supaya|sepertinya|mungkin|kalau|jika)\s+[a-z]{1,6}\.$/i,
+  /\b(memul|memban|memba|menjel|mengar|melih|menyi|menunj|member)\.$/i,
 ];
 
 function normalizeSurfaceReplyText(value = '') {
@@ -230,7 +261,7 @@ function isValidSelfIdentificationReply(value = '') {
     || /^aku vira$/.test(normalized);
 }
 
-function looksLikeCompleteSurfaceReply(value = '') {
+function looksLikeCompleteSurfaceReply(value = '', { replyKind = 'smalltalk' } = {}) {
   const text = String(value || '').trim();
   if (!text) {
     return false;
@@ -251,7 +282,53 @@ function looksLikeCompleteSurfaceReply(value = '') {
     }
   }
 
+  if (/\b(untuk|karena|agar|supaya|sepertinya|mungkin|kalau|jika)\s+[a-z]{1,5}\.$/i.test(text)) {
+    return false;
+  }
+
+  if (/\b(memul|mul|lanjut|sepertinya)\.$/i.test(text)) {
+    return false;
+  }
+
+  for (const pattern of SURFACE_INCOMPLETE_PATTERNS) {
+    if (pattern.test(text)) {
+      return false;
+    }
+  }
+
+  if (replyKind === 'clarification' && !/[?]$/.test(text) && !/\b(bisa|mau|ingin|tolong|jelaskan|perjelas|metrik|periode|dashboard)\b/i.test(text)) {
+    return false;
+  }
+
+  if (!/[.!?…]$/.test(text)) {
+    return false;
+  }
+
   return true;
+}
+
+function extractSurfaceReplyPayload(result) {
+  const payload = (result.functionCalls || []).find((call) => call.name === 'reply_user')?.args
+    || result.data
+    || (typeof result.text === 'string' && result.text.trim()
+      ? {
+          answer: result.text,
+          reply_kind: 'smalltalk',
+          complete: looksLikeCompleteSurfaceReply(normalizeSurfaceReplyText(result.text)),
+        }
+      : null);
+
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  return {
+    answer: normalizeSurfaceReplyText(payload.answer || ''),
+    reply_kind: ['smalltalk', 'capability', 'clarification'].includes(String(payload.reply_kind || '').trim().toLowerCase())
+      ? String(payload.reply_kind || '').trim().toLowerCase()
+      : 'smalltalk',
+    complete: payload.complete === true,
+  };
 }
 
 async function classifyRoute({ message, history, datasetReady, agentState, userDisplayName }) {
@@ -353,6 +430,7 @@ async function generateSurfaceReply({ message, history, datasetReady, userDispla
     'Jawab natural dalam Bahasa Indonesia.',
     'Untuk sapaan atau obrolan ringan, balas dengan 1 kalimat singkat yang utuh.',
     'Untuk pertanyaan kemampuan, balas maksimal 2 kalimat pendek yang utuh.',
+    'Untuk pertanyaan yang masih kabur, balas dengan 1 pertanyaan klarifikasi yang utuh dan bisa langsung dijawab user.',
     'Jika dataset belum tersedia dan relevan, arahkan user untuk upload file atau gunakan demo dengan bahasa sederhana.',
     'Jangan menyebut agent internal lain kecuali bila diminta secara eksplisit.',
     'Jangan memanggil user dengan nama kecuali diminta secara eksplisit.',
@@ -368,25 +446,35 @@ async function generateSurfaceReply({ message, history, datasetReady, userDispla
     : `Pesan terbaru: ${message}`;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const result = await generateTextWithGemini({
+    const result = await generateWithGeminiTools({
       systemPrompt: [
         baseSystemPrompt,
+        'Wajib panggil fungsi reply_user untuk setiap jawaban.',
+        'Jawaban harus terasa selesai, bukan potongan kalimat.',
         attempt === 1
-          ? 'Pastikan jawaban berupa kalimat utuh, tidak terpotong, dan diakhiri tanda baca.'
+          ? 'Pastikan jawaban berupa satu pikiran utuh, kalimat lengkap, dan pertanyaan klarifikasi harus jelas serta bisa langsung dijawab user. Jangan berhenti di tengah frasa.'
           : '',
       ].filter(Boolean).join(' '),
       userPrompt,
-      temperature: attempt === 0 ? 0.65 : 0.5,
-      maxOutputTokens: attempt === 0 ? 180 : 220,
+      tools: SURFACE_REPLY_TOOL_DECLARATIONS,
+      temperature: attempt === 0 ? 0.45 : 0.25,
+      maxOutputTokens: attempt === 0 ? 220 : 280,
+      thinkingBudget: 128,
+      functionCallingMode: 'ANY',
+      allowedFunctionNames: ['reply_user'],
     });
 
-    if (!result.ok || !result.text) {
+    if (!result.ok) {
       throw classifyGeminiFailure(result, 'Layanan AI sedang bermasalah saat membalas percakapan.');
     }
 
-    const normalized = normalizeSurfaceReplyText(result.text);
-    if (looksLikeCompleteSurfaceReply(normalized)) {
-      return normalized;
+    const payload = extractSurfaceReplyPayload(result);
+    if (!payload) {
+      continue;
+    }
+
+    if (payload.complete === true && looksLikeCompleteSurfaceReply(payload.answer, { replyKind: payload.reply_kind })) {
+      return payload.answer;
     }
   }
 
@@ -477,7 +565,16 @@ async function buildAnalyticsIntent({ message, history, route, datasetProfile })
   };
 }
 
-function buildDraftDashboardPayload({ widgets = [], artifacts = [], dashboard = null, runId, note = '', status = 'drafting', savedDashboardId = null }) {
+function buildDraftDashboardPayload({
+  widgets = [],
+  artifacts = [],
+  dashboard = null,
+  runId,
+  note = '',
+  status = 'drafting',
+  savedDashboardId = null,
+  analysisBrief = null,
+}) {
   const normalizedWidgets = Array.isArray(widgets) ? widgets : [];
   const pages = normalizedWidgets.reduce((max, widget) => Math.max(max, Number(widget?.layout?.page || 1)), 1);
   return {
@@ -487,6 +584,7 @@ function buildDraftDashboardPayload({ widgets = [], artifacts = [], dashboard = 
     pages: Math.max(1, Number(pages || 1)),
     widgets: normalizedWidgets,
     artifacts: Array.isArray(artifacts) ? artifacts : [],
+    analysis_brief: analysisBrief && typeof analysisBrief === 'object' ? analysisBrief : null,
     saved_dashboard_id: savedDashboardId || dashboard?.id || null,
     name: dashboard?.name || 'Draft Dashboard',
     updated_at: new Date().toISOString(),
@@ -507,6 +605,7 @@ function emitDashboardProgressPatch({ hooks, runId, dashboard, patch, savedDashb
       note: patch.note,
       status: patch.status,
       savedDashboardId,
+      analysisBrief: patch.analysis_brief || null,
     }),
     changed_widgets: Array.isArray(patch.changed_widgets) ? patch.changed_widgets : [],
     page_count: Number(patch.page_count || 1),
@@ -896,6 +995,7 @@ export async function runConversationAgent({
             note: patch.note,
             status: patch.status,
             savedDashboardId: baseDashboard?.id || null,
+            analysisBrief: patch.analysis_brief || null,
           });
           updateConversationAgentState({
             tenantId,
@@ -928,6 +1028,7 @@ export async function runConversationAgent({
       note: dashboardResult.answer,
       status: 'ready',
       savedDashboardId: baseDashboard?.id || null,
+      analysisBrief: dashboardResult.analysis_brief || null,
     });
     const nextState = updateConversationAgentState({
       tenantId,

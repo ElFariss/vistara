@@ -156,6 +156,19 @@ function geminiToolPayload({ text = null, functionCalls = [] } = {}) {
   };
 }
 
+function surfaceReplyPayload(answer, { replyKind = 'smalltalk', complete = true } = {}) {
+  return geminiToolPayload({
+    functionCalls: [{
+      name: 'reply_user',
+      args: {
+        answer,
+        reply_kind: replyKind,
+        complete,
+      },
+    }],
+  });
+}
+
 function routePayload(action, overrides = {}) {
   return geminiToolPayload({
     functionCalls: [{
@@ -177,6 +190,27 @@ function routePayload(action, overrides = {}) {
 
 function createMinimalDashboardAgentResponses({ timePeriod = '30 hari terakhir' } = {}) {
   return [
+    geminiToolPayload({
+      functionCalls: [{
+        name: 'submit_analysis_brief',
+        args: {
+          headline: 'Omzet menjadi fokus utama pada periode ini.',
+          business_goal: 'Membuat dashboard ringkas dari dataset aktif.',
+          time_scope: timePeriod,
+          findings: [
+            {
+              id: 'finding_total_revenue',
+              candidate_id: 'query_template_total_revenue',
+              insight: 'Omzet menjadi temuan utama pada periode ini.',
+              evidence: 'Omzet menunjukkan sinyal bisnis utama yang paling cepat terbaca.',
+              why_it_matters: 'visual ini dipakai untuk menempatkan KPI utama di depan user lebih dulu',
+              recommended_visual: 'metric',
+              priority: 'primary',
+            },
+          ],
+        },
+      }],
+    }),
     geminiToolPayload({
       functionCalls: [{
         name: 'submit_plan',
@@ -265,7 +299,7 @@ test('processChatMessage allows hi as smalltalk through the agent runtime', asyn
   const { tenantId, userId } = seedTenantUser();
   await withMockGeminiResponses([
     routePayload('conversational', { reason: 'sapaan' }),
-    geminiPayloadFromText('Halo juga. Ada yang ingin Anda cek dari bisnis Anda?'),
+    surfaceReplyPayload('Halo juga. Ada yang ingin Anda cek dari bisnis Anda?'),
   ], async () => {
     try {
       const response = await processChatMessage({ tenantId, userId, message: 'hi' });
@@ -283,8 +317,8 @@ test('processChatMessage retries truncated Vira replies before persisting', asyn
   const { tenantId, userId } = seedTenantUser();
   await withMockGeminiResponses([
     routePayload('conversational', { reason: 'sapaan' }),
-    geminiPayloadFromText('Halo juga! Ada yang bisa Vira.'),
-    geminiPayloadFromText('Halo. Ada yang ingin Anda cek dari bisnis Anda?'),
+    surfaceReplyPayload('Halo juga! Ada yang bisa Vira.', { complete: false }),
+    surfaceReplyPayload('Halo. Ada yang ingin Anda cek dari bisnis Anda?'),
   ], async () => {
     try {
       const response = await processChatMessage({ tenantId, userId, message: 'hi' });
@@ -302,7 +336,7 @@ test("processChatMessage allows what's up as natural conversation", async () => 
   const { tenantId, userId } = seedTenantUser();
   await withMockGeminiResponses([
     routePayload('conversational', { reason: 'obrolan ringan' }),
-    geminiPayloadFromText('Lagi siap bantu analisis. Mau cek tren atau minta dashboard?'),
+    surfaceReplyPayload('Lagi siap bantu analisis. Mau cek tren atau minta dashboard?'),
   ], async () => {
     try {
       const response = await processChatMessage({ tenantId, userId, message: "what's up" });
@@ -316,11 +350,55 @@ test("processChatMessage allows what's up as natural conversation", async () => 
   });
 });
 
+test('processChatMessage returns a complete onboarding reply for capability questions', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  await withMockGeminiResponses([
+    routePayload('conversational', { reason: 'pertanyaan kemampuan awal' }),
+    surfaceReplyPayload('Mulainya gampang: upload file lewat tombol plus atau drag file ke chat, lalu tulis pertanyaan analisis yang Anda butuhkan.', {
+      replyKind: 'capability',
+    }),
+  ], async () => {
+    try {
+      const response = await processChatMessage({ tenantId, userId, message: 'cara mulainya gimana ya?' });
+
+      assert.equal(response.intent.intent, 'smalltalk');
+      assert.match(response.answer, /upload file|drag file|chat/i);
+      assert.match(response.answer, /[.!?]$/);
+    } finally {
+      cleanupTenant(tenantId);
+    }
+  });
+});
+
+test('processChatMessage retries incomplete clarification replies for follow-up prompts', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  await withMockGeminiResponses([
+    routePayload('ask_clarification', { reason: 'follow-up masih kabur' }),
+    surfaceReplyPayload('Mohon maaf, sepertinya.', {
+      replyKind: 'clarification',
+      complete: false,
+    }),
+    surfaceReplyPayload('Bagian mana yang ingin Anda ulang: cara mulai, analisis data, atau pembuatan dashboard?', {
+      replyKind: 'clarification',
+    }),
+  ], async () => {
+    try {
+      const response = await processChatMessage({ tenantId, userId, message: 'gimana gimana?' });
+
+      assert.equal(response.intent.intent, 'clarify');
+      assert.match(response.answer, /cara mulai|analisis data|dashboard/i);
+      assert.match(response.answer, /\?$/);
+    } finally {
+      cleanupTenant(tenantId);
+    }
+  });
+});
+
 test('processChatMessage allows acknowledgment prompts as conversation', async () => {
   const { tenantId, userId } = seedTenantUser();
   await withMockGeminiResponses([
     routePayload('conversational', { reason: 'respons positif' }),
-    geminiPayloadFromText('Siap. Kalau mau, saya lanjut bantu baca insight berikutnya.'),
+    surfaceReplyPayload('Siap. Kalau mau, saya lanjut bantu baca insight berikutnya.'),
   ], async () => {
     try {
       const response = await processChatMessage({ tenantId, userId, message: 'mantap' });
@@ -338,11 +416,11 @@ test('processChatMessage handles extended greetings through Gemini classificatio
   const { tenantId, userId } = seedTenantUser();
   await withMockGeminiResponses([
     routePayload('conversational', { reason: 'sapaan' }),
-    geminiPayloadFromText('Halo, ada yang ingin Anda tanyakan?'),
+    surfaceReplyPayload('Halo, ada yang ingin Anda tanyakan?'),
     routePayload('conversational', { reason: 'sapaan' }),
-    geminiPayloadFromText('Baik. Saya siap bantu membaca data Anda.'),
+    surfaceReplyPayload('Baik. Saya siap bantu membaca data Anda.'),
     routePayload('conversational', { reason: 'sapaan' }),
-    geminiPayloadFromText('Siap. Tinggal bilang insight apa yang ingin dicari.'),
+    surfaceReplyPayload('Siap. Tinggal bilang insight apa yang ingin dicari.'),
   ], async () => {
     try {
       const responses = [];
@@ -366,7 +444,9 @@ test('processChatMessage asks for clarification instead of throwing for unclear 
   const { tenantId, userId } = seedTenantUser();
   await withMockGeminiResponses([
     routePayload('ask_clarification', { reason: 'permintaan terlalu kabur' }),
-    geminiPayloadFromText('Bisa diperjelas sedikit? Misalnya metrik, periode, atau dashboard yang ingin Anda lihat.'),
+    surfaceReplyPayload('Bisa diperjelas sedikit? Misalnya metrik, periode, atau dashboard yang ingin Anda lihat.', {
+      replyKind: 'clarification',
+    }),
   ], async () => {
     try {
       const response = await processChatMessage({ tenantId, userId, message: 'asdfghjkl' });
@@ -491,7 +571,7 @@ test('chat stream keeps simple smalltalk free of timeline events', async () => {
 
     await withMockGeminiResponses([
       routePayload('conversational', { reason: 'sapaan' }),
-      geminiPayloadFromText('Halo. Ada yang ingin Anda cek dari bisnis Anda?'),
+      surfaceReplyPayload('Halo. Ada yang ingin Anda cek dari bisnis Anda?'),
     ], async () => {
       const res = await invokeRoute(router, 'POST', '/api/chat/stream', {
         user: { id: userId, tenant_id: tenantId },
@@ -508,6 +588,22 @@ test('chat stream keeps simple smalltalk free of timeline events', async () => {
       assert.equal(events.some((event) => event.type === 'timeline_start' || event.type === 'timeline_step'), false);
       assert.equal(events.at(-1)?.type, 'final');
     });
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('processChatMessage returns explicit AI error when Vira stays incomplete after retry', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    await assert.rejects(
+      () => withMockGeminiResponses([
+        routePayload('conversational', { reason: 'sapaan' }),
+        surfaceReplyPayload('Baik, untuk memul.', { complete: false }),
+        surfaceReplyPayload('Mohon maaf, sepertinya.', { complete: false }),
+      ], async () => processChatMessage({ tenantId, userId, message: 'cara mulainya gimana ya?' })),
+      (error) => error?.code === 'AI_SERVICE_UNAVAILABLE' && error?.reason === 'surface_reply_incomplete',
+    );
   } finally {
     cleanupTenant(tenantId);
   }
