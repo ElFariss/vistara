@@ -10,6 +10,7 @@ import { Router } from '../src/router.mjs';
 import { registerChatRoutes } from '../src/routes/chat.mjs';
 import { ingestUploadedSource } from '../src/services/ingestion.mjs';
 import { getChatHistory, processChatMessage } from '../src/services/chat.mjs';
+import { resetGeminiQuotaCooldown } from '../src/services/gemini.mjs';
 
 function uid(prefix) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
@@ -266,6 +267,7 @@ async function withMockGeminiResponses(responses, runTest) {
   const previousFetch = globalThis.fetch;
   const queue = [...responses];
 
+  resetGeminiQuotaCooldown();
   config.geminiApiKey = 'test-key';
   config.geminiModel = 'gemini-test';
   config.geminiModelLight = 'gemini-test-light';
@@ -288,6 +290,7 @@ async function withMockGeminiResponses(responses, runTest) {
   try {
     return await runTest();
   } finally {
+    resetGeminiQuotaCooldown();
     globalThis.fetch = previousFetch;
     config.geminiApiKey = previousGeminiApiKey;
     config.geminiModel = previousGeminiModel;

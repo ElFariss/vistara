@@ -49,6 +49,10 @@ export function getGeminiQuotaCooldownInfo() {
   };
 }
 
+export function resetGeminiQuotaCooldown() {
+  clearQuotaCooldown();
+}
+
 function buildPrompt(systemPrompt, userPrompt) {
   if (!systemPrompt) {
     return userPrompt;
