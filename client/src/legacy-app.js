@@ -2275,6 +2275,7 @@ async function ensureDashboard() {
     body: JSON.stringify({
       name: 'Dashboard Utama',
       config: getCanvasConfig(),
+      conversation_id: state.conversationId || null,
     }),
   });
 
@@ -3270,7 +3271,8 @@ function renderCanvas() {
 
 async function refreshDashboards() {
   try {
-    const response = await api('/api/dashboards');
+    const queryParams = state.conversationId ? `?conversation_id=${encodeURIComponent(state.conversationId)}` : '';
+    const response = await api(`/api/dashboards${queryParams}`);
     state.dashboards = normalizeDashboardCollection(response.dashboards || []);
     syncSelectedDashboard({ fallbackToFirst: true });
     renderDashboardList();
@@ -4644,6 +4646,7 @@ async function persistDraftDashboard() {
         body: JSON.stringify({
           name: draft.name || 'Dashboard Utama',
           config: getCanvasConfig(),
+          conversation_id: state.conversationId || null,
         }),
       });
     }

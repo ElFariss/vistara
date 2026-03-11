@@ -23,7 +23,8 @@ export function registerDashboardRoutes(router) {
     '/api/dashboards',
     async (ctx) => {
       ensureDefaultDashboard(ctx.user.tenant_id, ctx.user.id);
-      const dashboards = listDashboards(ctx.user.tenant_id, ctx.user.id);
+      const conversationId = ctx.query.get('conversation_id') || null;
+      const dashboards = listDashboards(ctx.user.tenant_id, ctx.user.id, { conversationId });
       return sendJson(ctx.res, 200, { ok: true, dashboards });
     },
     { auth: true },
@@ -53,7 +54,9 @@ export function registerDashboardRoutes(router) {
       if (body.config !== undefined && body.config !== null && !isDashboardConfigObject(body.config)) {
         return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'config dashboard harus berupa object.');
       }
-      const dashboard = createDashboard(ctx.user.tenant_id, ctx.user.id, body.name, body.config || null);
+      const dashboard = createDashboard(ctx.user.tenant_id, ctx.user.id, body.name, body.config || null, {
+        conversationId: body.conversation_id || null,
+      });
       return sendJson(ctx.res, 201, { ok: true, dashboard });
     },
     { auth: true },

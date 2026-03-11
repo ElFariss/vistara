@@ -23,6 +23,7 @@ function parseDashboard(row) {
   return {
     ...row,
     is_default: Boolean(row.is_default),
+    conversation_id: row.conversation_id || null,
     config: safeJsonParse(row.config_json, defaultDashboardConfig()),
   };
 }
@@ -74,7 +75,22 @@ export function ensureDefaultDashboard(tenantId, userId) {
   };
 }
 
-export function listDashboards(tenantId, userId) {
+export function listDashboards(tenantId, userId, options = {}) {
+  const conversationId = options.conversationId || null;
+
+  if (conversationId) {
+    const rows = all(
+      `
+        SELECT *
+        FROM dashboards
+        WHERE tenant_id = :tenant_id AND user_id = :user_id AND conversation_id = :conversation_id
+        ORDER BY is_default DESC, updated_at DESC
+      `,
+      { tenant_id: tenantId, user_id: userId, conversation_id: conversationId },
+    );
+    return rows.map(parseDashboard);
+  }
+
   const rows = all(
     `
       SELECT *
@@ -123,15 +139,16 @@ export function getLatestDashboard(tenantId, userId) {
   return parseDashboard(row);
 }
 
-export function createDashboard(tenantId, userId, name, config) {
+export function createDashboard(tenantId, userId, name, config, options = {}) {
   const id = generateId();
   const now = new Date().toISOString();
   const payload = config || defaultDashboardConfig();
+  const conversationId = options.conversationId || null;
 
   run(
     `
-      INSERT INTO dashboards (id, tenant_id, user_id, name, config_json, is_default, created_at, updated_at)
-      VALUES (:id, :tenant_id, :user_id, :name, :config_json, 0, :created_at, :updated_at)
+      INSERT INTO dashboards (id, tenant_id, user_id, name, config_json, is_default, conversation_id, created_at, updated_at)
+      VALUES (:id, :tenant_id, :user_id, :name, :config_json, 0, :conversation_id, :created_at, :updated_at)
     `,
     {
       id,
@@ -139,6 +156,7 @@ export function createDashboard(tenantId, userId, name, config) {
       user_id: userId,
       name: name || 'Dashboard Baru',
       config_json: JSON.stringify(payload),
+      conversation_id: conversationId,
       created_at: now,
       updated_at: now,
     },

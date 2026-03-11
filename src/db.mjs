@@ -306,6 +306,9 @@ export function initializeDatabase() {
   }
   db.exec(schema);
   ensureColumn('otp_codes', 'failed_attempts', 'failed_attempts INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('dashboards', 'conversation_id', 'conversation_id TEXT');
+  ensureColumn('conversations', 'last_message_at', 'last_message_at TEXT');
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_dashboards_conversation ON dashboards(conversation_id)'); } catch { /* index may exist */ }
   logger.info('database initialized', { dbPath: config.dbPath });
 }
 
