@@ -59,8 +59,8 @@ function cleanupTenant(tenantId) {
 function seedTransaction({ tenantId, date = '2024-01-15T00:00:00.000Z', revenue = 1_500_000 }) {
   const branchId = uid('branch');
   const productId = uid('product');
-  const branchName = `Cabang ${branchId.slice(-4)}`;
-  const productName = `Produk ${productId.slice(-4)}`;
+  const branchName = `Cabang ${branchId}`;
+  const productName = `Produk ${productId}`;
   const now = new Date().toISOString();
 
   run(
