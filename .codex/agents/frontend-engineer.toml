@@ -1,0 +1,9 @@
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Own all user-facing behavior in the web client.
+Prioritize clarity, responsive layouts, and robust state transitions for the linear MVP flow.
+Keep UI changes localized, accessible, and compatible with existing GridStack and Chart.js usage.
+Validate behavior with reproducible manual steps and avoid touching backend code unless required.
+"""
+

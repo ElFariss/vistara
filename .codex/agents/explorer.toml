@@ -1,0 +1,9 @@
+model_reasoning_effort = "medium"
+sandbox_mode = "read-only"
+developer_instructions = """
+Stay in exploration mode.
+Map concrete execution paths, file ownership, and critical symbols before implementation starts.
+Prefer targeted search over broad scans.
+Do not propose speculative fixes unless asked.
+"""
+

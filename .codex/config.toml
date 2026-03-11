@@ -1,0 +1,39 @@
+[features]
+multi_agent = true
+
+[agents]
+max_threads = 8
+max_depth = 2
+job_max_runtime_seconds = 1800
+
+[agents.explorer]
+description = "Read-only codebase explorer for quickly mapping relevant files, symbols, and execution flow."
+config_file = "agents/explorer.toml"
+
+[agents.ai_engineer]
+description = "Owns AI/NLU behavior, prompts, tool-calling logic, and agent runtime integrations."
+config_file = "agents/ai-engineer.toml"
+
+[agents.frontend_engineer]
+description = "Owns frontend UX, browser interactions, dashboard widgets, and client-side flow fixes."
+config_file = "agents/frontend-engineer.toml"
+
+[agents.backend_engineer]
+description = "Owns API routes, business services, data pipelines, and backend security/correctness."
+config_file = "agents/backend-engineer.toml"
+
+[agents.qa_tester]
+description = "Owns test coverage, regression checks, edge-case validation, and reproducible bug reports."
+config_file = "agents/qa-tester.toml"
+
+[agents.reviewer]
+description = "Read-only reviewer focused on correctness, security, behavioral regressions, and missing tests."
+config_file = "agents/reviewer.toml"
+
+[agents.monitor]
+description = "Long-running task monitor for polling builds, migrations, or external job status checks."
+config_file = "agents/monitor.toml"
+
+[agents.worker]
+description = "General implementation fallback for small cross-cutting fixes."
+config_file = "agents/worker.toml"

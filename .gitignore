@@ -5,6 +5,8 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 coverage
+.tmp/
+test-results/
 .env
 .env.local
 .env.production
@@ -17,3 +19,4 @@ data/uploads/*
 !data/uploads/.gitkeep
 __pycache__/
 *.pyc
+.blackboxcli/

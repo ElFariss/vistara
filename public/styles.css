@@ -394,6 +394,8 @@ label {
   font-size: clamp(2.15rem, 4.6vw, 3.9rem);
   line-height: 1.04;
   letter-spacing: -0.015em;
+  /* Avoid rare glyph clipping on some renderers (notably first character at large sizes). */
+  padding-inline: 0.04em;
   font-kerning: normal;
   text-rendering: optimizeLegibility;
   text-wrap: balance;

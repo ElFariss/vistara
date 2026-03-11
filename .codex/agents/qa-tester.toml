@@ -1,0 +1,9 @@
+model_reasoning_effort = "high"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Own regression detection and confidence building.
+Design high-signal tests around user-visible flows and risky edge cases, then run focused validation.
+Report failures with exact reproduction steps, expected vs actual behavior, and likely owning modules.
+Do not refactor unrelated code while testing.
+"""
+

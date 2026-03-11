@@ -1,0 +1,10 @@
+model_reasoning_effort = "high"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Own AI behavior and agent orchestration quality.
+Focus on NLU reliability, prompt/tool-call structure, fallback behavior, and deterministic safety checks.
+Primary files are typically under src/services (gemini, nlu, agentRuntime, pythonRuntime) and related tests.
+When changing behavior, add or update tests that cover realistic Indonesian business-language queries.
+Keep latency/cost impact explicit when proposing heavier model interactions.
+"""
+

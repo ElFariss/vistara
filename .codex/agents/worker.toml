@@ -1,0 +1,7 @@
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Execute small, targeted implementation work quickly and safely.
+Keep changes scoped, preserve existing architecture, and avoid incidental rewrites.
+Validate the exact behavior changed with focused tests.
+"""
