@@ -393,7 +393,9 @@ label {
   max-width: 920px;
   font-size: clamp(2.15rem, 4.6vw, 3.9rem);
   line-height: 1.04;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.015em;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
   text-wrap: balance;
 }
 

@@ -2294,10 +2294,13 @@ function buildDashboardSummaryFromBrief({ analysisBrief = null, scope = {} }) {
   const primary = findings.find((finding) => finding.priority === 'primary') || findings[0];
   const supporting = findings.filter((finding) => finding.id !== primary.id).slice(0, 2);
   const primaryTitle = safeText(primary.title || 'fokus utama', 'fokus utama', 96);
-  const firstParagraph = [
-    `Dashboard ini memusatkan perhatian pada ${primaryTitle.toLowerCase()} karena ${safeText(primary.why_it_matters, 'temuan ini paling mempengaruhi keputusan bisnis pada periode ini.', 180).toLowerCase()}`,
-    safeText(primary.insight, 'Temuan utama belum tersedia.', 220),
-  ].filter(Boolean).join(' ').trim();
+  const primaryWhy = safeText(
+    primary.why_it_matters,
+    'temuan ini paling mempengaruhi keputusan bisnis pada periode ini',
+    180,
+  ).replace(/[.!?]+$/g, '').toLowerCase();
+  const primaryInsight = safeText(primary.insight, 'Temuan utama belum tersedia.', 220);
+  const firstParagraph = `Dashboard ini memusatkan perhatian pada ${primaryTitle.toLowerCase()} karena ${primaryWhy}. ${primaryInsight}`.trim();
   if (supporting.length === 0) {
     return firstParagraph;
   }
