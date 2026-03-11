@@ -26,6 +26,7 @@ const logger = createLogger('server');
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const publicDir = path.resolve(__dirname, '../public');
+const distDir = path.resolve(__dirname, '../dist');
 
 const router = new Router();
 const defaultRateLimit = createRateLimiter(config.rateLimitPerMinute);
@@ -92,13 +93,30 @@ function applyCors(req, res) {
 function serveStatic(pathname, res) {
   const relativePath = resolveStaticRelativePath(pathname);
   const normalized = path.normalize(relativePath).replace(/^([.]{2}[\/\\])+/, '');
-  const target = path.join(publicDir, normalized);
 
-  if (!target.startsWith(publicDir)) {
-    return sendNotFound(res);
+  // Try dist/ first (Vite build output), then public/ (raw assets)
+  const distTarget = path.join(distDir, normalized);
+  const publicTarget = path.join(publicDir, normalized);
+  const useViteBuild = fs.existsSync(distDir);
+
+  let target = null;
+  if (useViteBuild && distTarget.startsWith(distDir) && fs.existsSync(distTarget) && !fs.statSync(distTarget).isDirectory()) {
+    target = distTarget;
+  } else if (publicTarget.startsWith(publicDir) && fs.existsSync(publicTarget) && !fs.statSync(publicTarget).isDirectory()) {
+    target = publicTarget;
   }
 
-  if (!fs.existsSync(target) || fs.statSync(target).isDirectory()) {
+  // SPA fallback: serve index.html for non-file paths (HTML5 history routing)
+  if (!target) {
+    const indexTarget = useViteBuild
+      ? path.join(distDir, 'index.html')
+      : path.join(publicDir, 'index.html');
+    if (fs.existsSync(indexTarget)) {
+      target = indexTarget;
+    }
+  }
+
+  if (!target) {
     return sendNotFound(res);
   }
 

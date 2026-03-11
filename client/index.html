@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vistara</title>
+  <meta name="description" content="Vistara - AI analytics workspace berbasis upload dataset untuk bisnis." />
+  <meta name="theme-color" content="#faf7f2" />
+  <link rel="icon" href="/logo-light.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="/vendor/gridstack.min.css" />
+</head>
+
+<body>
+  <div class="ambient ambient-left"></div>
+  <div class="ambient ambient-right"></div>
+
+  <div class="app-shell">
+    <header class="app-header">
+      <a id="brandHomeLink" class="brand-home" href="/" aria-label="Kembali ke landing page">
+        <img class="brand-home-logo brand-home-logo-light" src="/logo-light.png" alt="" aria-hidden="true" />
+        <img class="brand-home-logo brand-home-logo-dark" src="/logo-dark.png" alt="" aria-hidden="true" />
+        <span class="brand-home-text">Vistara</span>
+      </a>
+      <div class="header-actions">
+        <button id="themeToggle" class="ghost icon-nav-btn" type="button" aria-label="Ubah tema" title="Ubah tema">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M21 12.8A8.8 8.8 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path>
+          </svg>
+        </button>
+        <button id="headerSettingsBtn" class="ghost icon-nav-btn" type="button" hidden aria-label="Pengaturan" title="Pengaturan">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 8.3a3.7 3.7 0 1 0 0 7.4 3.7 3.7 0 0 0 0-7.4zm9.2 3.7-.9-.5a7.7 7.7 0 0 0-.4-1l.5-.9a1.2 1.2 0 0 0-.2-1.5l-1.2-1.2a1.2 1.2 0 0 0-1.5-.2l-.9.5c-.3-.2-.7-.3-1-.4l-.5-.9A1.2 1.2 0 0 0 14 4h-2a1.2 1.2 0 0 0-1.1.7l-.5.9c-.3.1-.7.2-1 .4l-.9-.5a1.2 1.2 0 0 0-1.5.2L5.8 6.9a1.2 1.2 0 0 0-.2 1.5l.5.9c-.2.3-.3.7-.4 1l-.9.5A1.2 1.2 0 0 0 4 12v2c0 .5.3.9.7 1.1l.9.5c.1.3.2.7.4 1l-.5.9a1.2 1.2 0 0 0 .2 1.5l1.2 1.2c.4.4 1 .5 1.5.2l.9-.5c.3.2.7.3 1 .4l.5.9c.2.4.6.7 1.1.7h2c.5 0 .9-.3 1.1-.7l.5-.9c.3-.1.7-.2 1-.4l.9.5c.5.3 1.1.2 1.5-.2l1.2-1.2c.4-.4.5-1 .2-1.5l-.5-.9c.2-.3.3-.7.4-1l.9-.5c.4-.2.7-.6.7-1.1v-2c0-.5-.3-.9-.7-1.1z"></path>
+          </svg>
+        </button>
+        <button id="headerCtaBtn" class="cta-nav" type="button">Mulai</button>
+        <button id="headerLoginBtn" class="ghost">Masuk</button>
+        <button id="logoutBtn" class="ghost" hidden>Logout</button>
+      </div>
+    </header>
+
+    <section id="landingPage" class="page-view landing-page">
+      <section class="landing-welcome reveal-on-scroll" aria-label="Welcome">
+        <div>
+          <p class="hero-eyebrow">Selamat Datang di Vistara</p>
+          <h1 class="landing-welcome-title">Ngobrol dengan data bisnis tanpa ribet teknis.</h1>
+          <p class="landing-welcome-copy">Upload Excel, CSV, atau JSON lalu tanya insight bisnis Anda dengan bahasa yang biasa dipakai sehari-hari.</p>
+          <div class="landing-welcome-actions">
+            <button id="landingWelcomeCta" type="button">Mulai</button>
+            <button id="landingWelcomeDemo" type="button" class="ghost">Coba Demo</button>
+          </div>
+        </div>
+        <div id="landingScrollCue" class="landing-scroll-cue" aria-hidden="true">
+          <span>Scroll ke bawah</span>
+          <span class="landing-scroll-arrow" aria-hidden="true">↓</span>
+        </div>
+      </section>
+
+      <div id="landingHeroStart" class="hero-grid">
+        <div class="hero-copy">
+          <p class="hero-eyebrow reveal-on-scroll">Analisis Data Instan untuk Bisnis Anda</p>
+          <h2 class="reveal-on-scroll">Dari file ke dashboard dalam 60 detik, tanpa SQL dan tanpa setup rumit.</h2>
+          <div class="hero-sentences">
+            <p class="reveal-on-scroll">Vistara dirancang untuk pemilik UMKM, founder, dan tim operasional.</p>
+            <p class="reveal-on-scroll">Upload data Anda sekali, lalu tanya insight dengan Bahasa Indonesia natural.</p>
+            <p class="reveal-on-scroll">Dapatkan visual siap presentasi dalam alur chat yang tetap simpel.</p>
+          </div>
+        </div>
+        <div class="hero-panel">
+          <div class="hero-card">
+            <div class="hero-card-head">
+              <span></span><span></span><span></span>
+            </div>
+            <div class="hero-card-body">
+              <div class="mock-msg user">Buat dashboard performa bulan ini</div>
+              <div class="mock-msg ai">
+                <strong>Dashboard Generated</strong>
+                <p>6 widget siap: omzet, profit, margin, tren, top produk, top cabang.</p>
+                <div class="mock-dashboard-preview" aria-hidden="true">
+                  <div class="mini-metric">Rp 52.3jt <span>+8.2%</span></div>
+                  <div class="mini-bars">
+                    <span style="--h: 34%"></span>
+                    <span style="--h: 62%"></span>
+                    <span style="--h: 48%"></span>
+                    <span style="--h: 78%"></span>
+                    <span style="--h: 67%"></span>
+                  </div>
+                  <svg viewBox="0 0 180 40" class="mini-line">
+                    <defs>
+                      <linearGradient id="miniAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#F97316" stop-opacity="0.28" />
+                        <stop offset="100%" stop-color="#F97316" stop-opacity="0.03" />
+                      </linearGradient>
+                    </defs>
+                    <path d="M0 34 L0 30 C12 28,18 26,25 26 C34 26,42 29,50 28 C58 27,67 20,75 19 C84 18,91 22,100 21 C108 20,117 14,125 14 C134 14,142 18,150 17 C160 16,170 11,180 8 L180 34 Z"
+                      fill="url(#miniAreaGrad)" />
+                    <path d="M0 30 C12 28,18 26,25 26 C34 26,42 29,50 28 C58 27,67 20,75 19 C84 18,91 22,100 21 C108 20,117 14,125 14 C134 14,142 18,150 17 C160 16,170 11,180 8"
+                      fill="none" stroke="#F97316" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section class="pain-strip-section" aria-label="Kenapa Vistara itu penting">
+        <div class="section-head reveal-on-scroll">
+          <p class="hero-eyebrow">Kenapa Vistara itu penting?</p>
+        </div>
+        <div class="pain-strip">
+          <article class="reveal-on-scroll">
+            <h3>Data tersebar di banyak file</h3>
+            <p>Laporan jadi lambat karena harus gabung manual dari berbagai sumber.</p>
+          </article>
+          <article class="reveal-on-scroll">
+            <h3>Sulit baca tren penting</h3>
+            <p>Omzet naik turun tidak cepat terlihat, sehingga keputusan sering terlambat.</p>
+          </article>
+          <article class="reveal-on-scroll">
+            <h3>Dashboard terasa rumit</h3>
+            <p>Tool BI tradisional butuh setup teknis yang menyita waktu operasional.</p>
+          </article>
+        </div>
+      </section>
+
+      <div class="landing-features">
+        <article class="reveal-on-scroll">
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F97316" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 15.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2.5" />
+              <path d="M12 3v11" />
+              <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+            </svg>
+          </div>
+          <h3>Upload Data Sekali Klik</h3>
+          <p>Tidak ada integrasi live stream. Semua analisis berbasis file dataset yang kamu berikan.</p>
+        </article>
+        <article class="reveal-on-scroll">
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F97316" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+          </div>
+          <h3>Chat + Laporan Inline</h3>
+          <p>Jawaban AI menampilkan metrik, tabel, dan chart langsung di thread chat.</p>
+        </article>
+        <article class="reveal-on-scroll">
+          <div class="feature-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F97316" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="8" height="8" rx="1.2" />
+              <rect x="13" y="3" width="8" height="5" rx="1.2" />
+              <rect x="13" y="10" width="8" height="11" rx="1.2" />
+              <rect x="3" y="13" width="8" height="8" rx="1.2" />
+            </svg>
+          </div>
+          <h3>Canvas Dashboard Builder</h3>
+          <p>Susun dashboard sendiri dengan drag-resize widget, lalu simpan layout.</p>
+        </article>
+      </div>
+
+      <section class="differentiation" aria-label="Kenapa Vistara">
+        <div class="diff-head reveal-on-scroll">
+          <p class="hero-eyebrow">Kenapa Bukan Tool Lain?</p>
+          <h3>Vistara fokus ke eksekusi cepat, bukan setup panjang.</h3>
+        </div>
+        <div class="diff-grid">
+          <article class="reveal-on-scroll">
+            <h4>Vistara</h4>
+            <ul>
+              <li>Bahasa Indonesia-first untuk konteks bisnis lokal</li>
+              <li>Upload file langsung, tanpa konfigurasi data pipeline</li>
+              <li>Chat ke insight lalu lanjut ke canvas dalam alur yang sama</li>
+            </ul>
+          </article>
+          <article class="reveal-on-scroll">
+            <h4>Chatbot umum + spreadsheet</h4>
+            <ul>
+              <li>Perlu copy-paste manual dan format ulang berulang</li>
+              <li>Tidak ada dashboard terstruktur untuk presentasi</li>
+              <li>Insight mudah hilang antar percakapan</li>
+            </ul>
+          </article>
+          <article class="reveal-on-scroll">
+            <h4>BI tradisional</h4>
+            <ul>
+              <li>Kuat, tetapi setup awal lebih berat untuk tim kecil</li>
+              <li>Butuh kurva belajar visual builder yang lebih teknis</li>
+              <li>Kurang natural untuk eksplorasi cepat via chat</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="how-it-works" aria-label="Cara Kerja Vistara">
+        <div class="hiw-head reveal-on-scroll">
+          <p class="hero-eyebrow">Cara Kerja</p>
+          <h3>3 langkah instan dari file ke dashboard</h3>
+        </div>
+        <div class="hiw-steps">
+          <div class="hiw-step reveal-on-scroll">
+            <div class="hiw-number">1</div>
+            <h4>Upload file data</h4>
+            <p>Pilih CSV, Excel, atau JSON. AI langsung memahami struktur data utama Anda.</p>
+          </div>
+          <div class="hiw-step reveal-on-scroll">
+            <div class="hiw-number">2</div>
+            <h4>Tulis pertanyaan natural</h4>
+            <p>Tanya seperti ngobrol biasa, tanpa query atau rumus teknis.</p>
+          </div>
+          <div class="hiw-step reveal-on-scroll">
+            <div class="hiw-number">3</div>
+            <h4>Lihat visual & dashboard</h4>
+            <p>Dapatkan grafik dan dashboard siap presentasi dalam hitungan detik.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="agent-team" aria-label="Tim agent Vistara">
+        <div class="hiw-head reveal-on-scroll">
+          <p class="hero-eyebrow">Tim Agent</p>
+          <h3>Satu workspace, lima peran yang saling bantu</h3>
+        </div>
+        <div class="agent-team-grid">
+          <article class="reveal-on-scroll">
+            <strong>Vira</strong>
+            <p>Teman ngobrol utama Anda. Vira menjaga percakapan tetap sederhana dan jelas.</p>
+          </article>
+          <article class="reveal-on-scroll">
+            <strong>Atlas</strong>
+            <p>Pengatur alur kerja. Atlas memutuskan kapan perlu analisis, perbaikan data, atau dashboard.</p>
+          </article>
+          <article class="reveal-on-scroll">
+            <strong>Raka</strong>
+            <p>Data analyst yang membaca tren, membandingkan performa, dan merangkum insight bisnis.</p>
+          </article>
+          <article class="reveal-on-scroll">
+            <strong>Tala</strong>
+            <p>Data engineer yang turun tangan hanya ketika struktur data benar-benar perlu diperbaiki.</p>
+          </article>
+          <article class="reveal-on-scroll">
+            <strong>Citra</strong>
+            <p>Pembuat dashboard yang menyusun widget satu per satu sampai draft siap ditinjau.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="faq reveal-on-scroll" aria-label="Pertanyaan umum">
+        <div class="faq-head">
+          <p class="hero-eyebrow">FAQ Singkat</p>
+          <h3>Jawaban cepat sebelum Anda mulai</h3>
+        </div>
+        <div class="faq-grid">
+          <article>
+            <h4>Apakah data saya aman?</h4>
+            <p>File dipakai untuk analisis workspace Anda dan tidak dibagikan tanpa izin.</p>
+          </article>
+          <article>
+            <h4>Apakah bisa file berantakan?</h4>
+            <p>Bisa. Vistara membantu pemetaan kolom dari CSV, JSON, XLSX/XLS termasuk format campuran dasar.</p>
+          </article>
+          <article>
+            <h4>Berapa harga Vistara?</h4>
+            <p>Saat ini <strong>Free Beta</strong>. Daftar sekarang untuk early access paket berbayar berikutnya.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="landingFinalCta" class="landing-final-cta" aria-label="Final CTA">
+        <p>Sudah siap melihat data Anda jadi insight dalam hitungan detik?</p>
+        <button id="landingTryNowBtn" type="button">Mulai</button>
+      </section>
+    </section>
+
+    <section id="authPage" class="page-view auth-page hidden">
+      <div class="auth-shell">
+        <div class="auth-card">
+          <h1>Masuk ke Workspace</h1>
+          <p class="auth-sub">Langkah 1 dari 2: autentikasi akun</p>
+
+          <div class="tabs" id="authTabs" role="tablist">
+            <button class="tab active" data-auth-tab="login" type="button">Login</button>
+            <button class="tab" data-auth-tab="register" type="button">Register</button>
+          </div>
+
+          <form id="loginForm" class="stack auth-form">
+            <label>Email<input name="email" type="email" required autocomplete="email" placeholder="nama@bisnis.com" /></label>
+            <label>Password
+              <span class="password-field">
+                <input id="loginPasswordInput" name="password" type="password" required autocomplete="current-password" placeholder="Masukkan password" />
+                <button id="loginPasswordToggle" class="ghost password-toggle" type="button" aria-controls="loginPasswordInput" aria-pressed="false" aria-label="Tampilkan password">Tampilkan</button>
+              </span>
+            </label>
+            <button type="submit">Masuk</button>
+            <p class="auth-help-text">Belum ada reset password mandiri. Jika akun dibuat oleh tim Anda, minta admin workspace membantu akses.</p>
+          </form>
+
+          <form id="registerForm" class="stack auth-form hidden">
+            <label>Nama<input name="name" required autocomplete="name" placeholder="Nama lengkap" /></label>
+            <label>Email<input name="email" type="email" required autocomplete="email" placeholder="nama@bisnis.com" /></label>
+            <label>Password
+              <span class="password-field">
+                <input id="registerPasswordInput" name="password" type="password" minlength="8" required autocomplete="new-password" placeholder="Min. 8 karakter" />
+                <button id="registerPasswordToggle" class="ghost password-toggle" type="button" aria-controls="registerPasswordInput" aria-pressed="false" aria-label="Tampilkan password">Tampilkan</button>
+              </span>
+            </label>
+            <label>No. HP<input name="phone" autocomplete="tel" placeholder="08xx-xxxx-xxxx" /></label>
+            <label>Nama Bisnis<input name="business_name" required autocomplete="organization" placeholder="Nama bisnis kamu" /></label>
+            <button type="submit">Buat Akun</button>
+          </form>
+        </div>
+
+        <aside class="auth-onboarding" aria-label="Panduan onboarding">
+          <div class="auth-onboarding-head">
+            <p class="hero-eyebrow">Onboarding</p>
+            <h3>Mulai dari file, lanjut ke insight, lalu simpan dashboard.</h3>
+          </div>
+          <div class="auth-onboarding-slides">
+            <article class="auth-onboarding-slide is-active" data-onboarding-slide="0">
+              <span class="auth-onboarding-step">1</span>
+              <h4>Masukkan data ke chat</h4>
+              <p>Drag file langsung ke area chat, atau klik tombol `+` untuk upload dataset dari perangkat Anda.</p>
+            </article>
+            <article class="auth-onboarding-slide" data-onboarding-slide="1" hidden>
+              <span class="auth-onboarding-step">2</span>
+              <h4>Minta agent menganalisis</h4>
+              <p>Tanya dengan bahasa biasa seperti insight minggu ini, tren penjualan, atau anomali yang perlu dicek.</p>
+            </article>
+            <article class="auth-onboarding-slide" data-onboarding-slide="2" hidden>
+              <span class="auth-onboarding-step">3</span>
+              <h4>Generate dashboard</h4>
+              <p>Biarkan agent menyusun widget dan halaman dashboard berdasarkan kekuatan data yang benar-benar tersedia.</p>
+            </article>
+            <article class="auth-onboarding-slide" data-onboarding-slide="3" hidden>
+              <span class="auth-onboarding-step">4</span>
+              <h4>Edit dan simpan</h4>
+              <p>Sesuaikan widget, rapikan layout, lalu simpan dashboard untuk dipakai lagi di sesi berikutnya.</p>
+            </article>
+          </div>
+          <div class="auth-onboarding-nav" id="authOnboardingNav" aria-label="Navigasi onboarding">
+            <button type="button" class="auth-onboarding-dot is-active" data-onboarding-dot="0" aria-label="Slide onboarding 1"></button>
+            <button type="button" class="auth-onboarding-dot" data-onboarding-dot="1" aria-label="Slide onboarding 2"></button>
+            <button type="button" class="auth-onboarding-dot" data-onboarding-dot="2" aria-label="Slide onboarding 3"></button>
+            <button type="button" class="auth-onboarding-dot" data-onboarding-dot="3" aria-label="Slide onboarding 4"></button>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="contextPage" class="page-view context-page hidden">
+      <div class="context-card">
+        <h1>Lengkapi Konteks Bisnis</h1>
+        <p class="auth-sub">Langkah 2 dari 2: isi konteks bisnis untuk grounding AI</p>
+
+        <form id="contextForm" class="stack">
+          <label>Nama Bisnis<input name="name" required autocomplete="organization" /></label>
+          <label>Industri<input name="industry" required autocomplete="organization-title" placeholder="F&B, Retail, Jasa" /></label>
+          <label>Kota<input name="city" required autocomplete="address-level2" placeholder="Jakarta, Bandung" /></label>
+          <label>Timezone<input name="timezone" autocomplete="off" value="Asia/Jakarta" /></label>
+          <label>Mata Uang<input name="currency" autocomplete="off" value="IDR" /></label>
+          <label>Waktu Verdict<input name="morning_verdict_time" value="07:00" /></label>
+          <button type="submit">Masuk Workspace</button>
+        </form>
+      </div>
+    </section>
+
+    <main id="workspacePage" class="page-view workspace-page hidden">
+      <h1 id="workspaceTitle" class="sr-only">Workspace analitik Vistara</h1>
+      <section id="workspaceLoading" class="workspace-loading hidden" aria-live="polite" aria-labelledby="workspaceLoadingTitle" role="dialog" aria-modal="true">
+        <div class="workspace-loading-card">
+          <span class="workspace-loading-spinner" aria-hidden="true"></span>
+          <h2 id="workspaceLoadingTitle">Menyiapkan workspace Anda</h2>
+          <p id="workspaceLoadingText">Kami memuat percakapan, dataset, dan dashboard terlebih dulu supaya tampilan tidak muncul setengah jadi.</p>
+        </div>
+      </section>
+      <div class="workspace-shell session-rail-collapsed">
+        <button id="sessionRailPeekBtn" type="button" class="ghost session-rail-handle" aria-controls="sessionRail" aria-expanded="false" title="Buka riwayat">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>
+          <span class="sr-only">Buka riwayat</span>
+        </button>
+        <aside id="sessionRail" class="workspace-pane session-rail collapsed" aria-label="Riwayat percakapan" aria-hidden="true" inert>
+          <div class="session-rail-head">
+            <button id="sessionRailToggleBtn" type="button" class="ghost session-rail-toggle" aria-controls="sessionRail" aria-expanded="false" title="Toggle riwayat">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>
+              <span id="sessionRailToggleLabel">Riwayat</span>
+            </button>
+            <button id="newSessionBtn" type="button" class="ghost session-rail-new" aria-label="Buat chat baru" title="Chat Baru">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+            </button>
+          </div>
+          <div class="rail-section">
+            <div class="rail-section-head">
+              <span>Riwayat</span>
+            </div>
+            <div id="sessionList" class="session-list" aria-live="polite"></div>
+          </div>
+          <div class="rail-section">
+            <div class="rail-section-head">
+              <span>Dashboard</span>
+            </div>
+            <div id="dashboardList" class="session-list dashboard-list" aria-live="polite"></div>
+          </div>
+        </aside>
+
+        <section id="chatPane" class="workspace-pane chat-pane">
+          <div id="chatPaneHead" class="chat-pane-head" hidden>
+            <div class="chat-head-spacer" aria-hidden="true"></div>
+            <div class="chat-head-actions">
+              <button id="openCanvasBtn" type="button" class="ghost icon-nav-btn" hidden aria-label="Buka dashboard" title="Buka dashboard">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v5h-7zM13 11h7v9h-7zM4 13h7v7H4z"></path></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Upload drop overlay -->
+          <div id="uploadDropOverlay" class="upload-drop-overlay hidden" aria-hidden="true">
+            <div class="upload-drop-content">
+              <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 15.5V18a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2.5" />
+                <path d="M12 15V3" />
+                <path d="m7.5 7.5 4.5-4.5 4.5 4.5" />
+              </svg>
+              <p>Drop file di sini untuk upload dataset</p>
+            </div>
+          </div>
+
+          <!-- Upload loading indicator -->
+          <div id="uploadLoading" class="upload-loading hidden" role="status" aria-live="polite">
+            <div class="upload-loading-card">
+              <span class="upload-loading-spinner" aria-hidden="true"></span>
+              <p id="uploadLoadingText">Mengupload dataset...</p>
+            </div>
+          </div>
+
+          <div id="dataGate" class="data-gate hidden">
+            <h2>Upload Dataset Dulu</h2>
+            <p>Workspace ini bekerja dari dataset statis yang kamu upload. Tidak ada stream data real-time.</p>
+            <div class="gate-actions">
+              <input id="gateUploadInput" type="file" hidden />
+              <button id="gateUploadPickerBtn" type="button" class="ghost attach-btn gate-upload-btn">Pilih Dataset</button>
+              <button id="gateUploadBtn" type="button">Upload & Gunakan</button>
+              <button id="gateDemoBtn" type="button" class="ghost">Gunakan Demo test.csv</button>
+            </div>
+            <span id="gateUploadName" class="gate-upload-name hidden" aria-live="polite"></span>
+          </div>
+
+          <div id="chatMessages" class="chat-thread" aria-live="polite"></div>
+          <div id="preChatTicker" class="prechat-ticker hidden" aria-live="polite"></div>
+
+          <div id="typingIndicator" class="typing-indicator hidden">
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+          </div>
+
+          <div class="chat-compose-region">
+            <!-- Dashboard version switcher -->
+            <div id="dashboardSwitcher" class="dashboard-switcher hidden" aria-label="Versi dashboard">
+            </div>
+
+            <div id="quickPrompts" class="quick-prompts">
+              <button type="button" class="pill" data-prompt="Ringkas performa bisnis saya minggu ini">Ringkas minggu ini</button>
+              <button type="button" class="pill" data-prompt="Apa 3 insight terpenting dari data ini?">3 insight penting</button>
+              <button type="button" class="pill" data-prompt="Buat dashboard performa bulan ini">Buat dashboard</button>
+            </div>
+
+            <form id="chatForm" class="composer">
+              <div class="composer-row">
+                <input id="chatFile" type="file" hidden />
+                <button id="chatFileBtn" class="ghost attach-btn attach-btn-compact" type="button" aria-label="Tambah dataset" title="Tambah dataset">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+                  <span class="sr-only">Tambah dataset</span>
+                </button>
+                <div class="composer-input-shell">
+                  <textarea id="chatInput" rows="1" placeholder="Tanya data Anda"></textarea>
+                  <button id="sendBtn" type="submit" aria-label="Kirim pesan" title="Kirim">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M6 11l6-6 6 6"></path></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="composer-meta">
+                <span id="fileLabel" class="file-label" hidden>Tidak ada file</span>
+              </div>
+            </form>
+          </div>
+        </section>
+
+        <div id="panelDivider" class="panel-divider" role="separator" aria-orientation="vertical" aria-label="Ubah ukuran panel" tabindex="0"></div>
+
+        <section id="canvasPane" class="workspace-pane canvas-pane">
+          <h1 id="canvasTitle" class="sr-only">Dashboard canvas</h1>
+          <div class="canvas-shell">
+            <aside class="data-pane" id="dataPane">
+              <div class="pane-head">
+                <strong>Data Fields</strong>
+              </div>
+              <div id="dataFields" class="data-fields"></div>
+            </aside>
+
+            <div class="canvas-main">
+              <div class="canvas-bar">
+                <div class="canvas-bar-copy">
+                  <h2>Dashboard</h2>
+                </div>
+                <div class="canvas-bar-meta">
+                  <div class="canvas-page-controls" aria-label="Navigasi slide dashboard">
+                    <button id="canvasPrevPage" type="button" class="ghost canvas-tool-btn canvas-page-btn" aria-label="Halaman sebelumnya" title="Halaman sebelumnya">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.5 5-7 7 7 7"></path></svg>
+                    </button>
+                    <span id="canvasPageIndicator">Hal 1 / 1</span>
+                    <button id="canvasAddPage" type="button" class="ghost canvas-tool-btn canvas-page-btn" aria-label="Tambah halaman" title="Tambah halaman">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+                    </button>
+                    <button id="canvasNextPage" type="button" class="ghost canvas-tool-btn canvas-page-btn" aria-label="Halaman berikutnya" title="Halaman berikutnya">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5 7 7-7 7"></path></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="canvasLoading" class="canvas-loading hidden" role="status" aria-live="polite">
+                <div class="canvas-loading-card">
+                  <span class="canvas-loading-spinner" aria-hidden="true"></span>
+                  <p data-canvas-loading-text>Dashboard sedang disiapkan...</p>
+                </div>
+              </div>
+
+              <div id="canvasViewport" class="canvas-viewport">
+                <div id="canvasWorld" class="canvas-world">
+                  <div id="canvasStage" class="canvas-stage">
+                    <div id="canvasGrid" class="canvas-grid"></div>
+                    <button id="floatingAddBtn" type="button" class="floating-add">Tambah Widget</button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="canvasDock" class="canvas-dock" aria-label="Kontrol Canvas">
+                <div class="canvas-dock-group" aria-label="Panel pendukung">
+                  <button id="toggleDataPaneBtn" type="button" class="ghost canvas-tool-btn" aria-controls="dataPane" aria-expanded="false" title="Panel data">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h6v14H4zM14 5h6v6h-6zM14 13h6v6h-6z"></path></svg>
+                  </button>
+                  <button id="toggleConfigPaneBtn" type="button" class="ghost canvas-tool-btn" aria-controls="configPane" aria-expanded="false" title="Panel konfigurasi">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v4H4zM4 10h10v4H4zM4 16h16v4H4z"></path></svg>
+                  </button>
+                </div>
+                <div class="canvas-dock-group" aria-label="Kontrol zoom">
+                  <button id="zoomOutBtn" type="button" class="ghost canvas-tool-btn" aria-label="Zoom keluar" title="Zoom keluar">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg>
+                  </button>
+                  <span id="zoomLevelLabel" class="canvas-zoom-chip" aria-live="polite">100%</span>
+                  <button id="zoomInBtn" type="button" class="ghost canvas-tool-btn" aria-label="Zoom masuk" title="Zoom masuk">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M12 5v14"></path></svg>
+                  </button>
+                  <button id="zoomResetBtn" type="button" class="ghost canvas-tool-btn" aria-label="Reset zoom" title="Reset zoom">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4zM8 12h8"></path></svg>
+                  </button>
+                </div>
+                <div class="canvas-dock-group" aria-label="Aksi dashboard">
+                  <button id="addWidgetToolbar" type="button" class="canvas-tool-btn" title="Tambah widget">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+                  </button>
+                  <button id="editModeBtn" type="button" class="ghost canvas-tool-btn canvas-edit-toggle" aria-pressed="false" title="Mode edit">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16.5V20h3.5L19 8.5 15.5 5 4 16.5zM14 6.5l3.5 3.5"></path></svg>
+                  </button>
+                  <button id="persistDraftBtn" type="button" class="ghost canvas-tool-btn" title="Simpan dashboard">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h12l2 2v14H5zM8 4v5h8V4M8 18h8"></path></svg>
+                  </button>
+                  <button id="saveCanvasBtn" type="button" class="ghost canvas-tool-btn" title="Simpan JPG">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19h14V5H5zM8 3v4M16 3v4M8 14h8"></path></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <aside class="config-pane" id="configPane">
+              <div id="configEmpty" class="config-empty">
+                <div class="config-placeholder-icon" aria-hidden="true"></div>
+                <p>Pilih widget untuk mengatur visualisasi.</p>
+              </div>
+              <form id="configForm" class="config-form hidden">
+                <label>Judul<input name="title" /></label>
+                <label>Dataset<select name="dataset" id="configDataset"></select></label>
+                <label>Measure<select name="measure" id="configMeasure"></select></label>
+                <label>Group By<select name="group_by" id="configGroupBy"></select></label>
+                <label>Visualisasi<select name="visualization" id="configVisualization"></select></label>
+                <label>Periode<input name="time_period" value="30 hari terakhir" /></label>
+                <label>Limit<input name="limit" type="number" value="12" min="1" max="500" /></label>
+                <button type="submit">Terapkan</button>
+              </form>
+            </aside>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <aside id="toast" class="toast hidden"></aside>
+  <button id="editProfileBtn" class="hidden utility-context-trigger" type="button" aria-hidden="true" tabindex="-1">Business Context</button>
+
+  <div id="widgetBuilderBackdrop" class="widget-builder-backdrop hidden" aria-hidden="true"></div>
+  <aside id="widgetBuilderModal" class="widget-builder-modal hidden" role="dialog" aria-modal="true" aria-labelledby="widgetBuilderTitle" aria-label="Tambah widget" tabindex="-1">
+    <div class="widget-builder-head">
+      <div>
+        <p class="widget-builder-kicker">Tambah Widget</p>
+        <h3 id="widgetBuilderTitle">Pilih jenis visual</h3>
+      </div>
+      <button id="widgetBuilderCloseBtn" type="button" class="ghost" aria-label="Tutup tambah widget">Tutup</button>
+    </div>
+
+    <div class="widget-builder-body">
+      <section id="widgetBuilderStepType" class="widget-builder-step is-active" data-step="type">
+        <div id="widgetTypeGrid" class="widget-type-grid" aria-live="polite"></div>
+      </section>
+
+      <section id="widgetBuilderStepConfig" class="widget-builder-step" data-step="config">
+        <div class="widget-builder-config">
+          <div id="widgetAxisList" class="widget-axis-list"></div>
+          <p id="widgetAxisHint" class="widget-axis-hint">Pilih kolom untuk setiap sumbu agar visual lebih akurat.</p>
+        </div>
+        <div class="widget-builder-dataset">
+          <div class="widget-dataset-head">
+            <span id="widgetDatasetTitle">Pilih tabel data</span>
+            <span id="widgetDatasetMeta" class="widget-dataset-meta"></span>
+          </div>
+          <div id="widgetDatasetList" class="widget-dataset-list"></div>
+          <div id="widgetDatasetPreview" class="widget-dataset-preview"></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="widget-builder-footer">
+      <button id="widgetBuilderBackBtn" type="button" class="ghost">Kembali</button>
+      <button id="widgetBuilderNextBtn" type="button">Lanjut</button>
+    </div>
+  </aside>
+
+  <div id="settingsBackdrop" class="settings-backdrop hidden" aria-hidden="true"></div>
+  <aside id="settingsPanel" class="settings-panel hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" aria-describedby="settingsDescription" aria-label="Panel Pengaturan" tabindex="-1">
+    <div class="settings-head">
+      <div>
+        <h3 id="settingsTitle">Pengaturan</h3>
+        <p id="settingsDescription">Atur preferensi pribadi dan cara Vistara menjawab dari satu tempat.</p>
+      </div>
+      <button id="settingsCloseBtn" type="button" class="ghost" aria-label="Tutup Pengaturan">Tutup</button>
+    </div>
+
+    <form id="settingsForm" class="settings-form">
+      <div id="settingsGroupTabs" class="settings-group-switcher" role="tablist" aria-label="Grup pengaturan">
+        <button id="settingsGroupUserBtn" type="button" class="settings-group-tab is-active" data-settings-group="user" role="tab" aria-selected="true" aria-pressed="true" aria-controls="settingsUserGroup">Profil</button>
+        <button id="settingsGroupAgentBtn" type="button" class="settings-group-tab" data-settings-group="agent" role="tab" aria-selected="false" aria-pressed="false" aria-controls="settingsAgentGroup">Asisten</button>
+      </div>
+
+      <div class="settings-group-body">
+        <section id="settingsUserGroup" class="settings-group-panel" data-settings-panel="user" role="tabpanel" aria-labelledby="settingsGroupUserBtn">
+          <div class="settings-section">
+            <h4>Tampilan & Identitas</h4>
+            <label>Tema Tampilan
+              <select name="theme_mode" id="settingsThemeMode">
+                <option value="light">Terang</option>
+                <option value="dark">Gelap</option>
+                <option value="system">Ikuti Sistem</option>
+              </select>
+            </label>
+            <label>Warna Aksen
+              <select name="accent_color" id="settingsAccentColor">
+                <option value="orange">Oranye Vistara</option>
+                <option value="blue">Biru Profesional</option>
+                <option value="green">Hijau Pertumbuhan</option>
+                <option value="rose">Merah Muda Modern</option>
+              </select>
+            </label>
+            <label>Nama Panggilan
+              <input name="nickname" id="settingsNickname" maxlength="40" placeholder="Contoh: Kak Andi" />
+            </label>
+          </div>
+          <div class="settings-section">
+            <h4>Business Context</h4>
+            <label>Nama Bisnis
+              <input name="business_name" id="settingsBusinessName" maxlength="120" placeholder="Contoh: Vistara Mart" />
+            </label>
+            <label>Industri
+              <input name="business_industry" id="settingsBusinessIndustry" maxlength="80" placeholder="Contoh: Retail" />
+            </label>
+            <label>Kota
+              <input name="business_city" id="settingsBusinessCity" maxlength="80" placeholder="Contoh: Jakarta" />
+            </label>
+            <div class="settings-inline-grid">
+              <label>Timezone
+                <input name="business_timezone" id="settingsBusinessTimezone" maxlength="60" placeholder="Asia/Jakarta" />
+              </label>
+              <label>Mata Uang
+                <input name="business_currency" id="settingsBusinessCurrency" maxlength="12" placeholder="IDR" />
+              </label>
+            </div>
+            <label>Waktu Verdict
+              <input name="business_verdict_time" id="settingsBusinessVerdictTime" maxlength="8" placeholder="07:00" />
+            </label>
+          </div>
+        </section>
+
+        <section id="settingsAgentGroup" class="settings-group-panel hidden" data-settings-panel="agent" role="tabpanel" aria-labelledby="settingsGroupAgentBtn">
+          <div class="settings-section">
+            <h4>Gaya Jawaban</h4>
+            <label>Gaya Respons
+              <select name="response_style" id="settingsResponseStyle">
+                <option value="ringkas">Ringkas</option>
+                <option value="detail">Detail</option>
+                <option value="formal">Formal</option>
+                <option value="santai">Santai</option>
+              </select>
+            </label>
+            <label>Karakter Asisten
+              <select name="assistant_character" id="settingsAssistantCharacter">
+                <option value="proaktif">Proaktif</option>
+                <option value="teliti">Teliti</option>
+                <option value="tegas">Tegas</option>
+                <option value="suportif">Suportif</option>
+              </select>
+            </label>
+            <label>Fokus Personalisasi
+              <textarea name="personalization_focus" id="settingsPersonalizationFocus" rows="4"
+                placeholder="Contoh: fokus pada arus kas, margin, dan rekomendasi aksi mingguan."></textarea>
+            </label>
+          </div>
+        </section>
+      </div>
+
+      <div class="settings-actions">
+        <button id="settingsResetBtn" type="button" class="ghost settings-reset-btn">Kembalikan Saran Awal</button>
+        <button type="submit">Simpan Pengaturan</button>
+      </div>
+    </form>
+  </aside>
+
+  <script src="/vendor/gridstack-all.js"></script>
+  <script src="/vendor/chart.umd.min.js"></script>
+  <script src="/runtime-env.js"></script>
+  <script type="module" src="/src/main.js"></script>
+</body>
+
+</html>
