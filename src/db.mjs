@@ -93,6 +93,21 @@ CREATE TABLE IF NOT EXISTS source_files (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS dataset_tables (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  source_file_id TEXT,
+  table_name TEXT NOT NULL,
+  row_count INTEGER DEFAULT 0,
+  columns_json TEXT,
+  profile_json TEXT,
+  sample_rows_json TEXT,
+  data_path TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (source_file_id) REFERENCES source_files(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS products (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,
@@ -270,6 +285,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_transactions_tenant_date ON transactions(tenant_id, transaction_date);
 CREATE INDEX IF NOT EXISTS idx_transactions_tenant_branch ON transactions(tenant_id, branch_id);
 CREATE INDEX IF NOT EXISTS idx_source_files_tenant ON source_files(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_dataset_tables_tenant ON dataset_tables(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_dataset_tables_source ON dataset_tables(source_file_id);
 CREATE INDEX IF NOT EXISTS idx_messages_tenant_created ON chat_messages(tenant_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_conversation_agent_state_tenant_user ON conversation_agent_state(tenant_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_goals_tenant_status ON goals(tenant_id, status);

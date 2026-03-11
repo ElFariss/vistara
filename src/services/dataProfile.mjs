@@ -214,6 +214,28 @@ function buildColumnsProfile(rows = [], columns = []) {
   });
 }
 
+export function profileRows({ columns = [], rows = [] } = {}) {
+  const cleanColumns = Array.isArray(columns) ? columns : [];
+  const cleanRows = Array.isArray(rows) ? rows : [];
+  const columnsProfile = buildColumnsProfile(cleanRows, cleanColumns);
+  const duplicates = countDuplicates(cleanRows);
+  return {
+    summary: {
+      rows: cleanRows.length,
+      columns: cleanColumns.length,
+      total_missing: columnsProfile.reduce((acc, column) => acc + column.missing_count, 0),
+      duplicate_rows: duplicates,
+      duplicate_pct: cleanRows.length > 0 ? Number(((duplicates / cleanRows.length) * 100).toFixed(2)) : 0,
+    },
+    detected: {
+      date_columns: columnsProfile.filter((column) => column.kind === 'date').map((column) => column.name),
+      numeric_columns: columnsProfile.filter((column) => column.kind === 'number').map((column) => column.name),
+      categorical_columns: columnsProfile.filter((column) => column.kind === 'string').map((column) => column.name),
+    },
+    columns: columnsProfile,
+  };
+}
+
 function buildProfilePayload(source, parsed, mappingInfo) {
   const rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
   const columns = Array.isArray(parsed?.columns) ? parsed.columns : [];

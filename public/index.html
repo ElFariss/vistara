@@ -14,7 +14,7 @@
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap"
     rel="stylesheet" />
   <link rel="stylesheet" href="/vendor/gridstack.min.css" />
-  <link rel="stylesheet" href="/styles.css?v=20260309a" />
+  <link rel="stylesheet" href="/styles.css?v=20260311b" />
 </head>
 
 <body>
@@ -397,7 +397,18 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
             </button>
           </div>
-          <div id="sessionList" class="session-list" aria-live="polite"></div>
+          <div class="rail-section">
+            <div class="rail-section-head">
+              <span>Riwayat</span>
+            </div>
+            <div id="sessionList" class="session-list" aria-live="polite"></div>
+          </div>
+          <div class="rail-section">
+            <div class="rail-section-head">
+              <span>Dashboard</span>
+            </div>
+            <div id="dashboardList" class="session-list dashboard-list" aria-live="polite"></div>
+          </div>
         </aside>
 
         <section id="chatPane" class="workspace-pane chat-pane">
@@ -542,9 +553,6 @@
                   <button id="saveCanvasBtn" type="button" class="ghost canvas-tool-btn" title="Simpan JPG">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19h14V5H5zM8 3v4M16 3v4M8 14h8"></path></svg>
                   </button>
-                  <button id="closeCanvasBtn" type="button" class="ghost canvas-tool-btn" aria-label="Tutup canvas" title="Tutup canvas">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg>
-                  </button>
                 </div>
               </div>
             </div>
@@ -573,6 +581,43 @@
 
   <aside id="toast" class="toast hidden"></aside>
   <button id="editProfileBtn" class="hidden utility-context-trigger" type="button" aria-hidden="true" tabindex="-1">Business Context</button>
+
+  <div id="widgetBuilderBackdrop" class="widget-builder-backdrop hidden" aria-hidden="true"></div>
+  <aside id="widgetBuilderModal" class="widget-builder-modal hidden" role="dialog" aria-modal="true" aria-labelledby="widgetBuilderTitle" aria-label="Tambah widget" tabindex="-1">
+    <div class="widget-builder-head">
+      <div>
+        <p class="widget-builder-kicker">Tambah Widget</p>
+        <h3 id="widgetBuilderTitle">Pilih jenis visual</h3>
+      </div>
+      <button id="widgetBuilderCloseBtn" type="button" class="ghost" aria-label="Tutup tambah widget">Tutup</button>
+    </div>
+
+    <div class="widget-builder-body">
+      <section id="widgetBuilderStepType" class="widget-builder-step is-active" data-step="type">
+        <div id="widgetTypeGrid" class="widget-type-grid" aria-live="polite"></div>
+      </section>
+
+      <section id="widgetBuilderStepConfig" class="widget-builder-step" data-step="config">
+        <div class="widget-builder-config">
+          <div id="widgetAxisList" class="widget-axis-list"></div>
+          <p id="widgetAxisHint" class="widget-axis-hint">Pilih kolom untuk setiap sumbu agar visual lebih akurat.</p>
+        </div>
+        <div class="widget-builder-dataset">
+          <div class="widget-dataset-head">
+            <span id="widgetDatasetTitle">Pilih tabel data</span>
+            <span id="widgetDatasetMeta" class="widget-dataset-meta"></span>
+          </div>
+          <div id="widgetDatasetList" class="widget-dataset-list"></div>
+          <div id="widgetDatasetPreview" class="widget-dataset-preview"></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="widget-builder-footer">
+      <button id="widgetBuilderBackBtn" type="button" class="ghost">Kembali</button>
+      <button id="widgetBuilderNextBtn" type="button">Lanjut</button>
+    </div>
+  </aside>
 
   <div id="settingsBackdrop" class="settings-backdrop hidden" aria-hidden="true"></div>
   <aside id="settingsPanel" class="settings-panel hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" aria-describedby="settingsDescription" aria-label="Panel Pengaturan" tabindex="-1">

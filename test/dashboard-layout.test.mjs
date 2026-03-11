@@ -45,6 +45,18 @@ test('packDashboardLayout preserves explicit non-colliding layouts', () => {
   assert.equal(layoutsIntersect(widgets[0].layout, widgets[1].layout), false);
 });
 
+test('packDashboardLayout compacts explicit widgets upward to remove top dead space', () => {
+  const widgets = packDashboardLayout([
+    { id: 'trend', kind: 'chart', layout: { x: 0, y: 4, w: 8, h: 4, page: 2 } },
+    { id: 'table', kind: 'table', layout: { x: 8, y: 4, w: 8, h: 4, page: 2 } },
+  ]);
+
+  assert.equal(widgets[0].layout.page, 2);
+  assert.equal(widgets[1].layout.page, 2);
+  assert.equal(widgets[0].layout.y, 0);
+  assert.equal(widgets[1].layout.y, 0);
+});
+
 test('packDashboardLayout repairs colliding explicit layouts', () => {
   const widgets = packDashboardLayout([
     { id: 'metric', kind: 'metric', layout: { x: 0, y: 0, w: 4, h: 2, page: 1 } },

@@ -192,6 +192,7 @@ function createDashboardAgentResponses({
   finalSummary = 'Omzet stabil dengan kontribusi kuat dari produk utama.',
   templates = ['total_revenue', 'total_profit', 'revenue_trend', 'top_products'],
   analysisFindings = null,
+  reviewerResponses = null,
   plannerFunctionCalls = [
     {
       name: 'submit_plan',
@@ -211,7 +212,33 @@ function createDashboardAgentResponses({
     { title: 'Produk Terlaris', page: 1, x: 8, y: 2, w: 8, h: 4, kind: 'table' },
   ],
 } = {}) {
+  const defaultReviewerResponse = {
+    verdict: 'pass',
+    completeness_pct: 100,
+    summary: 'Layout konsisten dan artefak cukup untuk dipakai.',
+    issues: [],
+    directives: {
+      expand_titles: [],
+      add_templates: [],
+      notes: [],
+    },
+  };
+  const finalReviewerResponses = Array.isArray(reviewerResponses) && reviewerResponses.length > 0
+    ? reviewerResponses
+    : [defaultReviewerResponse, defaultReviewerResponse];
   const defaultFindings = (Array.isArray(analysisFindings) ? analysisFindings : templates).map((templateId, index) => {
+    if (templateId && typeof templateId === 'object') {
+      return {
+        id: templateId.id || `finding_${index + 1}`,
+        candidate_id: templateId.candidate_id || `candidate_${index + 1}`,
+        insight: templateId.insight || 'Insight dashboard belum tersedia.',
+        evidence: templateId.evidence || 'Evidence dashboard belum tersedia.',
+        why_it_matters: templateId.why_it_matters || 'Alasan bisnis belum tersedia.',
+        recommended_visual: templateId.recommended_visual || 'chart',
+        priority: templateId.priority || (index === 0 ? 'primary' : 'supporting'),
+      };
+    }
+
     const normalized = String(templateId || '').trim().toLowerCase();
     if (normalized === 'revenue_trend') {
       return {
@@ -303,19 +330,9 @@ function createDashboardAgentResponses({
         },
       ],
     }),
-    geminiToolPayload({
-      text: JSON.stringify({
-        verdict: 'pass',
-        completeness_pct: 100,
-        summary: 'Layout konsisten dan artefak cukup untuk dipakai.',
-        issues: [],
-        directives: {
-          expand_titles: [],
-          add_templates: [],
-          notes: [],
-        },
-      }),
-    }),
+    ...finalReviewerResponses.map((response) => geminiToolPayload({
+      text: JSON.stringify(response),
+    })),
   ];
 }
 
@@ -337,6 +354,8 @@ test('executeAnalyticsIntent anchors relative period to latest dataset date', ()
     assert.equal(result.template_id, 'total_revenue');
     assert.ok(Number(result.widgets?.[0]?.value || 0) > 0);
     assert.equal(result.agent_context.period_anchored, true);
+    assert.equal(result.content_format, 'markdown');
+    assert.match(result.answer, /\*\*.+\*\*/);
   } finally {
     cleanupTenant(tenantId);
   }
@@ -375,13 +394,57 @@ test('runDashboardAgent returns canvas widgets with findings instead of generic 
     assert.ok(response.widgets.every((widget) => typeof widget.finding_id === 'string' && widget.finding_id.length > 0));
     assert.ok(response.widgets.every((widget) => typeof widget.rationale === 'string' && widget.rationale.length > 0));
 
-    const paragraphs = String(response.answer || '')
-      .split(/\n\s*\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    assert.ok(paragraphs.length >= 1);
-    assert.ok(paragraphs.length <= 2);
+    assert.match(response.answer, /Ringkasan dashboard:/);
+    assert.match(response.answer, /Apa yang terlihat:/);
+    assert.match(response.answer, /Insight analis:/);
+    assert.match(response.answer, /Saran opsional:/);
+    assert.doesNotMatch(response.answer, /\.\.\./);
     assert.doesNotMatch(response.answer, /widget siap|dashboard siap|review selesai/i);
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('runDashboardAgent keeps long analysis findings intact without backend ellipsis', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    seedTransaction({ tenantId, date: '2024-01-13T00:00:00.000Z', revenue: 1_200_000 });
+    seedTransaction({ tenantId, date: '2024-01-14T00:00:00.000Z', revenue: 1_800_000 });
+    seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_050_000 });
+
+    const longInsight = 'Trend Omzet ikut ditampilkan untuk memahami fluktuasi harian yang membantu mengidentifikasi pola penjualan, penurunan di akhir rentang, serta momen lonjakan yang relevan untuk keputusan stok dan promosi tanpa harus membuka tabel mentah satu per satu di belakang layar.';
+    const longEvidence = 'Tren pendapatan menunjukkan penurunan menjelang akhir periode setelah sempat mencapai puncak yang jelas di pertengahan rentang, sehingga perubahan arah performa bisa dibaca langsung dari visual tanpa perlu menjumlah ulang data transaksi secara manual.';
+    const longWhy = 'Visual ini penting karena user non-teknis biasanya perlu alasan yang langsung terhubung ke keputusan bisnis, misalnya kapan promosi perlu diperkuat, kapan stok perlu diamankan, dan kapan investigasi cabang atau produk harus diprioritaskan.';
+
+    const response = await withMockGeminiToolResponses(
+      createDashboardAgentResponses({
+        analysisFindings: [
+          {
+            id: 'finding_long_trend',
+            candidate_id: 'revenue_trend',
+            insight: longInsight,
+            evidence: longEvidence,
+            why_it_matters: longWhy,
+            recommended_visual: 'line',
+            priority: 'primary',
+          },
+        ],
+      }),
+      () => runDashboardAgent({
+        tenantId,
+        userId,
+        goal: 'Buat dashboard penjualan yang grounded',
+        intent: {
+          intent: 'show_metric',
+          time_period: '30 hari terakhir',
+        },
+      }),
+    );
+
+    assert.equal(response.presentation_mode, 'canvas');
+    assert.doesNotMatch(response.answer, /\.\.\./);
+    assert.match(response.answer, /stok dan promosi tanpa harus membuka tabel mentah satu per satu/);
+    assert.match(response.answer, /promosi perlu diperkuat, kapan stok perlu diamankan/);
   } finally {
     cleanupTenant(tenantId);
   }
@@ -523,8 +586,8 @@ test('runDashboardAgent builds findings from chart-only dashboards without gener
       }),
     );
 
-    assert.equal(response.widgets.length, 1);
-    assert.equal(response.artifacts[0]?.kind, 'chart');
+    assert.ok(response.widgets.length >= 1);
+    assert.ok(response.artifacts.some((artifact) => artifact?.kind === 'chart'));
     assert.doesNotMatch(response.answer, /dashboard .* sudah siap/i);
     assert.match(response.answer, /trend|berakhir|puncak/i);
   } finally {
@@ -663,6 +726,15 @@ test('runDashboardAgent dedupes repeated worker outputs and collapses unused sec
             directives: { expand_titles: [], add_templates: [], notes: [] },
           }),
         }),
+        geminiToolPayload({
+          text: JSON.stringify({
+            verdict: 'pass',
+            completeness_pct: 100,
+            summary: 'Pass verifikasi kedua juga menilai dashboard ini cukup ringkas.',
+            issues: [],
+            directives: { expand_titles: [], add_templates: [], notes: [] },
+          }),
+        }),
       ],
       () => runDashboardAgent({
         tenantId,
@@ -675,10 +747,11 @@ test('runDashboardAgent dedupes repeated worker outputs and collapses unused sec
       }),
     );
 
-    assert.equal(response.widgets.length, 1);
-    assert.equal(response.artifacts.length, 1);
-    assert.equal(response.widgets[0]?.title, 'Omzet');
-    assert.equal(response.widgets[0]?.layout?.page, 1);
+    assert.ok(response.widgets.length >= 1);
+    assert.ok(response.artifacts.length >= 1);
+    assert.ok(response.widgets.some((widget) => widget?.title === 'Omzet'));
+    assert.ok(response.widgets.every((widget) => Number(widget?.layout?.page || 1) === 1));
+    assert.equal(new Set(response.widgets.map((widget) => widget.title)).size, response.widgets.length);
     assert.equal(response.agent.worker.pages, 1);
   } finally {
     cleanupTenant(tenantId);
@@ -772,6 +845,15 @@ test('runDashboardAgent stops after repeated duplicate worker calls instead of i
             directives: { expand_titles: [], add_templates: [], notes: [] },
           }),
         }),
+        geminiToolPayload({
+          text: JSON.stringify({
+            verdict: 'pass',
+            completeness_pct: 100,
+            summary: 'Pass verifikasi kedua juga tidak menemukan masalah tambahan.',
+            issues: [],
+            directives: { expand_titles: [], add_templates: [], notes: [] },
+          }),
+        }),
       ],
       async ({ requests }) => {
         const result = await runDashboardAgent({
@@ -784,14 +866,16 @@ test('runDashboardAgent stops after repeated duplicate worker calls instead of i
           },
         });
 
-        assert.equal(result.widgets.length, 1);
+        assert.ok(result.widgets.length >= 1);
+        assert.ok(result.widgets.some((widget) => widget?.title === 'Omzet'));
+        assert.ok(result.widgets.every((widget) => Number(widget?.layout?.page || 1) === 1));
         assert.equal(result.agent.tool_calls, 1);
-        assert.ok(requests.length <= 6);
+        assert.ok(requests.length <= 7);
         return result;
       },
     );
 
-    assert.equal(response.widgets[0]?.title, 'Omzet');
+    assert.ok(response.widgets.some((widget) => widget?.title === 'Omzet'));
   } finally {
     cleanupTenant(tenantId);
   }
@@ -839,9 +923,82 @@ test('runDashboardAgent expands layout to use at least 96% of the page width', a
         : max
     ), 0);
     const densityPct = occupiedArea / Math.max(1, rightEdge * contentHeight);
+    const rowCoverage = new Map();
+    for (const widget of response.widgets) {
+      if (Number(widget.layout?.page || 1) !== 1) {
+        continue;
+      }
+      const startRow = Number(widget.layout?.y || 0);
+      const endRow = startRow + Number(widget.layout?.h || 0);
+      const startCol = Number(widget.layout?.x || 0);
+      const endCol = startCol + Number(widget.layout?.w || 0);
+      for (let row = startRow; row < endRow; row += 1) {
+        const columns = rowCoverage.get(row) || new Set();
+        for (let column = startCol; column < endCol; column += 1) {
+          columns.add(column);
+        }
+        rowCoverage.set(row, columns);
+      }
+    }
+    let sparseRowCount = 0;
+    let maxRightGapCols = 0;
+    let topGapRows = 0;
+    for (let row = 0; row < contentHeight; row += 1) {
+      const columns = rowCoverage.get(row) || new Set();
+      const coveragePct = columns.size / 16;
+      const rowRightEdge = columns.size > 0 ? Math.max(...columns) + 1 : 0;
+      if (columns.size === 0 && row === topGapRows) {
+        topGapRows += 1;
+      }
+      if (coveragePct < 0.7) {
+        sparseRowCount += 1;
+      }
+      maxRightGapCols = Math.max(maxRightGapCols, 16 - rowRightEdge);
+    }
 
     assert.ok(rightEdge >= 16);
     assert.ok(densityPct >= 0.72);
+    assert.equal(topGapRows, 0);
+    assert.equal(sparseRowCount, 0);
+    assert.ok(maxRightGapCols <= 4);
+  } finally {
+    cleanupTenant(tenantId);
+  }
+});
+
+test('runDashboardAgent performs at least two reviewer passes before finalizing', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  try {
+    seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
+    seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
+
+    await withMockGeminiToolResponses(
+      createDashboardAgentResponses({
+        templates: ['total_revenue', 'revenue_trend'],
+        placements: [
+          { title: 'Omzet', page: 1, x: 0, y: 0, w: 8, h: 2, kind: 'metric' },
+          { title: 'Trend Omzet', page: 1, x: 0, y: 2, w: 16, h: 4, kind: 'chart' },
+        ],
+      }),
+      async ({ requests }) => {
+        const response = await runDashboardAgent({
+          tenantId,
+          userId,
+          goal: 'Buat dashboard omzet mingguan',
+          intent: {
+            intent: 'show_metric',
+            time_period: '7 hari terakhir',
+          },
+        });
+
+        const reviewerPasses = requests.filter((request) => (
+          JSON.stringify(request).includes('Kamu reviewer visual untuk dashboard analytics.')
+        )).length;
+
+        assert.equal(response.presentation_mode, 'canvas');
+        assert.ok(reviewerPasses >= 2);
+      },
+    );
   } finally {
     cleanupTenant(tenantId);
   }
@@ -854,16 +1011,14 @@ test('runDashboardAgent returns a needs_review draft instead of throwing when re
     seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
 
     const response = await withMockGeminiToolResponses(
-      [
-        ...createDashboardAgentResponses({
-          templates: ['total_revenue', 'revenue_trend'],
-          placements: [
-            { title: 'Omzet', page: 1, x: 0, y: 0, w: 4, h: 2, kind: 'metric' },
-            { title: 'Trend Omzet', page: 1, x: 0, y: 2, w: 8, h: 4, kind: 'chart' },
-          ],
-        }).slice(0, -1),
-        geminiToolPayload({
-          text: JSON.stringify({
+      createDashboardAgentResponses({
+        templates: ['total_revenue', 'revenue_trend'],
+        placements: [
+          { title: 'Omzet', page: 1, x: 0, y: 0, w: 4, h: 2, kind: 'metric' },
+          { title: 'Trend Omzet', page: 1, x: 0, y: 2, w: 8, h: 4, kind: 'chart' },
+        ],
+        reviewerResponses: [
+          {
             verdict: 'fail',
             completeness_pct: 42,
             summary: 'Masih ada area yang perlu dirapikan.',
@@ -873,9 +1028,9 @@ test('runDashboardAgent returns a needs_review draft instead of throwing when re
               add_templates: [],
               notes: ['Perlu review tambahan'],
             },
-          }),
-        }),
-      ],
+          },
+        ],
+      }),
       () => runDashboardAgent({
         tenantId,
         userId,

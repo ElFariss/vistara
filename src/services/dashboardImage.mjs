@@ -1,5 +1,6 @@
 import { Resvg } from '@resvg/resvg-js';
 import { DASHBOARD_GRID_COLS, DASHBOARD_GRID_ROWS, normalizeDashboardLayout } from '../../public/dashboard-layout.js';
+import { SINGLE_VALUE_VISUALS } from './chartCatalog.mjs';
 
 const EXPORT_WIDTH = 1600;
 const EXPORT_HEIGHT = 900;
@@ -29,6 +30,39 @@ const ACCENT = '#f97316';
 const ACCENT_SOFT = 'rgba(249, 115, 22, 0.18)';
 const SERIES_PALETTE = ['#f97316', '#0ea5e9', '#10b981', '#8b5cf6'];
 const PIE_PALETTE = ['#f97316', '#fb923c', '#fdba74', '#f59e0b', '#84cc16', '#38bdf8', '#a78bfa', '#14b8a6'];
+const PIE_LIKE_TYPES = new Set(['pie', 'donut', 'half_donut', 'multi_layer_pie']);
+const BAR_LIKE_TYPES = new Set([
+  'bar',
+  'histogram',
+  'cone',
+  'pyramid',
+  'funnel',
+  'tree',
+  'flowchart',
+  'icon_array',
+  'percentage_bar',
+  'gauge',
+  'radial_wheel',
+  'concentric_circles',
+  'gantt',
+  'timeline',
+  'venn',
+  'mind_map',
+  'dichotomous_key',
+  'pert',
+  'circuit',
+  'map',
+  'choropleth',
+]);
+const LINE_LIKE_TYPES = new Set([
+  'line',
+  'area',
+  'scatter',
+  'bubble',
+  'radar_triangle',
+  'radar_polygon',
+  'polar',
+]);
 
 function escapeXml(value = '') {
   return String(value || '')
@@ -617,14 +651,33 @@ function renderPieChart(artifact, body) {
 
 function renderChartWidget(artifact, body) {
   const chartType = String(artifact.chart_type || 'line').toLowerCase();
-  if (chartType === 'pie') {
+
+  if (SINGLE_VALUE_VISUALS.has(chartType)) {
+    const series = chartSeries(artifact);
+    const value = series[0]?.values?.[0] ?? 0;
+    return renderMetricWidget({
+      ...artifact,
+      kind: 'metric',
+      value: formatCompactNumber(value, {
+        currency: !artifactLooksPercent(artifact),
+        percent: artifactLooksPercent(artifact),
+      }),
+      raw_value: value,
+    }, body);
+  }
+
+  if (PIE_LIKE_TYPES.has(chartType)) {
     return renderPieChart(artifact, body);
   }
 
-  if (chartType === 'bar') {
+  if (BAR_LIKE_TYPES.has(chartType)) {
     const labels = chartLabels(artifact);
     const dense = labels.length > 6 || labels.some((label) => label.length > 12);
     return dense ? renderHorizontalBars(artifact, body) : renderVerticalBars(artifact, body);
+  }
+
+  if (LINE_LIKE_TYPES.has(chartType)) {
+    return renderLineChart(artifact, body);
   }
 
   return renderLineChart(artifact, body);

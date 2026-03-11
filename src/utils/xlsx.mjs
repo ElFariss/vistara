@@ -23,6 +23,32 @@ function unzipText(filePath, entry) {
   }
 }
 
+function sheetIndexFromEntry(entry = '') {
+  const match = String(entry).match(/sheet(\d+)\.xml$/i);
+  return match ? Number(match[1]) : null;
+}
+
+function parseSheetNames(filePath, entries) {
+  if (!entries.includes('xl/workbook.xml')) {
+    return new Map();
+  }
+  const xml = unzipText(filePath, 'xl/workbook.xml');
+  if (!xml) {
+    return new Map();
+  }
+  const map = new Map();
+  const regex = /<sheet[^>]*name="([^"]+)"[^>]*sheetId="(\d+)"/gi;
+  let match;
+  while ((match = regex.exec(xml))) {
+    const name = normalizeWhitespace(decodeXml(match[1]));
+    const sheetId = Number(match[2]);
+    if (Number.isFinite(sheetId)) {
+      map.set(sheetId, name || `Sheet ${sheetId}`);
+    }
+  }
+  return map;
+}
+
 function parseSharedStrings(xml) {
   if (!xml) {
     return [];
@@ -98,39 +124,57 @@ function parseSheetRows(sheetXml, sharedStrings) {
 }
 
 export function parseXlsxFile(filePath) {
-  const entries = getZipEntries(filePath);
-  const sheetEntry = entries
-    .filter((entry) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(entry))
-    .sort()[0];
-
-  if (!sheetEntry) {
+  const sheets = parseXlsxSheets(filePath);
+  if (!sheets.length) {
     throw new Error('File XLSX tidak memiliki worksheet yang didukung.');
   }
+  return sheets[0];
+}
 
+export function parseXlsxSheets(filePath) {
+  const entries = getZipEntries(filePath);
+  const sheetEntries = entries
+    .filter((entry) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(entry))
+    .sort((a, b) => {
+      const aIndex = sheetIndexFromEntry(a) ?? 0;
+      const bIndex = sheetIndexFromEntry(b) ?? 0;
+      return aIndex - bIndex;
+    });
+
+  if (sheetEntries.length === 0) {
+    return [];
+  }
+
+  const nameMap = parseSheetNames(filePath, entries);
   const sharedStringsXml = entries.includes('xl/sharedStrings.xml')
     ? unzipText(filePath, 'xl/sharedStrings.xml')
     : null;
-  const sheetXml = unzipText(filePath, sheetEntry);
-
-  if (!sheetXml) {
-    throw new Error('Gagal membaca isi worksheet XLSX.');
-  }
-
   const sharedStrings = parseSharedStrings(sharedStringsXml);
-  const matrix = parseSheetRows(sheetXml, sharedStrings);
 
-  if (matrix.length === 0) {
-    return { columns: [], rows: [] };
-  }
-
-  const header = matrix[0].map((col, index) => col || `column_${index + 1}`);
-  const rows = matrix.slice(1).filter((values) => values.some((v) => String(v || '').trim() !== '')).map((values) => {
-    const row = {};
-    for (let i = 0; i < header.length; i += 1) {
-      row[header[i]] = values[i] ?? '';
+  return sheetEntries.map((entry) => {
+    const sheetXml = unzipText(filePath, entry);
+    if (!sheetXml) {
+      return { name: normalizeWhitespace(entry), columns: [], rows: [] };
     }
-    return row;
-  });
+    const matrix = parseSheetRows(sheetXml, sharedStrings);
+    if (matrix.length === 0) {
+      return { name: normalizeWhitespace(entry), columns: [], rows: [] };
+    }
 
-  return { columns: header, rows };
+    const header = matrix[0].map((col, index) => col || `column_${index + 1}`);
+    const rows = matrix.slice(1).filter((values) => values.some((v) => String(v || '').trim() !== '')).map((values) => {
+      const row = {};
+      for (let i = 0; i < header.length; i += 1) {
+        row[header[i]] = values[i] ?? '';
+      }
+      return row;
+    });
+    const sheetIndex = sheetIndexFromEntry(entry) ?? 1;
+    const name = nameMap.get(sheetIndex) || `Sheet ${sheetIndex}`;
+    return {
+      name: normalizeWhitespace(name) || `Sheet ${sheetIndex}`,
+      columns: header,
+      rows,
+    };
+  });
 }

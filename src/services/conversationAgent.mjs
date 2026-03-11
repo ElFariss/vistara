@@ -1,9 +1,11 @@
+import { config } from '../config.mjs';
 import { generateId } from '../utils/ids.mjs';
 import { generateWithGeminiTools } from './gemini.mjs';
 import { executeAnalyticsIntent } from './queryEngine.mjs';
 import { inspectDatasetQuestion, getDatasetProfile } from './dataProfile.mjs';
 import { repairLatestSourceIfNeeded } from './ingestion.mjs';
 import { DashboardAgentError, runDashboardAgent } from './agentRuntime.mjs';
+import { createDashboard } from './dashboards.mjs';
 import {
   ensureConversationAgentState,
   getConversationAgentState,
@@ -51,6 +53,10 @@ function buildHistoryContext(history = [], limit = 10) {
     .join('\n');
 }
 
+function normalizeIntentText(message = '') {
+  return String(message || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
 function compactDatasetProfile(profile = null) {
   if (!profile) {
     return null;
@@ -95,6 +101,206 @@ function compactDraftDashboard(draft = null) {
   };
 }
 
+function compactSavedDashboard(dashboard = null) {
+  if (!dashboard || typeof dashboard !== 'object') {
+    return null;
+  }
+
+  const components = Array.isArray(dashboard.config?.components)
+    ? dashboard.config.components.slice(0, 8).map((component) => ({
+        title: component.title || 'Widget',
+        type: component.type || 'chart',
+        metric: component.metric || component.query?.metric || component.query?.template_id || null,
+      }))
+    : [];
+
+  return {
+    id: dashboard.id || null,
+    name: dashboard.name || 'Dashboard',
+    is_default: Boolean(dashboard.is_default),
+    updated_by: dashboard.config?.updated_by || null,
+    components,
+  };
+}
+
+function isUntouchedDefaultDashboard(dashboard = null) {
+  return Boolean(dashboard?.is_default) && String(dashboard?.config?.updated_by || '').trim().toLowerCase() === 'system';
+}
+
+function hasMeaningfulDashboardContext(agentState = null, savedDashboard = null) {
+  if (Array.isArray(agentState?.draft_dashboard?.widgets) && agentState.draft_dashboard.widgets.length > 0) {
+    return true;
+  }
+
+  if (!savedDashboard) {
+    return false;
+  }
+
+  if (isUntouchedDefaultDashboard(savedDashboard)) {
+    return false;
+  }
+
+  return Array.isArray(savedDashboard.config?.components) && savedDashboard.config.components.length > 0;
+}
+
+function isDashboardIntentMessage(message = '') {
+  const text = normalizeIntentText(message);
+  if (!text) {
+    return false;
+  }
+
+  return /\b(dashboard|kanvas|canvas|visual|widget|grafik|chart|laporan)\b/.test(text)
+    || /\b(buat|buatkan|bikin|susun|generate|rangkai|siapin|siapkan)\b.*\b(dashboard|visual|grafik|chart|laporan)\b/.test(text)
+    || /\b(buatin|gacor|lihat aja dataset|liat aja dataset)\b/.test(text);
+}
+
+function isDashboardContinuationMessage(message = '') {
+  const text = normalizeIntentText(message);
+  if (!text || isDashboardIntentMessage(text)) {
+    return false;
+  }
+
+  return /\b(buat aja|bikin aja|terserah|bebas|apa aja|apa pun|apapun|ngga tau|nggak tau|gak tau|ga tau|gatau|lanjut|lanjut aja|sesuai data|berdasarkan data|yang terbaik|yang paling penting|penjualan|sales|omzet|profit|produk|cabang|transaksi|pelanggan)\b/.test(text);
+}
+
+function dashboardChoiceFromMessage(message = '') {
+  const text = normalizeIntentText(message);
+  if (!text) {
+    return null;
+  }
+
+  if (/\b(edit|ubah|rapikan|revisi|perbarui|update|yang ada|yang ini|yang lama|dashboard aktif)\b/.test(text)) {
+    return 'edit';
+  }
+
+  if (/\b(baru|baru aja|baru saja|dashboard baru|dashboard lain|buat baru|bikin baru|new|lain)\b/.test(text)) {
+    return 'new';
+  }
+
+  return null;
+}
+
+function pendingDashboardChoice(agentState = null) {
+  return agentState?.memory?.[TEAM.orchestrator]?.pending_dashboard_choice || null;
+}
+
+function nextOrchestratorMemory(agentState = null, patch = {}) {
+  const existingMemory = agentState?.memory && typeof agentState.memory === 'object' ? agentState.memory : {};
+  const existingOrchestrator = existingMemory[TEAM.orchestrator] && typeof existingMemory[TEAM.orchestrator] === 'object'
+    ? existingMemory[TEAM.orchestrator]
+    : {};
+
+  return {
+    ...existingMemory,
+    [TEAM.orchestrator]: {
+      ...existingOrchestrator,
+      ...patch,
+      last_updated_at: new Date().toISOString(),
+    },
+  };
+}
+
+function dashboardChoicePrompt() {
+  return [
+    'Ada dashboard yang sedang aktif.',
+    '',
+    '- Balas `edit` untuk mengubah dashboard yang ada.',
+    '- Balas `baru` untuk membuat dashboard baru.',
+  ].join('\n');
+}
+
+function buildDashboardContext(agentState = null, savedDashboard = null) {
+  const draft = agentState?.draft_dashboard || null;
+  const findings = Array.isArray(draft?.analysis_brief?.findings)
+    ? draft.analysis_brief.findings.slice(0, 4).map((finding) => ({
+        title: finding.title || null,
+        insight: finding.insight || null,
+        why_it_matters: finding.why_it_matters || null,
+        recommended_visual: finding.recommended_visual || null,
+      }))
+    : [];
+
+  return {
+    active_dashboard: compactSavedDashboard(savedDashboard),
+    draft_dashboard: compactDraftDashboard(draft),
+    latest_findings: findings,
+  };
+}
+
+function hasRecentDashboardConversation(history = [], agentState = null) {
+  if (pendingDashboardChoice(agentState)) {
+    return true;
+  }
+
+  const recentHistory = Array.isArray(history) ? history.slice(-6) : [];
+  return recentHistory.some((item) => {
+    const content = normalizeIntentText(item?.content || '');
+    if (!content) {
+      return false;
+    }
+    if (item?.role === 'user') {
+      return isDashboardIntentMessage(content);
+    }
+    return /\bdashboard\b/.test(content);
+  });
+}
+
+function shouldPromoteToDashboardRoute({ message, history = [], datasetReady = false, agentState = null }) {
+  if (!datasetReady) {
+    return false;
+  }
+
+  if (isDashboardIntentMessage(message)) {
+    return true;
+  }
+
+  return isDashboardContinuationMessage(message) && hasRecentDashboardConversation(history, agentState);
+}
+
+function normalizeRouteDecision({ route, message, datasetReady = false, history = [], agentState = null }) {
+  const nextRoute = route && typeof route === 'object' ? { ...route } : { action: 'ask_clarification' };
+  const originalAction = nextRoute.action;
+  if (shouldPromoteToDashboardRoute({ message, history, datasetReady, agentState })
+    && !['create_dashboard', 'edit_dashboard'].includes(originalAction)) {
+    nextRoute.action = 'create_dashboard';
+    nextRoute.reason = originalAction === 'inspect_dataset'
+      ? 'dashboard_intent_overrode_dataset_inspection'
+      : 'dashboard_intent_auto_promoted';
+  }
+  return nextRoute;
+}
+
+function dashboardShellName(message = '') {
+  const cleaned = String(message || '')
+    .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) {
+    return 'Dashboard Baru';
+  }
+
+  const tokens = cleaned
+    .split(' ')
+    .filter((token) => token.length > 2)
+    .slice(0, 3)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1).toLowerCase());
+
+  return tokens.length > 0 ? `Dashboard ${tokens.join(' ')}` : 'Dashboard Baru';
+}
+
+function emptyDashboardShellConfig() {
+  return {
+    mode: 'ai',
+    pages: 1,
+    components: [],
+    updated_by: 'assistant',
+  };
+}
+
+function shouldAskDashboardChoice({ route, agentState, savedDashboard }) {
+  return route?.action === 'create_dashboard' && hasMeaningfulDashboardContext(agentState, savedDashboard);
+}
+
 function classifyGeminiFailure(result, fallbackMessage = 'Layanan AI sedang bermasalah.') {
   const reason = String(result?.reason || '').toLowerCase();
   if (reason === 'missing_api_key') {
@@ -134,8 +340,11 @@ function detectBlockingDatasetIssue(profile = null) {
     return null;
   }
 
-  const numericColumns = Array.isArray(profile.detected?.numeric_columns) ? profile.detected.numeric_columns : [];
-  const dateColumns = Array.isArray(profile.detected?.date_columns) ? profile.detected.date_columns : [];
+  const numericColumns = Array.isArray(profile.detected?.numeric_columns) && profile.detected.numeric_columns.length > 0
+    ? profile.detected.numeric_columns
+    : Array.isArray(profile.columns)
+      ? profile.columns.filter((column) => column?.kind === 'number').map((column) => column.name).filter(Boolean)
+      : [];
 
   if (numericColumns.length === 0) {
     return {
@@ -143,15 +352,6 @@ function detectBlockingDatasetIssue(profile = null) {
       issue: 'measure_missing',
       title: 'Kolom angka utama belum kebaca',
       prompt: 'Saya belum menemukan kolom angka yang cukup jelas untuk dianalisis. Mau saya coba perbaiki mapping source terbaru secara otomatis?',
-    };
-  }
-
-  if (dateColumns.length === 0) {
-    return {
-      type: 'repair_latest_source',
-      issue: 'date_missing',
-      title: 'Kolom tanggal belum kebaca',
-      prompt: 'Saya belum menemukan kolom tanggal yang cukup jelas. Mau saya coba perbaiki format dan mapping source terbaru secara otomatis?',
     };
   }
 
@@ -341,6 +541,8 @@ async function classifyRoute({ message, history, datasetReady, agentState, userD
       'Gunakan create_dashboard bila user meminta dashboard, canvas, atau visual lengkap.',
       'Gunakan edit_dashboard bila user ingin mengubah dashboard yang sedang aktif.',
       'Gunakan inspect_dataset bila user ingin mengecek struktur atau kualitas dataset.',
+      'Jika dataset tersedia dan user meminta dashboard meskipun masih samar, utamakan create_dashboard dan biarkan agent menyusun visual terbaik dari data yang ada.',
+      'Jika user sebelumnya sudah meminta dashboard lalu menulis hal seperti "buat aja", "terserah", "lihat aja datasetnya", atau hanya menyebut fokus bisnis seperti penjualan/omzet, tetap pilih create_dashboard.',
       'Jika belum jelas, gunakan ask_clarification.',
       userDisplayName ? `Nama user: ${userDisplayName}.` : 'Nama user belum diketahui.',
       datasetReady ? 'Dataset user tersedia.' : 'Dataset user belum tersedia.',
@@ -459,6 +661,7 @@ async function generateSurfaceReply({ message, history, datasetReady, userDispla
       tools: SURFACE_REPLY_TOOL_DECLARATIONS,
       temperature: attempt === 0 ? 0.45 : 0.25,
       maxOutputTokens: attempt === 0 ? 220 : 280,
+      modelOverride: config.geminiModelLight || config.geminiModel,
       thinkingBudget: 128,
       functionCallingMode: 'ANY',
       allowedFunctionNames: ['reply_user'],
@@ -486,7 +689,7 @@ async function generateSurfaceReply({ message, history, datasetReady, userDispla
   });
 }
 
-async function buildAnalyticsIntent({ message, history, route, datasetProfile }) {
+async function buildAnalyticsIntent({ message, history, route, datasetProfile, dashboardContext = null }) {
   const result = await generateWithGeminiTools({
     systemPrompt: [
       `Kamu adalah ${TEAM.analyst}, data analyst agent Vistara.`,
@@ -495,12 +698,15 @@ async function buildAnalyticsIntent({ message, history, route, datasetProfile })
       'metric boleh menggunakan istilah bisnis seperti revenue, profit, margin, expense, top_products, branch_performance, revenue_trend.',
       'Pilih rank bila user meminta top/ranking/peringkat, compare bila user membandingkan periode, explain bila user meminta penjelasan umum tren, selain itu show_metric.',
       'Gunakan konteks dataset hanya untuk menghindari field yang tidak masuk akal.',
+      'Jika user bertanya produk yang perlu didorong atau dijual lebih banyak, prioritaskan top_products atau ranking produk yang benar-benar bisa dibuktikan dari data.',
+      'Jika user bertanya kenapa performa turun/naik, prioritaskan revenue_trend atau compare dengan periode relevan.',
     ].join(' '),
     userPrompt: JSON.stringify({
       message,
       history: buildHistoryContext(history),
       route,
       dataset_profile: compactDatasetProfile(datasetProfile),
+      dashboard_context: dashboardContext,
     }),
     tools: [
       {
@@ -645,6 +851,10 @@ export async function runConversationAgent({
   const trace = [];
   const runId = generateId();
   let agentState = ensureConversationAgentState({ tenantId, userId, conversationId });
+  let effectiveMessage = message;
+  let resolvedSavedDashboard = savedDashboard;
+  let route = null;
+  let resolvedDashboardChoice = null;
 
   emitAgentStart(hooks, {
     run_id: runId,
@@ -679,13 +889,81 @@ export async function runConversationAgent({
     }
   }
 
-  const route = await classifyRoute({
-    message,
-    history,
-    datasetReady,
-    agentState,
-    userDisplayName,
-  });
+  const pendingChoice = pendingDashboardChoice(agentState);
+  if (pendingChoice) {
+    const choice = dashboardChoiceFromMessage(message);
+    if (!choice) {
+      const nextState = updateConversationAgentState({
+        tenantId,
+        userId,
+        conversationId,
+        activeRun: {
+          run_id: runId,
+          status: 'waiting_choice',
+          stage: 'dashboard_choice',
+          completed_at: new Date().toISOString(),
+        },
+      });
+
+      return {
+        answer: dashboardChoicePrompt(),
+        content_format: 'markdown',
+        widgets: [],
+        artifacts: [],
+        presentation_mode: 'chat',
+        intent: {
+          intent: 'clarify_dashboard_choice',
+          nlu_source: 'atlas_memory',
+        },
+        draft_dashboard: nextState?.draft_dashboard || null,
+        pending_approval: nextState?.pending_approval || null,
+        agent: {
+          mode: 'agentic_team_runtime',
+          run_id: runId,
+          team: TEAM,
+          trace,
+          route: {
+            action: 'ask_clarification',
+            reason: 'pending_dashboard_choice',
+          },
+        },
+      };
+    }
+
+    agentState = updateConversationAgentState({
+      tenantId,
+      userId,
+      conversationId,
+      memory: nextOrchestratorMemory(agentState, {
+        pending_dashboard_choice: null,
+        last_dashboard_choice: choice,
+      }),
+    });
+
+    resolvedDashboardChoice = choice;
+    effectiveMessage = String(pendingChoice.message_context || message).trim() || message;
+    route = {
+      ...(pendingChoice.requested_route || {}),
+      action: choice === 'edit' ? 'edit_dashboard' : 'create_dashboard',
+      reason: `resolved_dashboard_choice_${choice}`,
+    };
+  }
+
+  if (!route) {
+    route = normalizeRouteDecision({
+      route: await classifyRoute({
+        message,
+        history,
+        datasetReady,
+        agentState,
+        userDisplayName,
+      }),
+      message,
+      datasetReady,
+      history,
+      agentState,
+    });
+  }
   pushTrace(trace, { step: 'atlas_route', route });
   emitAgentStep(hooks, {
     run_id: runId,
@@ -696,7 +974,7 @@ export async function runConversationAgent({
 
   if (!datasetReady && ['analyze', 'inspect_dataset', 'create_dashboard', 'edit_dashboard'].includes(route.action)) {
     const answer = await generateSurfaceReply({
-      message,
+      message: effectiveMessage,
       history,
       datasetReady,
       userDisplayName,
@@ -718,6 +996,7 @@ export async function runConversationAgent({
 
     return {
       answer,
+      content_format: 'plain',
       widgets: [],
       artifacts: [],
       presentation_mode: 'chat',
@@ -737,9 +1016,52 @@ export async function runConversationAgent({
     };
   }
 
+  if (!resolvedDashboardChoice && shouldAskDashboardChoice({ route, agentState, savedDashboard: resolvedSavedDashboard })) {
+    agentState = updateConversationAgentState({
+      tenantId,
+      userId,
+      conversationId,
+      memory: nextOrchestratorMemory(agentState, {
+        pending_dashboard_choice: {
+          asked_at: new Date().toISOString(),
+          message_context: effectiveMessage,
+          saved_dashboard_id: resolvedSavedDashboard?.id || agentState?.draft_dashboard?.saved_dashboard_id || null,
+          requested_route: route,
+        },
+      }),
+      activeRun: {
+        run_id: runId,
+        status: 'waiting_choice',
+        stage: 'dashboard_choice',
+        completed_at: new Date().toISOString(),
+      },
+    });
+
+    return {
+      answer: dashboardChoicePrompt(),
+      content_format: 'markdown',
+      widgets: [],
+      artifacts: [],
+      presentation_mode: 'chat',
+      intent: {
+        intent: 'clarify_dashboard_choice',
+        nlu_source: 'atlas_gemini',
+      },
+      draft_dashboard: agentState?.draft_dashboard || null,
+      pending_approval: agentState?.pending_approval || null,
+      agent: {
+        mode: 'agentic_team_runtime',
+        run_id: runId,
+        team: TEAM,
+        trace,
+        route,
+      },
+    };
+  }
+
   if (route.action === 'conversational' || route.action === 'ask_clarification') {
     const answer = await generateSurfaceReply({
-      message,
+      message: effectiveMessage,
       history,
       datasetReady,
       userDisplayName,
@@ -773,6 +1095,7 @@ export async function runConversationAgent({
 
     return {
       answer,
+      content_format: 'plain',
       widgets: [],
       artifacts: [],
       presentation_mode: 'chat',
@@ -817,6 +1140,7 @@ export async function runConversationAgent({
     pushTrace(trace, { step: 'dataset_inspection', columns: inspection.profile?.summary?.columns || 0 });
     return {
       answer: inspection.answer,
+      content_format: 'plain',
       widgets: [],
       artifacts: inspection.artifacts || [],
       dataset_profile: inspection.profile || null,
@@ -846,10 +1170,11 @@ export async function runConversationAgent({
     });
 
     const analysisIntent = await buildAnalyticsIntent({
-      message,
+      message: effectiveMessage,
       history,
       route,
       datasetProfile,
+      dashboardContext: buildDashboardContext(agentState, resolvedSavedDashboard),
     });
     const analytics = executeAnalyticsIntent({
       tenantId,
@@ -888,6 +1213,7 @@ export async function runConversationAgent({
     pushTrace(trace, { step: 'analysis', template_id: analytics.template_id, intent: analysisIntent.intent });
     return {
       ...analytics,
+      content_format: 'markdown',
       presentation_mode: 'chat',
       intent: analysisIntent,
       draft_dashboard: nextState?.draft_dashboard || null,
@@ -952,7 +1278,16 @@ export async function runConversationAgent({
       };
     }
 
-    const baseDashboard = runDashboardBaseFromState(agentState, savedDashboard);
+    let baseDashboard = runDashboardBaseFromState(agentState, resolvedSavedDashboard);
+    if (route.action === 'create_dashboard' && (!baseDashboard || hasMeaningfulDashboardContext(agentState, resolvedSavedDashboard))) {
+      baseDashboard = createDashboard(
+        tenantId,
+        userId,
+        dashboardShellName(effectiveMessage),
+        emptyDashboardShellConfig(),
+      );
+      resolvedSavedDashboard = baseDashboard;
+    }
     emitAgentStart(hooks, {
       run_id: runId,
       agent: TEAM.creator,
@@ -974,9 +1309,9 @@ export async function runConversationAgent({
     const dashboardResult = await runDashboardAgent({
       tenantId,
       userId,
-      dashboardId,
+      dashboardId: baseDashboard?.id || dashboardId,
       dashboard: baseDashboard,
-      goal: message,
+      goal: effectiveMessage,
       request: {
         time_period: route.time_period || '30 hari terakhir',
         branch: route.branch || null,
@@ -1051,6 +1386,8 @@ export async function runConversationAgent({
     });
     return {
       ...dashboardResult,
+      content_format: 'markdown',
+      dashboard: baseDashboard,
       draft_dashboard: nextState?.draft_dashboard || latestDraft,
       save_required: true,
       intent: {
@@ -1109,6 +1446,7 @@ export async function applyConversationApproval({ tenantId, userId, conversation
     });
     return {
       answer: 'Baik, saya tidak mengubah dataset. Saya akan tetap membantu sebisanya dengan kondisi data yang ada.',
+      content_format: 'plain',
       widgets: [],
       artifacts: [],
       presentation_mode: 'chat',
@@ -1158,6 +1496,7 @@ export async function applyConversationApproval({ tenantId, userId, conversation
   if (!repair.ok) {
     return {
       answer: 'Perbaikan data belum berhasil. Dataset lama tetap dipertahankan, jadi Anda masih bisa lanjut memakai data sebelumnya.',
+      content_format: 'plain',
       widgets: [],
       artifacts: [],
       dataset_profile: nextProfile,
@@ -1184,6 +1523,7 @@ export async function applyConversationApproval({ tenantId, userId, conversation
 
   return {
     answer: 'Perbaikan source terbaru selesai. Anda bisa lanjut minta analisis atau dashboard lagi.',
+    content_format: 'plain',
     widgets: [],
     artifacts: [],
     dataset_profile: nextProfile,

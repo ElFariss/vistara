@@ -12,6 +12,7 @@ import {
 } from '../services/ingestion.mjs';
 import { getDatasetProfile, inspectDatasetQuestion } from '../services/dataProfile.mjs';
 import { executeBuilderQuery, getBuilderSchema } from '../services/queryEngine.mjs';
+import { listDatasetTables, getDatasetTable } from '../services/datasetTables.mjs';
 import { safeJsonParse } from '../utils/parse.mjs';
 import { generateId } from '../utils/ids.mjs';
 import { createLogger } from '../utils/logger.mjs';
@@ -414,7 +415,49 @@ export function registerDataRoutes(router) {
     async (ctx) => {
       return sendJson(ctx.res, 200, {
         ok: true,
-        schema: getBuilderSchema(),
+        schema: getBuilderSchema(ctx.user.tenant_id),
+      });
+    },
+    { auth: true },
+  );
+
+  router.register(
+    'GET',
+    '/api/data/tables',
+    async (ctx) => {
+      const tables = listDatasetTables(ctx.user.tenant_id).map((table) => ({
+        id: table.id,
+        name: table.name,
+        row_count: table.row_count,
+        columns: table.columns,
+        profile: table.profile,
+        description: table.profile?.columns?.length
+          ? `${table.row_count} baris • ${table.profile.columns.length} kolom`
+          : `${table.row_count} baris`,
+      }));
+      return sendJson(ctx.res, 200, { ok: true, tables });
+    },
+    { auth: true },
+  );
+
+  router.register(
+    'GET',
+    '/api/data/tables/:id/preview',
+    async (ctx) => {
+      const table = getDatasetTable(ctx.user.tenant_id, ctx.params.id);
+      if (!table) {
+        return sendError(ctx.res, 404, 'DATASET_TABLE_NOT_FOUND', 'Dataset table tidak ditemukan.');
+      }
+      const limit = Number.parseInt(String(ctx.query.get('limit') || '5'), 10);
+      const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 25) : 5;
+      const rows = Array.isArray(table.rows) ? table.rows.slice(0, safeLimit) : [];
+      return sendJson(ctx.res, 200, {
+        ok: true,
+        id: table.id,
+        name: table.name,
+        columns: table.columns,
+        rows,
+        row_count: table.row_count,
       });
     },
     { auth: true },

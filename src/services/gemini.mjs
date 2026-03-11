@@ -424,6 +424,7 @@ export async function generateWithGeminiTools({
   tools = [],
   temperature = 0.1,
   maxOutputTokens = 800,
+  modelOverride = null,
   thinkingLevel = null,
   thinkingBudget = null,
   includeThoughts = false,
@@ -454,7 +455,8 @@ export async function generateWithGeminiTools({
     };
   }
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${config.geminiModel}:generateContent`;
+  const model = String(modelOverride || config.geminiModel || '').trim();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60000);
   const prompt = buildPrompt(systemPrompt, userPrompt);

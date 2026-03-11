@@ -3,6 +3,7 @@ import { createGridStackLite } from './vendor/gridstack-lite.js?v=20260307e';
 import { resolveCanvasViewportTarget } from './canvasViewport.js';
 import { shouldRetryNonStreamChatRequest } from './chatRequestPolicy.js';
 import { summarizeChartArtifactForExport } from './exportSummary.js?v=20260309a';
+import { CHART_CATALOG, chartDefinition, chartIconSvg, SINGLE_VALUE_VISUALS } from './chartCatalog.js?v=20260311a';
 import {
   didDeleteActiveConversation,
   normalizeAppPath,
@@ -85,6 +86,8 @@ const state = {
   conversationMessageCount: 0,
   conversations: [],
   messages: [],
+  dashboards: [],
+  selectedDashboardId: null,
   currentDashboard: null,
   draftDashboard: null,
   canvasWidgets: [],
@@ -92,6 +95,7 @@ const state = {
   isWorkspaceBooting: false,
   datasetReady: false,
   schema: null,
+  datasetTables: [],
   grid: null,
   isDemoSession: false,
   canvasOpen: false,
@@ -113,6 +117,14 @@ const state = {
   openConversationMenuId: null,
   dataPaneCollapsed: true,
   configPaneCollapsed: true,
+  widgetBuilderOpen: false,
+  widgetBuilderStep: 'type',
+  widgetBuilderSelection: {
+    visualization: null,
+    datasetId: null,
+    axes: {},
+  },
+  widgetBuilderActiveAxis: null,
   preChatTickerIndex: 0,
   preChatTickerInterval: null,
   preChatTickerSwapTimer: null,
@@ -195,6 +207,7 @@ const refs = {
   sessionRailToggleBtn: document.getElementById('sessionRailToggleBtn'),
   sessionRailToggleLabel: document.getElementById('sessionRailToggleLabel'),
   sessionList: document.getElementById('sessionList'),
+  dashboardList: document.getElementById('dashboardList'),
   newSessionBtn: document.getElementById('newSessionBtn'),
 
   chatPane: document.getElementById('chatPane'),
@@ -228,10 +241,24 @@ const refs = {
 
   persistDraftBtn: document.getElementById('persistDraftBtn'),
   saveCanvasBtn: document.getElementById('saveCanvasBtn'),
-  closeCanvasBtn: document.getElementById('closeCanvasBtn'),
   toggleDataPaneBtn: document.getElementById('toggleDataPaneBtn'),
   toggleConfigPaneBtn: document.getElementById('toggleConfigPaneBtn'),
   addWidgetToolbar: document.getElementById('addWidgetToolbar'),
+  widgetBuilderBackdrop: document.getElementById('widgetBuilderBackdrop'),
+  widgetBuilderModal: document.getElementById('widgetBuilderModal'),
+  widgetBuilderCloseBtn: document.getElementById('widgetBuilderCloseBtn'),
+  widgetBuilderTitle: document.getElementById('widgetBuilderTitle'),
+  widgetBuilderStepType: document.getElementById('widgetBuilderStepType'),
+  widgetBuilderStepConfig: document.getElementById('widgetBuilderStepConfig'),
+  widgetTypeGrid: document.getElementById('widgetTypeGrid'),
+  widgetAxisList: document.getElementById('widgetAxisList'),
+  widgetAxisHint: document.getElementById('widgetAxisHint'),
+  widgetDatasetTitle: document.getElementById('widgetDatasetTitle'),
+  widgetDatasetMeta: document.getElementById('widgetDatasetMeta'),
+  widgetDatasetList: document.getElementById('widgetDatasetList'),
+  widgetDatasetPreview: document.getElementById('widgetDatasetPreview'),
+  widgetBuilderBackBtn: document.getElementById('widgetBuilderBackBtn'),
+  widgetBuilderNextBtn: document.getElementById('widgetBuilderNextBtn'),
   editModeBtn: document.getElementById('editModeBtn'),
   floatingAddBtn: document.getElementById('floatingAddBtn'),
   zoomInBtn: document.getElementById('zoomInBtn'),
@@ -358,8 +385,141 @@ function dashboardSummaryParagraphs(message = {}) {
   return String(message.content || '')
     .split(/\n{2,}/)
     .map((value) => value.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .slice(0, 2);
+    .filter(Boolean);
+}
+
+function plainTextFromMarkdown(content = '') {
+  return String(content || '')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function parseMarkdownBlocks(content = '') {
+  const lines = String(content || '')
+    .replace(/\r\n/g, '\n')
+    .split('\n');
+
+  const blocks = [];
+  let paragraph = [];
+
+  const flushParagraph = () => {
+    const text = paragraph.join(' ').replace(/\s+/g, ' ').trim();
+    if (text) {
+      blocks.push({ type: 'paragraph', text });
+    }
+    paragraph = [];
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    if (!line) {
+      flushParagraph();
+      continue;
+    }
+
+    const unorderedMatch = line.match(/^[-*+]\s+(.+)$/);
+    const orderedMatch = line.match(/^(\d+)\.\s+(.+)$/);
+
+    if (unorderedMatch || orderedMatch) {
+      flushParagraph();
+      const type = unorderedMatch ? 'ul' : 'ol';
+      const items = [];
+      let cursor = index;
+      while (cursor < lines.length) {
+        const nextLine = lines[cursor].trim();
+        const nextMatch = type === 'ul'
+          ? nextLine.match(/^[-*+]\s+(.+)$/)
+          : nextLine.match(/^\d+\.\s+(.+)$/);
+        if (!nextMatch) {
+          break;
+        }
+        items.push(nextMatch[1].trim());
+        cursor += 1;
+      }
+      blocks.push({ type, items });
+      index = cursor - 1;
+      continue;
+    }
+
+    paragraph.push(line);
+  }
+
+  flushParagraph();
+  return blocks;
+}
+
+function appendInlineMarkdown(parent, content = '') {
+  const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g;
+  let lastIndex = 0;
+  const text = String(content || '');
+
+  for (const match of text.matchAll(pattern)) {
+    const token = match[0];
+    const start = match.index ?? 0;
+    if (start > lastIndex) {
+      parent.append(document.createTextNode(text.slice(lastIndex, start)));
+    }
+
+    let node = null;
+    if (token.startsWith('**') && token.endsWith('**')) {
+      node = document.createElement('strong');
+      node.textContent = token.slice(2, -2);
+    } else if (token.startsWith('*') && token.endsWith('*')) {
+      node = document.createElement('em');
+      node.textContent = token.slice(1, -1);
+    } else if (token.startsWith('`') && token.endsWith('`')) {
+      node = document.createElement('code');
+      node.textContent = token.slice(1, -1);
+    }
+
+    if (node) {
+      parent.append(node);
+    } else {
+      parent.append(document.createTextNode(token));
+    }
+    lastIndex = start + token.length;
+  }
+
+  if (lastIndex < text.length) {
+    parent.append(document.createTextNode(text.slice(lastIndex)));
+  }
+}
+
+function renderMarkdownContent(container, content = '', options = {}) {
+  const blocks = parseMarkdownBlocks(content);
+  const className = options.className || '';
+  if (className) {
+    container.classList.add(className);
+  }
+
+  if (blocks.length === 0) {
+    const fallback = document.createElement('p');
+    fallback.textContent = String(content || '').trim();
+    container.append(fallback);
+    return;
+  }
+
+  blocks.forEach((block, index) => {
+    if (block.type === 'paragraph') {
+      const paragraph = document.createElement(index === 0 && options.firstParagraphAsSpan ? 'span' : 'p');
+      appendInlineMarkdown(paragraph, block.text);
+      container.append(paragraph);
+      return;
+    }
+
+    const list = document.createElement(block.type === 'ol' ? 'ol' : 'ul');
+    block.items.forEach((item) => {
+      const li = document.createElement('li');
+      appendInlineMarkdown(li, item);
+      list.append(li);
+    });
+    container.append(list);
+  });
 }
 
 function setAccent(accentKey = 'orange') {
@@ -864,7 +1024,7 @@ function normalizeTimelineTitle(title = '') {
 }
 
 function summarizeDashboardText(content = '') {
-  const value = String(content || '').replace(/\s+/g, ' ').trim();
+  const value = plainTextFromMarkdown(content || '');
   if (!value) {
     return 'Ringkasan dashboard siap dibuka di panel kanan.';
   }
@@ -1126,6 +1286,8 @@ function setCanvasOpen(open) {
     queueCanvasStageCenter();
     queueCanvasArtifactRefresh();
   }
+
+  updateChatHeader();
 }
 
 function setCanvasPreparing(preparing, options = {}) {
@@ -1604,6 +1766,7 @@ function appendMessage(message) {
     id: message.id || generateMessageId(),
     role: message.role,
     content: message.content || '',
+    contentFormat: message.contentFormat || 'plain',
     fileName: message.fileName || null,
     mode: message.mode || 'chat',
     widgets: Array.isArray(message.widgets) ? message.widgets : [],
@@ -1668,6 +1831,7 @@ function commitAssistantMessage(message) {
     id: message.id || generateMessageId(),
     role: message.role || 'assistant',
     content: message.content || '',
+    contentFormat: message.contentFormat || 'plain',
     fileName: message.fileName || null,
     mode: message.mode || 'chat',
     widgets: Array.isArray(message.widgets) ? message.widgets : [],
@@ -1727,19 +1891,26 @@ function renderDashboardSummary(message) {
   title.textContent = 'Temuan dashboard';
   card.append(title);
 
-  const paragraphs = dashboardSummaryParagraphs(message);
-  if (paragraphs.length === 0) {
-    const meta = document.createElement('span');
-    meta.className = 'summary-meta';
-    meta.textContent = summarizeDashboardText(message.content);
-    card.append(meta);
+  if (message.contentFormat === 'markdown' && String(message.content || '').trim()) {
+    const summaryBody = document.createElement('div');
+    summaryBody.className = 'summary-markdown';
+    renderMarkdownContent(summaryBody, message.content, { className: 'summary-markdown' });
+    card.append(summaryBody);
   } else {
-    paragraphs.forEach((paragraph, index) => {
-      const block = document.createElement(index === 0 ? 'p' : 'span');
-      block.className = index === 0 ? 'summary-meta' : 'summary-support';
-      block.textContent = paragraph;
-      card.append(block);
-    });
+    const paragraphs = dashboardSummaryParagraphs(message);
+    if (paragraphs.length === 0) {
+      const meta = document.createElement('span');
+      meta.className = 'summary-meta';
+      meta.textContent = summarizeDashboardText(message.content);
+      card.append(meta);
+    } else {
+      paragraphs.forEach((paragraph, index) => {
+        const block = document.createElement(index === 0 ? 'p' : 'span');
+        block.className = index === 0 ? 'summary-meta' : 'summary-support';
+        block.textContent = paragraph;
+        card.append(block);
+      });
+    }
   }
 
   const openBtn = document.createElement('button');
@@ -1782,43 +1953,18 @@ function renderDashboardSummary(message) {
   return card;
 }
 
-function renderTimeline(message) {
-  const wrap = document.createElement('div');
-  wrap.className = 'timeline-card';
-
-  const header = document.createElement('div');
-  header.className = 'timeline-head';
-  const title = document.createElement('strong');
-  title.textContent = normalizeTimelineTitle(message.timelineTitle || message.content);
-  const toggle = document.createElement('button');
-  toggle.type = 'button';
-  toggle.className = 'ghost timeline-toggle';
-  toggle.textContent = message.collapsed ? 'Tampilkan' : 'Sembunyikan';
-  toggle.addEventListener('click', () => {
-    message.collapsed = !message.collapsed;
-    renderThread();
-  });
-  header.append(title, toggle);
-  wrap.append(header);
-
-  if (!message.collapsed && Array.isArray(message.timeline)) {
-    const list = document.createElement('div');
-    list.className = 'timeline-steps';
-    message.timeline.forEach((step) => {
-      const row = document.createElement('div');
-      row.className = `timeline-step ${step.status}`;
-      const indicator = document.createElement('span');
-      indicator.className = 'timeline-indicator';
-      indicator.textContent = step.status === 'done' ? '✓' : step.status === 'error' ? '!' : '•';
-      const label = document.createElement('span');
-      label.textContent = step.label;
-      row.append(indicator, label);
-      list.append(row);
-    });
-    wrap.append(list);
+function renderMessageContent(bubble, message) {
+  if (message.contentFormat === 'markdown' && message.role === 'assistant') {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg-markdown';
+    renderMarkdownContent(wrap, message.content, { className: 'msg-markdown' });
+    bubble.append(wrap);
+    return;
   }
 
-  return wrap;
+  const text = document.createElement('div');
+  text.innerHTML = escapeHtml(message.content).replace(/\n/g, '<br/>');
+  bubble.append(text);
 }
 
 function renderThread() {
@@ -1863,9 +2009,7 @@ function renderThread() {
     }
 
     if (message.mode !== 'canvas') {
-      const text = document.createElement('div');
-      text.innerHTML = escapeHtml(message.content).replace(/\n/g, '<br/>');
-      bubble.append(text);
+      renderMessageContent(bubble, message);
     }
 
     if (message.fileName) {
@@ -1905,6 +2049,44 @@ function renderThread() {
     refs.chatMessages.scrollTo({ top: 0 });
   }
   syncComposerChrome();
+}
+function renderTimeline(message) {
+  const wrap = document.createElement('div');
+  wrap.className = 'timeline-card';
+
+  const header = document.createElement('div');
+  header.className = 'timeline-head';
+  const title = document.createElement('strong');
+  title.textContent = normalizeTimelineTitle(message.timelineTitle || message.content);
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'ghost timeline-toggle';
+  toggle.textContent = message.collapsed ? 'Tampilkan' : 'Sembunyikan';
+  toggle.addEventListener('click', () => {
+    message.collapsed = !message.collapsed;
+    renderThread();
+  });
+  header.append(title, toggle);
+  wrap.append(header);
+
+  if (!message.collapsed && Array.isArray(message.timeline)) {
+    const list = document.createElement('div');
+    list.className = 'timeline-steps';
+    message.timeline.forEach((step) => {
+      const row = document.createElement('div');
+      row.className = `timeline-step ${step.status}`;
+      const indicator = document.createElement('span');
+      indicator.className = 'timeline-indicator';
+      indicator.textContent = step.status === 'done' ? '✓' : step.status === 'error' ? '!' : '•';
+      const label = document.createElement('span');
+      label.textContent = step.label;
+      row.append(indicator, label);
+      list.append(row);
+    });
+    wrap.append(list);
+  }
+
+  return wrap;
 }
 
 function toMetricArtifact(widget) {
@@ -1994,10 +2176,16 @@ function toMetricArtifact(widget) {
 }
 
 function normalizeIncomingWidgets(inputWidgets = []) {
+  const seenIds = new Set();
   const prepared = inputWidgets.map((widget, index) => {
     const artifact = widget.artifact || toMetricArtifact(widget);
+    let id = String(widget.id || generateWidgetId());
+    if (!id || seenIds.has(id)) {
+      id = generateWidgetId();
+    }
+    seenIds.add(id);
     return {
-      id: String(widget.id || generateWidgetId()),
+      id,
       title: normalizeConversationTitle(widget.title || artifact?.title || `Widget ${index + 1}`, `Widget ${index + 1}`),
       artifact,
       query: widget.query || null,
@@ -2029,7 +2217,7 @@ function buildDraftDashboardFromCanvas(overrides = {}) {
     status: overrides.status || state.draftDashboard?.status || 'drafting',
     note: overrides.note ?? state.draftDashboard?.note ?? null,
     name: overrides.name || state.draftDashboard?.name || state.currentDashboard?.name || 'Draft Dashboard',
-    saved_dashboard_id: overrides.saved_dashboard_id || state.draftDashboard?.saved_dashboard_id || state.currentDashboard?.id || null,
+    saved_dashboard_id: overrides.saved_dashboard_id || state.draftDashboard?.saved_dashboard_id || state.selectedDashboardId || state.currentDashboard?.id || null,
     pages: Math.max(1, Number(overrides.pages || pageCountForWidgets(widgets) || state.canvasPagesCount || 1)),
     widgets,
     artifacts: Array.isArray(overrides.artifacts) ? overrides.artifacts : (state.draftDashboard?.artifacts || []),
@@ -2048,6 +2236,12 @@ function setDraftDashboard(draft = null, options = {}) {
     pages: Math.max(1, Number(draft.pages || pageCountForWidgets(draft.widgets || []))),
     widgets: Array.isArray(draft.widgets) ? normalizeIncomingWidgets(draft.widgets) : [],
   } : null;
+
+  if (state.draftDashboard?.saved_dashboard_id) {
+    state.selectedDashboardId = state.draftDashboard.saved_dashboard_id;
+    syncSelectedDashboard({ fallbackToFirst: true });
+    renderDashboardList();
+  }
 
   if (state.draftDashboard) {
     state.canvasWidgets = state.draftDashboard.widgets;
@@ -2084,7 +2278,10 @@ async function ensureDashboard() {
     }),
   });
 
+  upsertDashboardRecord(created.dashboard);
   state.currentDashboard = created.dashboard;
+  state.selectedDashboardId = created.dashboard?.id || null;
+  renderDashboardList();
   return state.currentDashboard;
 }
 
@@ -2651,19 +2848,363 @@ function addEmptyWidget() {
   scheduleCanvasSave();
 }
 
+function resetWidgetBuilderState() {
+  state.widgetBuilderSelection = {
+    visualization: null,
+    datasetId: null,
+    axes: {},
+  };
+  state.widgetBuilderActiveAxis = null;
+  state.widgetBuilderStep = 'type';
+}
+
+function setWidgetBuilderOpen(isOpen) {
+  state.widgetBuilderOpen = isOpen;
+  if (refs.widgetBuilderBackdrop) {
+    refs.widgetBuilderBackdrop.classList.toggle('hidden', !isOpen);
+  }
+  if (refs.widgetBuilderModal) {
+    refs.widgetBuilderModal.classList.toggle('hidden', !isOpen);
+  }
+  if (isOpen) {
+    renderWidgetBuilder();
+  }
+}
+
+function openWidgetBuilder() {
+  if (!state.datasetReady) {
+    setDatasetGateVisible(true);
+    setCanvasOpen(false);
+    showToast('Upload dataset dulu sebelum tambah widget.');
+    return;
+  }
+  resetWidgetBuilderState();
+  setWidgetBuilderOpen(true);
+}
+
+function closeWidgetBuilder() {
+  setWidgetBuilderOpen(false);
+}
+
+function datasetSupportsVisualization(dataset, visualization) {
+  const def = chartDefinition(visualization);
+  if (!def) return false;
+  const measures = Array.isArray(dataset?.measures) ? dataset.measures.filter((item) => item !== 'count') : [];
+  const dimensions = Array.isArray(dataset?.dimensions) ? dataset.dimensions.filter((item) => item !== 'none') : [];
+  if (def.requires?.includes('measure') && measures.length === 0 && !SINGLE_VALUE_VISUALS.has(def.id)) {
+    return false;
+  }
+  if (def.requires?.includes('dimension') && dimensions.length === 0) {
+    return false;
+  }
+  if (def.requires?.includes('columns') && (!dataset?.columns || dataset.columns.length === 0)) {
+    return false;
+  }
+  return true;
+}
+
+function visualizationAvailable(visualization) {
+  const datasets = Array.isArray(state.datasetTables) ? state.datasetTables : [];
+  if (!datasets.length) return true;
+  return datasets.some((dataset) => datasetSupportsVisualization(dataset, visualization));
+}
+
+function renderWidgetTypeGrid() {
+  if (!refs.widgetTypeGrid) return;
+  refs.widgetTypeGrid.innerHTML = '';
+
+  CHART_CATALOG.forEach((item) => {
+    const compatible = visualizationAvailable(item.id);
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'widget-type-card';
+    if (state.widgetBuilderSelection.visualization === item.id) {
+      card.classList.add('is-selected');
+    }
+    if (!compatible) {
+      card.classList.add('is-disabled');
+      card.disabled = true;
+    }
+    card.innerHTML = `
+      <div class="widget-type-icon">${item.icon}</div>
+      <div>
+        <h4>${item.label}</h4>
+        <p>${item.category || 'visual'}</p>
+      </div>
+    `;
+    card.addEventListener('click', () => {
+      state.widgetBuilderSelection.visualization = item.id;
+      state.widgetBuilderStep = 'config';
+      renderWidgetBuilder();
+    });
+    refs.widgetTypeGrid.append(card);
+  });
+}
+
+function axisDefinitionsForVisualization(visualization) {
+  const def = chartDefinition(visualization);
+  if (!def) return [];
+  const requires = def.requires || [];
+  const axes = [];
+  if (requires.includes('dimension')) {
+    axes.push({ key: 'dimension', label: 'Sumbu X (Kategori)', hint: 'Pilih kolom kategori atau tanggal' });
+  }
+  if (requires.includes('measure')) {
+    axes.push({ key: 'measure', label: SINGLE_VALUE_VISUALS.has(def.id) ? 'Nilai Utama' : 'Sumbu Y (Nilai)', hint: 'Pilih kolom angka' });
+  }
+  if (requires.includes('columns')) {
+    axes.push({ key: 'columns', label: 'Kolom Tabel', hint: 'Klik beberapa kolom untuk tabel' });
+  }
+  return axes;
+}
+
+function renderWidgetAxisList() {
+  if (!refs.widgetAxisList) return;
+  refs.widgetAxisList.innerHTML = '';
+  const visualization = state.widgetBuilderSelection.visualization;
+  if (!visualization) return;
+  const axes = axisDefinitionsForVisualization(visualization);
+
+  axes.forEach((axis) => {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'widget-axis-item';
+    const selected = state.widgetBuilderSelection.axes?.[axis.key];
+    const valueText = Array.isArray(selected) ? selected.join(', ') : selected || 'Belum dipilih';
+
+    wrapper.innerHTML = `
+      <strong>${axis.label}</strong>
+      <div class="widget-axis-value">${valueText || 'Belum dipilih'}</div>
+      <button type="button" class="ghost" data-axis="${axis.key}">Pilih kolom</button>
+    `;
+
+    const button = wrapper.querySelector('button[data-axis]');
+    if (button) {
+      button.addEventListener('click', () => {
+        state.widgetBuilderActiveAxis = axis.key;
+        renderWidgetBuilder();
+      });
+    }
+    refs.widgetAxisList.append(wrapper);
+  });
+}
+
+function renderWidgetDatasetList() {
+  if (!refs.widgetDatasetList) return;
+  refs.widgetDatasetList.innerHTML = '';
+  const datasets = Array.isArray(state.datasetTables) ? state.datasetTables : [];
+  if (!datasets.length) {
+    refs.widgetDatasetList.innerHTML = '<p class="widget-axis-hint">Dataset belum tersedia.</p>';
+    return;
+  }
+
+  const activeDataset = state.widgetBuilderSelection.datasetId;
+  datasets.forEach((dataset) => {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'widget-dataset-card';
+    if (dataset.id === activeDataset) {
+      card.classList.add('is-active');
+    }
+    card.innerHTML = `
+      <h5>${dataset.label || dataset.name || dataset.id}</h5>
+      <p>${dataset.description || `${dataset.row_count || 0} baris`}</p>
+    `;
+    card.addEventListener('click', () => {
+      state.widgetBuilderSelection.datasetId = dataset.id;
+      renderWidgetBuilder();
+      renderDatasetPreview(dataset.id);
+    });
+    refs.widgetDatasetList.append(card);
+  });
+}
+
+async function renderDatasetPreview(datasetId) {
+  if (!refs.widgetDatasetPreview) return;
+  refs.widgetDatasetPreview.innerHTML = '<p class="widget-axis-hint">Memuat preview...</p>';
+  if (datasetId === 'transactions' || datasetId === 'expenses') {
+    refs.widgetDatasetPreview.innerHTML = '<p class="widget-axis-hint">Preview tabel tersedia setelah upload dataset multi-tabel.</p>';
+    return;
+  }
+  try {
+    const preview = await api(`/api/data/tables/${datasetId}/preview?limit=5`);
+    const columns = Array.isArray(preview.columns) ? preview.columns : [];
+    const rows = Array.isArray(preview.rows) ? preview.rows : [];
+    if (!columns.length) {
+      refs.widgetDatasetPreview.innerHTML = '<p class="widget-axis-hint">Preview tidak tersedia.</p>';
+      return;
+    }
+
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    columns.forEach((column) => {
+      const th = document.createElement('th');
+      th.textContent = column;
+      th.dataset.column = column;
+      th.addEventListener('click', () => selectAxisColumn(datasetId, column));
+      headRow.append(th);
+    });
+    thead.append(headRow);
+    table.append(thead);
+
+    const tbody = document.createElement('tbody');
+    rows.forEach((row) => {
+      const tr = document.createElement('tr');
+      columns.forEach((column) => {
+        const td = document.createElement('td');
+        td.textContent = row?.[column] ?? '';
+        tr.append(td);
+      });
+      tbody.append(tr);
+    });
+    table.append(tbody);
+    refs.widgetDatasetPreview.innerHTML = '';
+    refs.widgetDatasetPreview.append(table);
+  } catch {
+    refs.widgetDatasetPreview.innerHTML = '<p class="widget-axis-hint">Preview gagal dimuat.</p>';
+  }
+}
+
+function selectAxisColumn(datasetId, column) {
+  const axisKey = state.widgetBuilderActiveAxis;
+  if (!axisKey) {
+    showToast('Pilih sumbu dulu.');
+    return;
+  }
+  if (state.widgetBuilderSelection.datasetId && state.widgetBuilderSelection.datasetId !== datasetId) {
+    showToast('Gunakan satu tabel untuk semua sumbu.');
+    return;
+  }
+  state.widgetBuilderSelection.datasetId = datasetId;
+  if (axisKey === 'columns') {
+    const existing = Array.isArray(state.widgetBuilderSelection.axes.columns)
+      ? state.widgetBuilderSelection.axes.columns
+      : [];
+    if (existing.includes(column)) {
+      state.widgetBuilderSelection.axes.columns = existing.filter((item) => item !== column);
+    } else {
+      state.widgetBuilderSelection.axes.columns = [...existing, column];
+    }
+  } else {
+    state.widgetBuilderSelection.axes[axisKey] = column;
+  }
+  renderWidgetBuilder();
+}
+
+function widgetBuilderReady() {
+  const visualization = state.widgetBuilderSelection.visualization;
+  if (!visualization) return false;
+  const axes = axisDefinitionsForVisualization(visualization);
+  if (!state.widgetBuilderSelection.datasetId && axes.length > 0) return false;
+  return axes.every((axis) => {
+    const value = state.widgetBuilderSelection.axes?.[axis.key];
+    return axis.key === 'columns'
+      ? Array.isArray(value) && value.length > 0
+      : Boolean(value);
+  });
+}
+
+async function createWidgetFromBuilder() {
+  if (!widgetBuilderReady()) {
+    showToast('Lengkapi sumbu widget dulu.');
+    return;
+  }
+  const visualization = state.widgetBuilderSelection.visualization;
+  const dataset = state.widgetBuilderSelection.datasetId;
+  const axes = state.widgetBuilderSelection.axes || {};
+  const measure = axes.measure || null;
+  const groupBy = axes.dimension || 'none';
+  const columns = Array.isArray(axes.columns) ? axes.columns : null;
+
+  const titleParts = [];
+  if (visualization && visualization !== 'metric' && visualization !== 'table') {
+    titleParts.push(chartDefinition(visualization)?.label || 'Visual');
+  }
+  if (groupBy && groupBy !== 'none') {
+    titleParts.push(`per ${groupBy}`);
+  }
+  const title = titleParts.join(' ') || 'Widget Baru';
+
+  try {
+    const result = await api('/api/data/query', {
+      method: 'POST',
+      body: JSON.stringify({
+        dataset,
+        measure,
+        group_by: groupBy,
+        visualization,
+        title,
+        columns,
+        time_period: '30 hari terakhir',
+        limit: 12,
+      }),
+    });
+
+    const artifact = result.artifact || null;
+    if (!artifact) {
+      showToast('Widget gagal dibuat.');
+      return;
+    }
+
+    const widget = {
+      id: generateWidgetId(),
+      title: title || artifact.title,
+      artifact,
+      query: result.query || { dataset, measure, group_by: groupBy, visualization },
+      layout: nextWidgetLayout(artifact.kind || 'chart'),
+    };
+    state.canvasWidgets.push(widget);
+    state.canvasPagesCount = Math.max(state.canvasPagesCount, Number(widget.layout?.page || state.canvasPage || 1));
+    renderCanvas();
+    setCanvasOpen(true);
+    selectWidget(widget.id);
+    scheduleCanvasSave();
+    closeWidgetBuilder();
+  } catch (error) {
+    showToast(`Gagal membuat widget: ${error.message || 'error'}`);
+  }
+}
+
+function renderWidgetBuilder() {
+  if (!refs.widgetBuilderModal) return;
+  if (refs.widgetBuilderTitle) {
+    refs.widgetBuilderTitle.textContent = state.widgetBuilderStep === 'type'
+      ? 'Pilih jenis visual'
+      : 'Atur sumbu & dataset';
+  }
+  if (refs.widgetBuilderStepType) {
+    refs.widgetBuilderStepType.classList.toggle('is-active', state.widgetBuilderStep === 'type');
+  }
+  if (refs.widgetBuilderStepConfig) {
+    refs.widgetBuilderStepConfig.classList.toggle('is-active', state.widgetBuilderStep === 'config');
+  }
+  renderWidgetTypeGrid();
+  renderWidgetAxisList();
+  renderWidgetDatasetList();
+
+  if (refs.widgetDatasetTitle) {
+    refs.widgetDatasetTitle.textContent = state.widgetBuilderActiveAxis
+      ? `Pilih kolom untuk ${state.widgetBuilderActiveAxis === 'measure' ? 'nilai' : state.widgetBuilderActiveAxis === 'dimension' ? 'kategori' : 'tabel'}`
+      : 'Pilih tabel data';
+  }
+
+  if (refs.widgetBuilderBackBtn) {
+    refs.widgetBuilderBackBtn.hidden = state.widgetBuilderStep === 'type';
+  }
+  if (refs.widgetBuilderNextBtn) {
+    refs.widgetBuilderNextBtn.textContent = state.widgetBuilderStep === 'type' ? 'Lanjut' : 'Buat Widget';
+    refs.widgetBuilderNextBtn.disabled = state.widgetBuilderStep === 'config' && !widgetBuilderReady();
+  }
+}
+
 function removeWidgetById(widgetId) {
   const targetId = String(widgetId || '');
   if (!targetId) {
     return;
   }
 
-  const activePage = state.canvasPage;
   let removed = false;
-  let nextWidgets = state.canvasWidgets.filter((entry) => {
-    const page = Number(entry.layout?.page || 1);
-    if (page !== activePage) {
-      return true;
-    }
+  const nextWidgets = state.canvasWidgets.filter((entry) => {
     if (String(entry.id) === targetId) {
       removed = true;
       return false;
@@ -2730,33 +3271,24 @@ function renderCanvas() {
 async function refreshDashboards() {
   try {
     const response = await api('/api/dashboards');
-    state.currentDashboard = (response.dashboards || [])[0] || null;
+    state.dashboards = normalizeDashboardCollection(response.dashboards || []);
+    syncSelectedDashboard({ fallbackToFirst: true });
+    renderDashboardList();
     setCanvasPreparing(false);
 
     if (state.draftDashboard && Array.isArray(state.draftDashboard.widgets) && state.draftDashboard.widgets.length > 0) {
-      renderCanvas();
-      updateChatHeader();
+      applySelectedDashboardToCanvas({ preservePage: true });
       return;
     }
 
-    const components = state.currentDashboard?.config?.components;
-    const savedPages = Math.max(1, Number(state.currentDashboard?.config?.pages || 1));
-    if (Array.isArray(components) && components.length > 0) {
-      state.draftSaveDirty = false;
-      state.canvasWidgets = normalizeIncomingWidgets(components);
-      state.canvasPagesCount = Math.max(savedPages, pageCountForWidgets(state.canvasWidgets));
-      state.canvasPage = Math.min(Math.max(1, state.canvasPage), state.canvasPagesCount);
-      renderCanvas();
-    } else {
-      state.draftSaveDirty = false;
-      state.canvasWidgets = [];
-      state.canvasPagesCount = savedPages;
-      state.canvasPage = 1;
-      renderCanvas();
-    }
+    state.draftSaveDirty = false;
+    applySelectedDashboardToCanvas({ preservePage: true });
   } catch {
+    state.dashboards = [];
     state.currentDashboard = null;
+    state.selectedDashboardId = null;
     state.canvasPagesCount = 1;
+    renderDashboardList();
     setCanvasPreparing(false);
   }
 }
@@ -2833,6 +3365,8 @@ function updateChatHeader() {
   const hasCanvasWidgets = Array.isArray(state.canvasWidgets) && state.canvasWidgets.length > 0;
   if (refs.openCanvasBtn) {
     refs.openCanvasBtn.hidden = !hasCanvasWidgets;
+    refs.openCanvasBtn.setAttribute('title', state.canvasOpen ? 'Ciutkan dashboard' : 'Buka dashboard');
+    refs.openCanvasBtn.setAttribute('aria-label', state.canvasOpen ? 'Ciutkan dashboard' : 'Buka dashboard');
   }
   if (refs.persistDraftBtn) {
     refs.persistDraftBtn.hidden = !hasCanvasWidgets;
@@ -2866,6 +3400,7 @@ function resetConversationWorkspaceState({
     canvasPagesCount: state.canvasPagesCount,
   });
   state.currentDashboard = dashboardState.currentDashboard;
+  state.selectedDashboardId = dashboardState.currentDashboard?.id || state.selectedDashboardId;
   state.draftDashboard = null;
   state.canvasWidgets = dashboardState.canvasWidgets;
   state.canvasPage = dashboardState.canvasPage;
@@ -2878,6 +3413,7 @@ function resetConversationWorkspaceState({
   setCanvasOpen(false);
   renderCanvas();
   renderThread();
+  renderDashboardList();
   updateChatHeader();
 }
 
@@ -2969,6 +3505,131 @@ function renderConversationList() {
   updateChatHeader();
 }
 
+function normalizeDashboardCollection(dashboards = []) {
+  return Array.isArray(dashboards) ? dashboards.filter((dashboard) => dashboard?.id) : [];
+}
+
+function upsertDashboardRecord(dashboard) {
+  if (!dashboard?.id) {
+    return;
+  }
+
+  const index = state.dashboards.findIndex((item) => item.id === dashboard.id);
+  if (index >= 0) {
+    state.dashboards.splice(index, 1, { ...state.dashboards[index], ...dashboard });
+  } else {
+    state.dashboards.unshift(dashboard);
+  }
+
+  state.dashboards.sort((left, right) => {
+    const leftTime = new Date(left.updated_at || left.created_at || 0).getTime();
+    const rightTime = new Date(right.updated_at || right.created_at || 0).getTime();
+    return rightTime - leftTime;
+  });
+}
+
+function syncSelectedDashboard({ fallbackToFirst = true } = {}) {
+  const available = normalizeDashboardCollection(state.dashboards);
+  const preferredId = state.selectedDashboardId
+    || state.draftDashboard?.saved_dashboard_id
+    || state.currentDashboard?.id
+    || null;
+
+  const selected = available.find((dashboard) => dashboard.id === preferredId)
+    || (fallbackToFirst ? available[0] || null : null);
+
+  state.currentDashboard = selected || null;
+  state.selectedDashboardId = selected?.id || null;
+  return state.currentDashboard;
+}
+
+function selectedDashboardSavedWidgets() {
+  return Array.isArray(state.currentDashboard?.config?.components)
+    ? normalizeIncomingWidgets(state.currentDashboard.config.components)
+    : [];
+}
+
+function applySelectedDashboardToCanvas(options = {}) {
+  const currentDashboardId = state.currentDashboard?.id || null;
+  const shouldUseDraft = Boolean(
+    currentDashboardId
+    && state.draftDashboard?.saved_dashboard_id
+    && state.draftDashboard.saved_dashboard_id === currentDashboardId
+    && Array.isArray(state.draftDashboard.widgets)
+    && state.draftDashboard.widgets.length > 0
+  );
+
+  const widgets = shouldUseDraft ? state.draftDashboard.widgets : selectedDashboardSavedWidgets();
+  const pages = shouldUseDraft
+    ? Math.max(1, Number(state.draftDashboard?.pages || pageCountForWidgets(widgets)))
+    : Math.max(1, Number(state.currentDashboard?.config?.pages || pageCountForWidgets(widgets) || 1));
+
+  if (!shouldUseDraft) {
+    state.draftSaveDirty = false;
+  }
+
+  state.canvasWidgets = widgets;
+  state.canvasPagesCount = Math.max(1, pages);
+  state.canvasPage = options.preservePage
+    ? Math.min(Math.max(1, Number(state.canvasPage || 1)), state.canvasPagesCount)
+    : 1;
+
+  renderCanvas();
+  updateChatHeader();
+}
+
+function renderDashboardList() {
+  if (!refs.dashboardList) {
+    return;
+  }
+
+  const dashboards = normalizeDashboardCollection(state.dashboards);
+  if (dashboards.length === 0) {
+    refs.dashboardList.innerHTML = `
+      <div class="session-empty">
+        <strong>Belum ada dashboard.</strong>
+        <span>Buat dashboard dari chat untuk menyimpannya di sini.</span>
+      </div>
+    `;
+    return;
+  }
+
+  refs.dashboardList.innerHTML = '';
+  dashboards.forEach((dashboard) => {
+    const card = document.createElement('article');
+    card.className = 'session-card dashboard-card';
+    card.classList.toggle('active', dashboard.id === state.selectedDashboardId);
+
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'session-card-open ghost';
+    openBtn.setAttribute('aria-pressed', String(dashboard.id === state.selectedDashboardId));
+    openBtn.addEventListener('click', () => {
+      const reselecting = dashboard.id === state.selectedDashboardId;
+      state.selectedDashboardId = dashboard.id;
+      syncSelectedDashboard();
+      applySelectedDashboardToCanvas();
+      renderDashboardList();
+
+      if (Array.isArray(state.canvasWidgets) && state.canvasWidgets.length > 0) {
+        state.canvasViewportMovedByUser = false;
+        setCanvasOpen(reselecting ? !state.canvasOpen : true);
+        if (state.canvasOpen) {
+          queueCanvasStageCenter({ force: true });
+        }
+      }
+    });
+
+    const title = document.createElement('span');
+    title.className = 'session-card-title';
+    title.textContent = normalizeConversationTitle(dashboard.name || 'Dashboard');
+    openBtn.append(title);
+
+    card.append(openBtn);
+    refs.dashboardList.append(card);
+  });
+}
+
 function upsertConversation(conversation) {
   if (!conversation?.id) {
     return;
@@ -3019,6 +3680,7 @@ async function refreshChatHistory(conversationId = state.conversationId) {
         return {
           role: item.role,
           content: item.content,
+          contentFormat: payload.content_format || 'plain',
           artifacts: Array.isArray(payload.artifacts) ? payload.artifacts : [],
           widgets: Array.isArray(payload.widgets) ? payload.widgets : [],
           mode: payload.presentation_mode || 'chat',
@@ -3039,18 +3701,23 @@ async function refreshChatHistory(conversationId = state.conversationId) {
         }
       : null;
     state.draftSaveDirty = Boolean(state.draftDashboard);
+    if (state.draftDashboard?.saved_dashboard_id) {
+      state.selectedDashboardId = state.draftDashboard.saved_dashboard_id;
+      syncSelectedDashboard({ fallbackToFirst: true });
+      renderDashboardList();
+    }
 
     const lastCanvas = [...state.messages]
       .reverse()
       .find((item) => item.mode === 'canvas' && Array.isArray(item.widgets) && item.widgets.length > 0);
 
+    const selectedSavedWidgets = selectedDashboardSavedWidgets();
     const nextCanvasState = resolveCanvasState({
       messageWidgets: state.draftDashboard?.widgets?.length
+        && (!state.selectedDashboardId || state.draftDashboard?.saved_dashboard_id === state.selectedDashboardId)
         ? state.draftDashboard.widgets
         : (lastCanvas ? normalizeIncomingWidgets(lastCanvas.widgets) : []),
-      dashboardWidgets: Array.isArray(state.currentDashboard?.config?.components)
-        ? normalizeIncomingWidgets(state.currentDashboard.config.components)
-        : [],
+      dashboardWidgets: selectedSavedWidgets,
       canvasPage: 1,
       canvasPagesCount: state.canvasPagesCount,
       dashboardPagesCount: state.currentDashboard?.config?.pages,
@@ -3128,10 +3795,12 @@ async function loadSchema() {
   try {
     const response = await api('/api/data/schema');
     state.schema = response.schema;
+    state.datasetTables = Array.isArray(response.schema?.datasets) ? response.schema.datasets : [];
     populateSchemaOptions();
     renderDataFields();
   } catch {
     state.schema = null;
+    state.datasetTables = [];
   }
 }
 
@@ -3153,11 +3822,13 @@ function populateSchemaOptions() {
     refs.configVisualization.innerHTML = '';
     const list = schema.visualizations?.length
       ? schema.visualizations
-      : ['metric', 'bar', 'line', 'pie', 'table'];
-    for (const value of list) {
+      : CHART_CATALOG;
+    for (const item of list) {
+      const value = typeof item === 'string' ? item : item.id;
+      const label = typeof item === 'string' ? item.toUpperCase() : item.label;
       const option = document.createElement('option');
       option.value = value;
-      option.textContent = value.toUpperCase();
+      option.textContent = label;
       refs.configVisualization.append(option);
     }
   }
@@ -3361,7 +4032,10 @@ function applyAssistantResponse(response, options = {}) {
   state.conversationTitle = response.conversation?.title || state.conversationTitle || 'Percakapan baru';
   upsertConversation(response.conversation);
   if (response.dashboard) {
-    state.currentDashboard = response.dashboard;
+    upsertDashboardRecord(response.dashboard);
+    state.selectedDashboardId = response.dashboard.id;
+    syncSelectedDashboard({ fallbackToFirst: true });
+    renderDashboardList();
   }
   if (response.draft_dashboard) {
     state.draftDashboard = {
@@ -3371,6 +4045,11 @@ function applyAssistantResponse(response, options = {}) {
         : [],
     };
     state.draftSaveDirty = response.save_required !== false;
+    if (state.draftDashboard.saved_dashboard_id) {
+      state.selectedDashboardId = state.draftDashboard.saved_dashboard_id;
+      syncSelectedDashboard({ fallbackToFirst: true });
+      renderDashboardList();
+    }
   }
 
   if (options.needsTimeline && !options.skipTraceHydration && !state.timelineRunId && !findPendingAssistantMessage()) {
@@ -3394,6 +4073,7 @@ function applyAssistantResponse(response, options = {}) {
     commitAssistantMessage({
       role: 'assistant',
       content: response.answer || 'Berikut insight cepat.',
+      contentFormat: response.content_format || 'plain',
       mode: 'chat',
       widgets: [],
       artifacts: [normalized.artifact],
@@ -3405,6 +4085,7 @@ function applyAssistantResponse(response, options = {}) {
     commitAssistantMessage({
       role: 'assistant',
       content: response.answer || 'Berikut insight cepat.',
+      contentFormat: response.content_format || 'plain',
       mode: 'chat',
       widgets: [],
       artifacts,
@@ -3415,6 +4096,7 @@ function applyAssistantResponse(response, options = {}) {
   commitAssistantMessage({
     role: 'assistant',
     content: response.answer || 'Selesai.',
+    contentFormat: response.content_format || 'plain',
     mode,
     widgets,
     artifacts,
@@ -3457,7 +4139,7 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
     body: JSON.stringify({
       message: userText,
       conversation_id: state.conversationId,
-      dashboard_id: state.currentDashboard?.id || state.draftDashboard?.saved_dashboard_id || null,
+      dashboard_id: state.draftDashboard?.saved_dashboard_id || state.selectedDashboardId || state.currentDashboard?.id || null,
       client_preferences: state.settings,
     }),
   }, {
@@ -3485,93 +4167,102 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
   let buffer = '';
   let finalPayload = null;
 
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      let event;
-      try {
-        event = JSON.parse(trimmed);
-      } catch {
-        continue;
-      }
-
-      if (event.type === 'timeline_start') {
-        const runId = event.timeline_id || `timeline_${Date.now()}`;
-        streamState.runId = runId;
-        streamState.seenEventKeys.clear();
-        streamState.visualStepKeys.clear();
-        ensureTimeline(runId, normalizeTimelineTitle(event.title));
-      } else if (event.type === 'agent_start' || event.type === 'agent_step') {
-        const runId = streamState.runId || event.run_id || state.timelineRunId || `timeline_${Date.now()}`;
-        streamState.runId = runId;
-        const agentKey = String(event.agent || 'agent').trim().toLowerCase();
-        if (agentKey) {
-          streamState.agentKeys.add(agentKey);
-        }
-        if (streamState.agentKeys.size > 2) {
-          markStreamComplexity(streamState, runId);
-        }
-        ensureTimeline(runId, 'Tim agent sedang bekerja');
-        upsertTimelineStep(runId, {
-          id: `${event.type}_${String(event.agent || 'agent').toLowerCase()}_${String(event.title || 'langkah').toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
-          title: event.title || 'Langkah agent',
-          status: event.type === 'agent_start' ? 'pending' : (event.status || 'done'),
-        });
-      } else if (event.type === 'timeline_step') {
-        const step = event.step || {};
-        const runId = step.timeline_id || streamState.runId || state.timelineRunId || `timeline_${Date.now()}`;
-        streamState.runId = runId;
-        const eventKey = timelineEventKey(runId, step);
-        if (streamState.seenEventKeys.has(eventKey)) {
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        let event;
+        try {
+          event = JSON.parse(trimmed);
+        } catch {
           continue;
         }
-        streamState.seenEventKeys.add(eventKey);
-        ensureTimeline(runId, 'Proses analisis');
-        if (isVisualTimelineStep(step)) {
-          markStreamComplexity(streamState, runId);
-          streamState.visualStepKeys.add(timelineStepId(step));
-          upsertVisualAggregateTimeline(runId, streamState, step.status === 'error' ? 'error' : 'pending');
-          continue;
+
+        if (event.type === 'timeline_start') {
+          const runId = event.timeline_id || `timeline_${Date.now()}`;
+          streamState.runId = runId;
+          streamState.seenEventKeys.clear();
+          streamState.visualStepKeys.clear();
+          ensureTimeline(runId, normalizeTimelineTitle(event.title));
+        } else if (event.type === 'agent_start' || event.type === 'agent_step') {
+          const runId = streamState.runId || event.run_id || state.timelineRunId || `timeline_${Date.now()}`;
+          streamState.runId = runId;
+          const agentKey = String(event.agent || 'agent').trim().toLowerCase();
+          if (agentKey) {
+            streamState.agentKeys.add(agentKey);
+          }
+          if (streamState.agentKeys.size > 2) {
+            markStreamComplexity(streamState, runId);
+          }
+          ensureTimeline(runId, 'Tim agent sedang bekerja');
+          upsertTimelineStep(runId, {
+            id: `${event.type}_${String(event.agent || 'agent').toLowerCase()}_${String(event.title || 'langkah').toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+            title: event.title || 'Langkah agent',
+            status: event.type === 'agent_start' ? 'pending' : (event.status || 'done'),
+          });
+        } else if (event.type === 'timeline_step') {
+          const step = event.step || {};
+          const runId = step.timeline_id || streamState.runId || state.timelineRunId || `timeline_${Date.now()}`;
+          streamState.runId = runId;
+          const eventKey = timelineEventKey(runId, step);
+          if (streamState.seenEventKeys.has(eventKey)) {
+            continue;
+          }
+          streamState.seenEventKeys.add(eventKey);
+          ensureTimeline(runId, 'Proses analisis');
+          if (isVisualTimelineStep(step)) {
+            markStreamComplexity(streamState, runId);
+            streamState.visualStepKeys.add(timelineStepId(step));
+            upsertVisualAggregateTimeline(runId, streamState, step.status === 'error' ? 'error' : 'pending');
+            continue;
+          }
+          upsertTimelineStep(runId, {
+            ...step,
+            id: timelineStepId(step),
+          });
+        } else if (event.type === 'timeline_done') {
+          const runId = event.timeline_id || streamState.runId || state.timelineRunId;
+          if (runId) {
+            upsertVisualAggregateTimeline(runId, streamState, 'done');
+          }
+          finalizeTimeline(runId);
+        } else if (event.type === 'dashboard_patch') {
+          markStreamComplexity(streamState, event.run_id || streamState.runId || null);
+          applyDashboardPatch(event);
+        } else if (event.type === 'approval_required') {
+          markStreamComplexity(streamState, event.run_id || streamState.runId || null);
+          if (event.approval?.prompt) {
+            showToast(event.approval.prompt);
+          }
+        } else if (event.type === 'final') {
+          finalPayload = event.payload || null;
+        } else if (event.type === 'error') {
+          throw createAppError(event.message || 'Stream error.', {
+            code: event.code || 'CHAT_STREAM_FAILED',
+            statusCode: event.status || 500,
+            conversationId: event.conversation_id || null,
+            persistedInConversation:
+              event.persisted_in_conversation
+              ?? event.persistedInConversation
+              ?? false,
+          });
         }
-        upsertTimelineStep(runId, {
-          ...step,
-          id: timelineStepId(step),
-        });
-      } else if (event.type === 'timeline_done') {
-        const runId = event.timeline_id || streamState.runId || state.timelineRunId;
-        if (runId) {
-          upsertVisualAggregateTimeline(runId, streamState, 'done');
-        }
-        finalizeTimeline(runId);
-      } else if (event.type === 'dashboard_patch') {
-        markStreamComplexity(streamState, event.run_id || streamState.runId || null);
-        applyDashboardPatch(event);
-      } else if (event.type === 'approval_required') {
-        markStreamComplexity(streamState, event.run_id || streamState.runId || null);
-        if (event.approval?.prompt) {
-          showToast(event.approval.prompt);
-        }
-      } else if (event.type === 'final') {
-        finalPayload = event.payload || null;
-      } else if (event.type === 'error') {
-        throw createAppError(event.message || 'Stream error.', {
-          code: event.code || 'CHAT_STREAM_FAILED',
-          statusCode: event.status || 500,
-          conversationId: event.conversation_id || null,
-          persistedInConversation:
-            event.persisted_in_conversation
-            ?? event.persistedInConversation
-            ?? false,
-        });
       }
     }
+  } catch (error) {
+    if (String(error?.code || '').trim().toUpperCase().startsWith('CHAT_STREAM_')) {
+      throw error;
+    }
+    throw createAppError(error?.message || 'Stream gagal dibaca.', {
+      code: 'CHAT_STREAM_READ_FAILED',
+    });
   }
 
   if (!finalPayload) {
@@ -3612,7 +4303,7 @@ async function sendChatMessage(userText) {
         body: JSON.stringify({
           message: userText,
           conversation_id: state.conversationId,
-          dashboard_id: state.currentDashboard?.id || state.draftDashboard?.saved_dashboard_id || null,
+          dashboard_id: state.draftDashboard?.saved_dashboard_id || state.selectedDashboardId || state.currentDashboard?.id || null,
           client_preferences: state.settings,
         }),
       });
@@ -3645,6 +4336,7 @@ async function sendChatMessage(userText) {
     commitAssistantMessage({
       role: 'assistant',
       content: `Error: ${error.message || 'Permintaan tidak dapat diproses.'}`,
+      contentFormat: 'plain',
       mode: 'chat',
       artifacts: [],
       error: true,
@@ -3939,12 +4631,15 @@ async function persistDraftDashboard() {
     }
 
     state.currentDashboard = saved.dashboard;
+    upsertDashboardRecord(saved.dashboard);
+    state.selectedDashboardId = saved.dashboard?.id || state.selectedDashboardId;
     state.draftDashboard = {
       ...draft,
       saved_dashboard_id: saved.dashboard?.id || draft.saved_dashboard_id || null,
       updated_at: new Date().toISOString(),
     };
     state.draftSaveDirty = false;
+    renderDashboardList();
     updateChatHeader();
     showToast('Draft dashboard berhasil disimpan.');
   } catch (error) {
@@ -4152,8 +4847,10 @@ if (refs.openCanvasBtn) {
   refs.openCanvasBtn.addEventListener('click', () => {
     if (Array.isArray(state.canvasWidgets) && state.canvasWidgets.length > 0) {
       state.canvasViewportMovedByUser = false;
-      setCanvasOpen(true);
-      queueCanvasStageCenter({ force: true });
+      setCanvasOpen(!state.canvasOpen);
+      if (state.canvasOpen) {
+        queueCanvasStageCenter({ force: true });
+      }
     }
   });
 }
@@ -4242,12 +4939,6 @@ if (refs.persistDraftBtn) {
   });
 }
 
-if (refs.closeCanvasBtn) {
-  refs.closeCanvasBtn.addEventListener('click', () => {
-    setCanvasOpen(false);
-  });
-}
-
 if (refs.canvasPrevPage) {
   refs.canvasPrevPage.addEventListener('click', () => {
     setCanvasPage(state.canvasPage - 1);
@@ -4271,7 +4962,7 @@ if (refs.addWidgetToolbar) {
     if (!state.editMode) {
       setEditMode(true);
     }
-    addEmptyWidget();
+    openWidgetBuilder();
   });
 }
 
@@ -4295,7 +4986,41 @@ if (refs.editModeBtn) {
 
 if (refs.floatingAddBtn) {
   refs.floatingAddBtn.addEventListener('click', () => {
-    addEmptyWidget();
+    openWidgetBuilder();
+  });
+}
+
+if (refs.widgetBuilderCloseBtn) {
+  refs.widgetBuilderCloseBtn.addEventListener('click', () => {
+    closeWidgetBuilder();
+  });
+}
+
+if (refs.widgetBuilderBackdrop) {
+  refs.widgetBuilderBackdrop.addEventListener('click', () => {
+    closeWidgetBuilder();
+  });
+}
+
+if (refs.widgetBuilderBackBtn) {
+  refs.widgetBuilderBackBtn.addEventListener('click', () => {
+    state.widgetBuilderStep = 'type';
+    renderWidgetBuilder();
+  });
+}
+
+if (refs.widgetBuilderNextBtn) {
+  refs.widgetBuilderNextBtn.addEventListener('click', () => {
+    if (state.widgetBuilderStep === 'type') {
+      if (!state.widgetBuilderSelection.visualization) {
+        showToast('Pilih jenis visual dulu.');
+        return;
+      }
+      state.widgetBuilderStep = 'config';
+      renderWidgetBuilder();
+      return;
+    }
+    createWidgetFromBuilder();
   });
 }
 
@@ -4749,6 +5474,8 @@ refs.logoutBtn.addEventListener('click', () => {
   state.conversationTitle = 'Percakapan baru';
   state.conversations = [];
   state.messages = [];
+  state.dashboards = [];
+  state.selectedDashboardId = null;
   state.currentDashboard = null;
   state.draftDashboard = null;
   state.canvasWidgets = [];
@@ -4764,6 +5491,7 @@ refs.logoutBtn.addEventListener('click', () => {
   state.draftSaveDirty = false;
   state.timelineRunId = null;
   state.timelineMessageId = null;
+  renderDashboardList();
 
   if (state.grid) {
     if (typeof state.grid.destroy === 'function') {

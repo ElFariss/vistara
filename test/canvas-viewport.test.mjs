@@ -3,15 +3,15 @@ import assert from 'node:assert/strict';
 
 import { resolveCanvasViewportTarget } from '../public/canvasViewport.js';
 
-test('resolveCanvasViewportTarget centers compact content bounds', () => {
+test('resolveCanvasViewportTarget keeps compact content near the top of the viewport', () => {
   const result = resolveCanvasViewportTarget({
     stageRect: { left: 220, top: 220, width: 1280, height: 720 },
     viewportRect: { width: 780, height: 520 },
     focusRect: { left: 320, top: 260, width: 420, height: 260 },
   });
 
-  assert.equal(result.scrollLeft, 140);
-  assert.equal(result.scrollTop, 130);
+  assert.equal(result.scrollLeft, 296);
+  assert.equal(result.scrollTop, 236);
 });
 
 test('resolveCanvasViewportTarget centers oversized content around the active widget bounds', () => {
@@ -22,5 +22,5 @@ test('resolveCanvasViewportTarget centers oversized content around the active wi
   });
 
   assert.equal(result.scrollLeft, 447);
-  assert.equal(result.scrollTop, 63);
+  assert.equal(result.scrollTop, 128);
 });

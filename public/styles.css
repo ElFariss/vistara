@@ -1169,7 +1169,7 @@ label {
   background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, transparent), color-mix(in srgb, var(--bg-warm) 78%, transparent));
   padding: 1rem 0.85rem;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.8rem;
   min-width: 0;
   overflow: hidden;
@@ -1324,6 +1324,15 @@ label {
   transform: translateX(0);
 }
 
+.workspace-page.canvas-open .session-rail,
+.workspace-page.canvas-open .workspace-shell.session-rail-collapsed .session-rail-handle {
+  z-index: 34;
+}
+
+.workspace-page.canvas-open .workspace-shell.session-rail-collapsed .session-rail-handle {
+  z-index: 35;
+}
+
 .session-list {
   min-height: 0;
   overflow: auto;
@@ -1331,6 +1340,32 @@ label {
   align-content: start;
   gap: 0.5rem;
   padding-right: 0.15rem;
+}
+
+.rail-section {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.rail-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--ink-secondary);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.dashboard-list {
+  min-height: 7rem;
+}
+
+.dashboard-card .session-card-open {
+  padding-block: 0.48rem;
 }
 
 .session-card {
@@ -1583,6 +1618,51 @@ label {
   border-color: color-mix(in srgb, var(--danger) 32%, var(--line));
   background: color-mix(in srgb, var(--surface) 88%, rgba(220, 38, 38, 0.06));
   color: color-mix(in srgb, var(--danger) 82%, var(--ink));
+}
+
+.msg-markdown,
+.summary-markdown {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.msg-markdown > :first-child,
+.summary-markdown > :first-child {
+  margin-top: 0;
+}
+
+.msg-markdown > :last-child,
+.summary-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.msg-markdown p,
+.summary-markdown p {
+  margin: 0;
+  color: inherit;
+}
+
+.msg-markdown ul,
+.msg-markdown ol,
+.summary-markdown ul,
+.summary-markdown ol {
+  margin: 0;
+  padding-left: 1.15rem;
+  display: grid;
+  gap: 0.34rem;
+}
+
+.msg-markdown li,
+.summary-markdown li {
+  margin: 0;
+}
+
+.msg-markdown code,
+.summary-markdown code {
+  padding: 0.08rem 0.35rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  font-size: 0.82em;
 }
 
 .pending-message-text {
@@ -2713,9 +2793,20 @@ label {
   line-height: 1.5;
 }
 
+.summary-markdown {
+  grid-column: 1;
+  color: var(--ink-secondary);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.summary-markdown strong {
+  color: var(--ink);
+}
+
 .summary-btn {
   grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-row: 1 / span 3;
   width: 40px;
   height: 40px;
   padding: 0;
@@ -3103,17 +3194,22 @@ label {
     display: none !important;
   }
 
-  .session-rail {
-    position: absolute;
-    left: 0.75rem;
-    top: 0.75rem;
-    bottom: 0.75rem;
-    width: min(320px, calc(100vw - 1.5rem));
-    border: 1px solid var(--line);
-    border-radius: 20px;
-    padding: 0.9rem 0.8rem;
-    box-shadow: var(--shadow-lg);
-    z-index: 28;
+	  .session-rail {
+	    position: absolute;
+	    left: 0.75rem;
+	    top: 0.75rem;
+	    bottom: 0.75rem;
+	    width: min(320px, calc(100vw - 1.5rem));
+	    border: 1px solid var(--line);
+	    border-radius: 20px;
+	    padding: 0.9rem 0.8rem;
+	    box-shadow: var(--shadow-lg);
+	    /* Must stay above the canvas overlay on small screens. */
+	    z-index: 34;
+	  }
+
+  .session-rail-handle {
+    z-index: 35;
   }
 
   .session-list {
@@ -3129,13 +3225,13 @@ label {
     width: min(86vw, 330px);
   }
 
-  .canvas-pane {
-    position: fixed;
-    inset: var(--app-header-height, 0px) 0 0 0;
-    z-index: 30;
-    background: var(--bg-warm);
-    display: none;
-  }
+	  .canvas-pane {
+	    position: fixed;
+	    inset: var(--app-header-height, 0px) 0 0 0;
+	    z-index: 30;
+	    background: var(--bg-warm);
+	    display: none;
+	  }
 
   .canvas-viewport {
     padding: 0.7rem 0.7rem 5.2rem;
@@ -3151,12 +3247,17 @@ label {
     height: 720px;
   }
 
-  .workspace-page.canvas-open .canvas-pane {
-    display: block;
-    transform: translateX(0);
-    opacity: 1;
-    pointer-events: auto;
-  }
+	  .workspace-page.canvas-open .canvas-pane {
+	    display: block;
+	    transform: translateX(0);
+	    opacity: 1;
+	    pointer-events: auto;
+	  }
+
+	  .session-rail-handle {
+	    /* Keep the rail handle clickable even when the canvas is open as an overlay. */
+	    z-index: 35;
+	  }
 }
 
 @media (max-width: 768px) {
@@ -3543,4 +3644,235 @@ label {
     transform: none !important;
     opacity: 1 !important;
   }
+}
+
+.widget-builder-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  backdrop-filter: blur(6px);
+  z-index: 40;
+}
+
+.widget-builder-modal {
+  position: fixed;
+  inset: 10% 50% auto;
+  transform: translateX(-50%);
+  width: min(980px, 92vw);
+  max-height: 80vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 1rem;
+  padding: 1.4rem 1.6rem;
+  border-radius: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.25);
+  z-index: 41;
+  overflow: hidden;
+}
+
+.widget-builder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.widget-builder-kicker {
+  margin: 0 0 0.2rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-muted);
+}
+
+.widget-builder-head h3 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.widget-builder-body {
+  display: grid;
+  gap: 1rem;
+  overflow: hidden;
+}
+
+.widget-builder-step {
+  display: none;
+  height: 100%;
+}
+
+.widget-builder-step.is-active {
+  display: block;
+}
+
+.widget-type-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  max-height: 52vh;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.widget-type-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.75rem;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.65rem;
+  align-items: center;
+  cursor: pointer;
+  transition: border 0.2s ease, box-shadow 0.2s ease;
+}
+
+.widget-type-card svg {
+  width: 36px;
+  height: 36px;
+  stroke: var(--ink);
+  stroke-width: 1.6;
+  fill: rgba(249, 115, 22, 0.15);
+}
+
+.widget-type-card.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.18);
+}
+
+.widget-type-card.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.widget-type-card h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.widget-type-card p {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+}
+
+.widget-builder-config {
+  display: grid;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.widget-axis-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.6rem;
+}
+
+.widget-axis-item {
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  padding: 0.6rem 0.7rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.widget-axis-value {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.widget-axis-hint {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.84rem;
+}
+
+.widget-builder-dataset {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 0.9rem;
+  background: var(--bg-warm);
+  display: grid;
+  gap: 0.8rem;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.widget-dataset-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.widget-dataset-meta {
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+}
+
+.widget-dataset-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.widget-dataset-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.widget-dataset-card.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.15);
+}
+
+.widget-dataset-card h5 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.widget-dataset-card p {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+}
+
+.widget-dataset-preview {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.5rem;
+  overflow: auto;
+}
+
+.widget-dataset-preview table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.widget-dataset-preview th,
+.widget-dataset-preview td {
+  border-bottom: 1px solid var(--line);
+  padding: 0.4rem 0.45rem;
+  text-align: left;
+}
+
+.widget-dataset-preview th {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.widget-builder-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.widget-builder-footer button {
+  min-width: 120px;
 }

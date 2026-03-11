@@ -5,10 +5,11 @@ import { execFileSync } from 'node:child_process';
 import { all, get, run, withTransaction } from '../db.mjs';
 import { parseCsvBuffer } from '../utils/csv.mjs';
 import { parseJsonBuffer } from '../utils/json.mjs';
-import { parseXlsxFile } from '../utils/xlsx.mjs';
+import { parseXlsxFile, parseXlsxSheets } from '../utils/xlsx.mjs';
 import { generateId } from '../utils/ids.mjs';
 import { parseFlexibleDate, parseIndonesianNumber, parseBoolean } from '../utils/parse.mjs';
 import { suggestColumnMapping, requiredFieldsForDataset } from './columnMapper.mjs';
+import { storeDatasetTables, deleteDatasetTablesForTenant, deleteDatasetTablesForSource } from './datasetTables.mjs';
 import { generateJsonWithGemini } from './gemini.mjs';
 import { logAudit } from './audit.mjs';
 import { config } from '../config.mjs';
@@ -175,6 +176,32 @@ function parseExcelFile(filePath, fileType) {
   }
 
   return parseXlsxFile(filePath);
+}
+
+function datasetNameFromFilename(filename = '') {
+  const base = path.basename(filename || '', path.extname(filename || '')).trim();
+  return base || 'Dataset';
+}
+
+function pickPrimaryTable(tables = []) {
+  return tables.reduce((best, current) => (
+    (current?.rows?.length || 0) > (best?.rows?.length || 0) ? current : best
+  ), tables[0] || { columns: [], rows: [] });
+}
+
+export async function parseDatasetTables(filePath, fileType, filename) {
+  if (fileType === 'xlsx') {
+    return parseXlsxSheets(filePath);
+  }
+
+  const parsed = await parseDataset(filePath, fileType, filename);
+  return [
+    {
+      name: datasetNameFromFilename(filename),
+      columns: parsed.columns,
+      rows: parsed.rows,
+    },
+  ];
 }
 
 export async function parseDataset(filePath, fileType, filename) {
@@ -500,16 +527,31 @@ function normalizeExpenseRow(row, mapping) {
 
 export async function analyzeUploadedFile(filePath, filename, contentType) {
   const fileType = detectFileType(filename, contentType);
-  const parsed = await parseDataset(filePath, fileType, filename);
-  const sampleRows = parsed.rows.slice(0, 20);
-  const suggestion = await suggestColumnMapping(parsed.columns, sampleRows);
+  const tables = await parseDatasetTables(filePath, fileType, filename);
+  const normalizedTables = tables.map((table, index) => ({
+    name: table?.name || `Sheet ${index + 1}`,
+    columns: Array.isArray(table?.columns) ? table.columns : [],
+    rows: Array.isArray(table?.rows) ? table.rows : [],
+  }));
+  const primary = normalizedTables.reduce((best, current) => (
+    current.rows.length > (best?.rows?.length || 0) ? current : best
+  ), normalizedTables[0] || { columns: [], rows: [] });
+  const sampleRows = Array.isArray(primary?.rows) ? primary.rows.slice(0, 20) : [];
+  const suggestion = await suggestColumnMapping(primary?.columns || [], sampleRows);
+  const totalRows = normalizedTables.reduce((sum, table) => sum + (table.rows?.length || 0), 0);
 
   return {
     fileType,
-    columns: parsed.columns,
+    columns: primary?.columns || [],
     sampleRows,
-    rowCount: parsed.rows.length,
+    rowCount: totalRows,
     suggestion,
+    tables: normalizedTables.map((table) => ({
+      name: table.name,
+      columns: table.columns,
+      rowCount: table.rows.length,
+    })),
+    primaryTable: primary?.name || null,
   };
 }
 
@@ -517,7 +559,17 @@ export async function readParsedSourceFile({ filePath, fileType, filename }) {
   return parseDataset(filePath, fileType, filename);
 }
 
-export function storeSourceFileRecord({ tenantId, filename, fileType, filePath, rowCount, suggestion, sampleRows }) {
+export function storeSourceFileRecord({
+  tenantId,
+  filename,
+  fileType,
+  filePath,
+  rowCount,
+  suggestion,
+  sampleRows,
+  tables = [],
+  primaryTable = null,
+}) {
   const id = generateId();
   run(
     `
@@ -546,6 +598,8 @@ export function storeSourceFileRecord({ tenantId, filename, fileType, filePath, 
       status: 'uploaded',
       metadata_json: JSON.stringify({
         sample_rows: sampleRows ?? [],
+        tables: Array.isArray(tables) ? tables : [],
+        primary_table: primaryTable,
       }),
     },
   );
@@ -813,6 +867,7 @@ function deleteTenantDatasetRecords(tenantId) {
   run(`DELETE FROM products WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
   run(`DELETE FROM branches WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
   run(`DELETE FROM customers WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
+  deleteDatasetTablesForTenant(tenantId);
   run(`DELETE FROM source_files WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
 }
 
@@ -865,15 +920,18 @@ export async function processSourceFile({ tenantId, userId, sourceId }) {
   validateMapping(mappingInfo.datasetType, mappingInfo.mapping);
 
   try {
-    const parsed = await parseDataset(source.file_path, source.file_type, source.filename);
+    const tables = await parseDatasetTables(source.file_path, source.file_type, source.filename);
+    const primary = pickPrimaryTable(tables);
 
     const summary = withTransaction(() => {
+      deleteDatasetTablesForSource(sourceId);
+      storeDatasetTables({ tenantId, sourceId, tables, minRows: 6 });
       if (mappingInfo.datasetType === 'expense') {
         return insertExpenses({
           tenantId,
           userId,
           sourceId,
-          rows: parsed.rows,
+          rows: primary.rows,
           mapping: mappingInfo.mapping,
         });
       }
@@ -882,7 +940,7 @@ export async function processSourceFile({ tenantId, userId, sourceId }) {
         tenantId,
         userId,
         sourceId,
-        rows: parsed.rows,
+        rows: primary.rows,
         mapping: mappingInfo.mapping,
       });
     });
@@ -917,7 +975,8 @@ export async function ingestUploadedSource({
   const analysis = await analyzeUploadedFile(filePath, filename, contentType);
 
   if (replaceExisting) {
-    const parsed = await parseDataset(filePath, analysis.fileType, filename);
+    const tables = await parseDatasetTables(filePath, analysis.fileType, filename);
+    const primary = pickPrimaryTable(tables);
     const previousSources = all(`SELECT file_path FROM source_files WHERE tenant_id = :tenant_id`, {
       tenant_id: tenantId,
     });
@@ -934,13 +993,16 @@ export async function ingestUploadedSource({
         rowCount: analysis.rowCount,
         suggestion: analysis.suggestion,
         sampleRows: analysis.sampleRows,
+        tables: analysis.tables,
+        primaryTable: analysis.primaryTable,
       });
 
+      storeDatasetTables({ tenantId, sourceId, tables, minRows: 6 });
       result = processParsedRows({
         tenantId,
         userId,
         sourceId,
-        parsed,
+        parsed: primary,
         datasetType: analysis.suggestion?.datasetType,
         mapping: analysis.suggestion?.mapping,
       });
@@ -963,6 +1025,8 @@ export async function ingestUploadedSource({
     rowCount: analysis.rowCount,
     suggestion: analysis.suggestion,
     sampleRows: analysis.sampleRows,
+    tables: analysis.tables,
+    primaryTable: analysis.primaryTable,
   });
 
   const result = await processSourceFile({

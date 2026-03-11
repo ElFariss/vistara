@@ -115,7 +115,216 @@ function formatCompactNumber(rawValue) {
   return value.toLocaleString('id-ID');
 }
 
+const CHART_JS_TYPES = new Set([
+  'bar',
+  'line',
+  'pie',
+  'donut',
+  'half_donut',
+  'multi_layer_pie',
+  'radar_triangle',
+  'radar_polygon',
+  'polar',
+  'scatter',
+  'bubble',
+  'area',
+  'histogram',
+]);
+
+function normalizeChartType(rawType = '') {
+  const type = String(rawType || '').toLowerCase();
+  if (type === 'donut') return 'donut';
+  if (type === 'half_donut') return 'half_donut';
+  if (type === 'multi_layer_pie') return 'multi_layer_pie';
+  if (type === 'radar_triangle') return 'radar_triangle';
+  if (type === 'radar_polygon') return 'radar_polygon';
+  if (type === 'polar') return 'polar';
+  if (type === 'scatter') return 'scatter';
+  if (type === 'bubble') return 'bubble';
+  if (type === 'area') return 'area';
+  if (type === 'histogram') return 'histogram';
+  if (type === 'pie') return 'pie';
+  if (type === 'bar') return 'bar';
+  if (type === 'line') return 'line';
+  return type || 'line';
+}
+
+function buildHistogram(values = [], bins = 6) {
+  if (!values.length) return { labels: [], counts: [] };
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const step = span / bins;
+  const counts = Array(bins).fill(0);
+  values.forEach((value) => {
+    const idx = Math.min(bins - 1, Math.floor((value - min) / step));
+    counts[idx] += 1;
+  });
+  const labels = counts.map((_, index) => {
+    const start = min + index * step;
+    const end = start + step;
+    return `${formatCompactNumber(start)}-${formatCompactNumber(end)}`;
+  });
+  return { labels, counts };
+}
+
+function renderCustomChart(element, artifact) {
+  const type = normalizeChartType(artifact.chart_type || 'line');
+  const series = Array.isArray(artifact.series) ? artifact.series : [];
+  const values = (series[0]?.values || []).map((value) => Number(value || 0));
+  const labels = Array.isArray(artifact.labels) ? artifact.labels : values.map((_, idx) => `Item ${idx + 1}`);
+  const palette = values.map((_, idx) => randomColor(idx));
+  const max = Math.max(...values, 1);
+  const total = values.reduce((sum, val) => sum + Math.max(0, val), 0) || 1;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'artifact-chart-wrap';
+  if (element.classList.contains('widget-body')) {
+    wrap.classList.add('artifact-chart-wrap-compact');
+  }
+  const plot = document.createElement('div');
+  plot.className = 'artifact-chart-plot';
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 100 60');
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  svg.style.width = '100%';
+  svg.style.height = '100%';
+
+  const add = (markup) => {
+    const temp = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    temp.innerHTML = markup;
+    svg.append(...temp.childNodes);
+  };
+
+  if (type === 'cone' || type === 'pyramid' || type === 'funnel') {
+    const sorted = values.map((value, index) => ({ value, label: labels[index] })).sort((a, b) => b.value - a.value);
+    const stackHeight = 42;
+    const segmentHeight = stackHeight / Math.max(1, sorted.length);
+    sorted.forEach((entry, idx) => {
+      const ratio = Math.max(0.15, entry.value / max);
+      const width = ratio * 70;
+      const center = 50;
+      const y = 8 + idx * segmentHeight;
+      const topWidth = type === 'funnel' ? width * 0.7 : width;
+      const bottomWidth = type === 'pyramid' ? width * 0.7 : width;
+      add(`<polygon points="${center - topWidth / 2} ${y}, ${center + topWidth / 2} ${y}, ${center + bottomWidth / 2} ${y + segmentHeight}, ${center - bottomWidth / 2} ${y + segmentHeight}" fill="${palette[idx % palette.length]}" opacity="0.8"></polygon>`);
+    });
+  } else if (type === 'tree') {
+    let x = 8;
+    values.forEach((value, idx) => {
+      const width = (value / total) * 84;
+      add(`<rect x="${x}" y="14" width="${Math.max(4, width)}" height="32" rx="2" fill="${palette[idx % palette.length]}" opacity="0.8"></rect>`);
+      x += width;
+    });
+  } else if (type === 'flowchart' || type === 'pert' || type === 'circuit') {
+    const count = Math.min(values.length, 5);
+    const gap = 84 / Math.max(1, count - 1);
+    for (let i = 0; i < count; i += 1) {
+      const cx = 8 + i * gap;
+      add(`<rect x="${cx - 6}" y="24" width="12" height="10" rx="2" fill="${palette[i % palette.length]}" opacity="0.85"></rect>`);
+      if (i < count - 1) {
+        add(`<path d="M${cx + 6} 29H${cx + gap - 6}" stroke="#6b5a48" stroke-width="1.2" />`);
+      }
+    }
+  } else if (type === 'icon_array') {
+    const totalIcons = 25;
+    let iconIndex = 0;
+    values.forEach((value, idx) => {
+      const share = Math.round((Math.max(0, value) / total) * totalIcons);
+      for (let i = 0; i < share && iconIndex < totalIcons; i += 1) {
+        const row = Math.floor(iconIndex / 5);
+        const col = iconIndex % 5;
+        add(`<circle cx="${16 + col * 12}" cy="${14 + row * 9}" r="3" fill="${palette[idx % palette.length]}" />`);
+        iconIndex += 1;
+      }
+    });
+  } else if (type === 'percentage_bar' || type === 'gauge' || type === 'radial_wheel' || type === 'concentric_circles') {
+    const value = Math.max(0, values[0] || 0);
+    const ratio = Math.min(1, total > 0 ? value / total : 0.5);
+    if (type === 'percentage_bar') {
+      add(`<rect x="10" y="26" width="80" height="8" rx="4" fill="#e2e8f0"></rect>`);
+      add(`<rect x="10" y="26" width="${Math.max(6, ratio * 80)}" height="8" rx="4" fill="${palette[0]}"></rect>`);
+    } else if (type === 'gauge') {
+      add(`<path d="M20 40a20 20 0 0 1 60 0" stroke="#e2e8f0" stroke-width="6" fill="none"></path>`);
+      const angle = Math.PI * ratio;
+      const x = 50 + 20 * Math.cos(Math.PI - angle);
+      const y = 40 - 20 * Math.sin(Math.PI - angle);
+      add(`<circle cx="50" cy="40" r="3" fill="${palette[0]}"></circle>`);
+      add(`<line x1="50" y1="40" x2="${x}" y2="${y}" stroke="${palette[0]}" stroke-width="2"></line>`);
+    } else if (type === 'radial_wheel') {
+      let start = -Math.PI / 2;
+      values.slice(0, 6).forEach((val, idx) => {
+        const slice = (Math.max(0, val) / total) * Math.PI * 2;
+        const x1 = 50 + 22 * Math.cos(start);
+        const y1 = 30 + 22 * Math.sin(start);
+        const x2 = 50 + 22 * Math.cos(start + slice);
+        const y2 = 30 + 22 * Math.sin(start + slice);
+        const large = slice > Math.PI ? 1 : 0;
+        add(`<path d="M50 30 L${x1} ${y1} A22 22 0 ${large} 1 ${x2} ${y2} Z" fill="${palette[idx % palette.length]}" opacity="0.8"></path>`);
+        start += slice;
+      });
+    } else {
+      values.slice(0, 3).forEach((val, idx) => {
+        const radius = 8 + (Math.max(0.2, val / max) * 16);
+        add(`<circle cx="50" cy="30" r="${radius}" fill="${palette[idx % palette.length]}" opacity="0.2"></circle>`);
+      });
+    }
+  } else if (type === 'gantt') {
+    const count = Math.min(values.length, 5);
+    for (let i = 0; i < count; i += 1) {
+      const width = Math.max(10, (values[i] / max) * 70);
+      add(`<rect x="12" y="${12 + i * 9}" width="${width}" height="5" rx="2" fill="${palette[i % palette.length]}"></rect>`);
+    }
+  } else if (type === 'timeline') {
+    add('<line x1="20" y1="10" x2="20" y2="50" stroke="#94a3b8" stroke-width="1.5"></line>');
+    values.slice(0, 4).forEach((_, idx) => {
+      const y = 14 + idx * 10;
+      add(`<circle cx="20" cy="${y}" r="2.4" fill="${palette[idx % palette.length]}"></circle>`);
+      add(`<rect x="26" y="${y - 2}" width="50" height="4" rx="2" fill="#e2e8f0"></rect>`);
+    });
+  } else if (type === 'venn') {
+    add('<circle cx="40" cy="30" r="14" fill="#f97316" opacity="0.25"></circle>');
+    add('<circle cx="60" cy="30" r="14" fill="#fb923c" opacity="0.25"></circle>');
+  } else if (type === 'mind_map') {
+    add('<circle cx="50" cy="30" r="6" fill="#f97316"></circle>');
+    const nodes = Math.min(labels.length, 4);
+    for (let i = 0; i < nodes; i += 1) {
+      const angle = (Math.PI * 2 * i) / nodes;
+      const x = 50 + 22 * Math.cos(angle);
+      const y = 30 + 16 * Math.sin(angle);
+      add(`<circle cx="${x}" cy="${y}" r="4" fill="${palette[i % palette.length]}"></circle>`);
+      add(`<line x1="50" y1="30" x2="${x}" y2="${y}" stroke="#6b5a48" stroke-width="1"></line>`);
+    }
+  } else if (type === 'dichotomous_key') {
+    add('<line x1="20" y1="12" x2="20" y2="48" stroke="#6b5a48" stroke-width="1.2"></line>');
+    add('<line x1="20" y1="22" x2="50" y2="22" stroke="#6b5a48" stroke-width="1.2"></line>');
+    add('<line x1="20" y1="36" x2="50" y2="36" stroke="#6b5a48" stroke-width="1.2"></line>');
+    add('<circle cx="20" cy="22" r="2" fill="#f97316"></circle>');
+    add('<circle cx="20" cy="36" r="2" fill="#fb923c"></circle>');
+  } else if (type === 'map' || type === 'choropleth') {
+    const cells = Math.min(values.length, 8);
+    for (let i = 0; i < cells; i += 1) {
+      const row = Math.floor(i / 4);
+      const col = i % 4;
+      const intensity = Math.max(0.2, values[i] / max);
+      add(`<rect x="${12 + col * 18}" y="${12 + row * 14}" width="14" height="10" rx="2" fill="${palette[i % palette.length]}" opacity="${intensity}"></rect>`);
+    }
+  } else {
+    add('<rect x="12" y="18" width="76" height="24" rx="6" fill="#f1f5f9"></rect>');
+  }
+
+  plot.append(svg);
+  wrap.append(plot);
+  element.append(wrap);
+}
+
 function renderChartWithLibrary(element, artifact) {
+  const rawType = normalizeChartType(artifact.chart_type || 'line');
+  if (!CHART_JS_TYPES.has(rawType)) {
+    renderCustomChart(element, artifact);
+    return;
+  }
+
   const wrap = document.createElement('div');
   wrap.className = 'artifact-chart-wrap';
   if (element.classList.contains('widget-body')) {
@@ -141,40 +350,96 @@ function renderChartWithLibrary(element, artifact) {
 
   const primarySeries = (artifact.series && artifact.series.length ? artifact.series[0] : null) || { values: [] };
   const rawValues = (primarySeries.values || artifact.values || artifact.data || []).map((value) => Number(value || 0));
-  const values = rawValues.length ? rawValues : [0];
-  const labels = (artifact.labels && artifact.labels.length ? artifact.labels : values.map((_, index) => `P${index + 1}`)).slice(0, values.length);
+  let values = rawValues.length ? rawValues : [0];
+  let labels = (artifact.labels && artifact.labels.length ? artifact.labels : values.map((_, index) => `P${index + 1}`)).slice(0, values.length);
 
-  const chartType = artifact.chart_type === 'pie'
-    ? 'pie'
-    : artifact.chart_type === 'bar'
-      ? 'bar'
-      : 'line';
+  let chartType = rawType;
+  let chartConfigType = rawType === 'donut' || rawType === 'half_donut' || rawType === 'multi_layer_pie'
+    ? 'doughnut'
+    : rawType === 'radar_triangle' || rawType === 'radar_polygon'
+      ? 'radar'
+      : rawType === 'polar'
+        ? 'polarArea'
+        : rawType === 'area'
+          ? 'line'
+          : rawType === 'histogram'
+            ? 'bar'
+            : rawType;
+
+  if (rawType === 'radar_triangle' && labels.length > 3) {
+    labels = labels.slice(0, 3);
+    values = values.slice(0, 3);
+  }
+
+  if (rawType === 'histogram') {
+    const hist = buildHistogram(values, 6);
+    labels = hist.labels;
+    values = hist.counts;
+  }
+
+  const scatterPoints = values.map((value, index) => ({
+    x: index + 1,
+    y: value,
+  }));
+
+  const bubblePoints = values.map((value, index) => ({
+    x: index + 1,
+    y: value,
+    r: Math.max(3, Math.min(12, (value / Math.max(...values, 1)) * 12)),
+  }));
 
   const config = {
-    type: chartType,
+    type: chartConfigType,
     data: {
       labels,
-      datasets: [
-        {
+      datasets: rawType === 'scatter'
+        ? [{
           label: primarySeries.name || 'Value',
-          data: values,
-          borderColor: chartType === 'pie' ? undefined : accent,
-          backgroundColor: chartType === 'pie'
-            ? values.map((_, index) => randomColor(index))
-            : chartType === 'bar'
-              ? `${accent}CC`
-              : `${accent}40`,
-          fill: chartType === 'line',
-          tension: chartType === 'line' ? 0.28 : 0,
-        },
-      ],
+          data: scatterPoints,
+          borderColor: accent,
+          backgroundColor: `${accent}80`,
+        }]
+        : rawType === 'bubble'
+          ? [{
+            label: primarySeries.name || 'Value',
+            data: bubblePoints,
+            borderColor: accent,
+            backgroundColor: `${accent}70`,
+          }]
+          : rawType === 'multi_layer_pie'
+            ? [
+              {
+                label: primarySeries.name || 'Layer 1',
+                data: values,
+                backgroundColor: values.map((_, index) => randomColor(index)),
+              },
+              {
+                label: 'Layer 2',
+                data: values.map((value) => Math.max(0, value * 0.6)),
+                backgroundColor: values.map((_, index) => `${randomColor(index)}66`),
+              },
+            ]
+            : [
+              {
+                label: primarySeries.name || 'Value',
+                data: values,
+                borderColor: chartConfigType === 'pie' || chartConfigType === 'doughnut' || chartConfigType === 'polarArea' ? undefined : accent,
+                backgroundColor: chartConfigType === 'pie' || chartConfigType === 'doughnut' || chartConfigType === 'polarArea'
+                  ? values.map((_, index) => randomColor(index))
+                  : chartConfigType === 'bar'
+                    ? `${accent}CC`
+                    : `${accent}40`,
+                fill: chartConfigType === 'line' || rawType === 'area',
+                tension: chartConfigType === 'line' ? 0.28 : 0,
+              },
+            ],
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
         legend: {
-          display: chartType === 'pie',
+          display: chartConfigType === 'pie' || chartConfigType === 'doughnut' || chartConfigType === 'polarArea',
           labels: {
             color: inkSecondary,
           },
@@ -191,13 +456,15 @@ function renderChartWithLibrary(element, artifact) {
           callbacks: {
             label: (context) => {
               const label = context.dataset?.label || 'Value';
-              const numeric = chartType === 'pie' ? context.raw : context.parsed?.y ?? context.raw;
+              const numeric = chartConfigType === 'pie' || chartConfigType === 'doughnut' || chartConfigType === 'polarArea'
+                ? context.raw
+                : context.parsed?.y ?? context.raw;
               return `${label}: ${formatCompactNumber(numeric)}`;
             },
           },
         },
       },
-      scales: chartType === 'pie'
+      scales: chartConfigType === 'pie' || chartConfigType === 'doughnut' || chartConfigType === 'polarArea' || chartConfigType === 'radar'
         ? {}
         : {
             x: {

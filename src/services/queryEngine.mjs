@@ -3,6 +3,9 @@ import { buildTemplateQuery, getTemplate } from './queryTemplates.mjs';
 import { parseTimePeriod, previousPeriod } from '../utils/time.mjs';
 import { toLowerAlnum, toRupiah } from '../utils/text.mjs';
 import { logAudit } from './audit.mjs';
+import { parseIndonesianNumber, parseFlexibleDate } from '../utils/parse.mjs';
+import { listDatasetTables, getDatasetTable } from './datasetTables.mjs';
+import { CHART_CATALOG, VISUALIZATION_IDS, SINGLE_VALUE_VISUALS, isMetricVisualization, isTableVisualization } from './chartCatalog.mjs';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -31,6 +34,72 @@ function isRelativePeriodInput(input) {
   }
 
   return /hari|minggu|bulan|today|yesterday|last|this|kemarin/.test(text);
+}
+
+function normalizeVisualization(value, fallback = 'line') {
+  const normalized = String(value || '').toLowerCase().trim();
+  return VISUALIZATION_IDS.includes(normalized) ? normalized : fallback;
+}
+
+function datasetTableSpec(table = {}) {
+  const profile = table.profile || {};
+  const detected = profile.detected || {};
+  const numeric = Array.isArray(detected.numeric_columns) ? detected.numeric_columns : [];
+  const dates = Array.isArray(detected.date_columns) ? detected.date_columns : [];
+  const categorical = Array.isArray(detected.categorical_columns) ? detected.categorical_columns : [];
+  const dimensions = ['none', ...dates, ...categorical];
+  const measures = numeric.length ? [...numeric] : [];
+  if (!measures.includes('count')) {
+    measures.push('count');
+  }
+  return {
+    id: table.id,
+    label: table.name || table.id,
+    measures,
+    dimensions,
+    date_columns: dates,
+    default_measure: numeric[0] || 'count',
+    default_dimension: dates[0] || categorical[0] || 'none',
+  };
+}
+
+function resolveTablePeriod(rows = [], dateColumn, rawPeriodInput) {
+  if (!dateColumn) {
+    return {
+      label: 'Semua data',
+      start: null,
+      end: null,
+      anchored: false,
+      source: 'no_date_column',
+    };
+  }
+  const dates = rows
+    .map((row) => parseFlexibleDate(row?.[dateColumn]))
+    .filter((value) => value && !Number.isNaN(value.getTime()));
+  if (dates.length === 0) {
+    return {
+      label: 'Semua data',
+      start: null,
+      end: null,
+      anchored: false,
+      source: 'no_date_values',
+    };
+  }
+  const latest = new Date(Math.max(...dates.map((value) => value.getTime())));
+  const input = rawPeriodInput || '30 hari terakhir';
+  if (!isRelativePeriodInput(input)) {
+    return {
+      ...parseTimePeriod(input),
+      anchored: false,
+      source: 'user_input',
+    };
+  }
+  return {
+    ...parseTimePeriod(input, latest),
+    anchored: true,
+    source: 'latest_dataset_date',
+    anchor_date: latest.toISOString(),
+  };
 }
 
 function latestDataDate(tenantId, dataset = 'transactions') {
@@ -388,9 +457,15 @@ function describeResult(intent, result, comparison) {
       const delta = comparison.delta;
       const sign = delta >= 0 ? 'naik' : 'turun';
       const pct = Number.isFinite(comparison.deltaPct) ? `${Math.abs(comparison.deltaPct).toFixed(1)}%` : '0%';
-      return `${result.title} ${result.period.label}: ${value}, ${sign} ${pct} dibanding periode sebelumnya.`;
+      return [
+        `**${result.title}** untuk **${result.period.label}** ada di **${value}**.`,
+        `- Perubahan vs periode sebelumnya: **${sign} ${pct}**.`,
+      ].join('\n');
     }
-    return `${result.title} ${result.period.label}: ${value}.`;
+    return [
+      `**${result.title}** untuk **${result.period.label}** ada di **${value}**.`,
+      '- Temuan ini bisa dipakai sebagai patokan utama untuk membaca performa saat ini.',
+    ].join('\n');
   }
 
   if (result.type === 'trend') {
@@ -398,7 +473,14 @@ function describeResult(intent, result, comparison) {
     if (!latest) {
       return `Belum ada data untuk ${result.period.label}.`;
     }
-    return `${result.title} ${result.period.label} siap. Nilai terakhir ${toRupiah(latest.value)}.`;
+    const peak = [...result.data].reduce((best, row) => (Number(row.value || 0) > Number(best.value || 0) ? row : best), latest);
+    const low = [...result.data].reduce((worst, row) => (Number(row.value || 0) < Number(worst.value || 0) ? row : worst), latest);
+    return [
+      `**${result.title}** untuk **${result.period.label}** menunjukkan bagaimana performa bergerak dari waktu ke waktu.`,
+      `- Nilai terbaru: **${toRupiah(latest.value)}** pada **${latest.period}**.`,
+      `- Titik tertinggi: **${toRupiah(peak.value)}** pada **${peak.period}**.`,
+      `- Titik terendah: **${toRupiah(low.value)}** pada **${low.period}**.`,
+    ].join('\n');
   }
 
   if (result.type === 'list') {
@@ -408,7 +490,18 @@ function describeResult(intent, result, comparison) {
     const top = result.data[0];
     const topName = top.name || top.product || 'Item';
     const topValue = top.total_revenue || top.revenue || top.value || 0;
-    return `${result.title} ${result.period.label}: ${topName} paling tinggi dengan ${toRupiah(topValue)}.`;
+    const runnerUp = result.data[1] || null;
+    const bullets = [
+      `**${result.title}** untuk **${result.period.label}** membantu melihat siapa kontributor terbesar dari data yang tersedia.`,
+      `- Posisi teratas: **${topName}** dengan **${toRupiah(topValue)}**.`,
+    ];
+    if (runnerUp) {
+      const runnerUpName = runnerUp.name || runnerUp.product || 'Item';
+      const runnerUpValue = runnerUp.total_revenue || runnerUp.revenue || runnerUp.value || 0;
+      bullets.push(`- Posisi berikutnya: **${runnerUpName}** dengan **${toRupiah(runnerUpValue)}**.`);
+    }
+    bullets.push(`- Total item yang dibandingkan: **${result.data.length}**.`);
+    return bullets.join('\n');
   }
 
   return 'Analisis selesai.';
@@ -488,6 +581,7 @@ export function executeAnalyticsIntent({ tenantId, userId, intent }) {
 
   return {
     answer,
+    content_format: 'markdown',
     widgets,
     artifacts,
     period,
@@ -514,7 +608,7 @@ function buildBuilderParts(query) {
   const dataset = query.dataset === 'expenses' ? 'expenses' : 'transactions';
   const groupBy = String(query.group_by || 'none').toLowerCase();
   const measure = String(query.measure || (dataset === 'expenses' ? 'amount' : 'revenue')).toLowerCase();
-  const visualization = String(query.visualization || (groupBy === 'none' ? 'metric' : 'line')).toLowerCase();
+  const visualization = normalizeVisualization(query.visualization, groupBy === 'none' ? 'metric' : 'line');
 
   if (dataset === 'expenses') {
     const dimensions = {
@@ -577,9 +671,10 @@ function buildBuilderParts(query) {
 }
 
 function rowsToArtifact(query, rows, valueField = 'value') {
-  const kind = query.visualization === 'table'
+  const visualization = normalizeVisualization(query.visualization, query.group_by === 'none' ? 'metric' : 'bar');
+  const kind = isTableVisualization(visualization)
     ? 'table'
-    : query.visualization === 'metric'
+    : isMetricVisualization(visualization)
       ? 'metric'
       : 'chart';
 
@@ -610,7 +705,7 @@ function rowsToArtifact(query, rows, valueField = 'value') {
   return {
     kind: 'chart',
     title: query.title || 'Grafik',
-    chart_type: query.visualization === 'pie' ? 'pie' : query.visualization === 'bar' ? 'bar' : 'line',
+    chart_type: visualization,
     labels,
     series: [
       {
@@ -621,7 +716,204 @@ function rowsToArtifact(query, rows, valueField = 'value') {
   };
 }
 
+function normalizeColumnValue(columns = [], value) {
+  const normalized = String(value || '').toLowerCase().trim();
+  if (!normalized) {
+    return null;
+  }
+  return columns.find((column) => String(column || '').toLowerCase() === normalized) || null;
+}
+
+function executeTableQuery({ tenantId, userId, query, table }) {
+  const spec = datasetTableSpec(table);
+  const availableMeasures = spec.measures;
+  const availableDimensions = spec.dimensions;
+
+  let measure = normalizeColumnValue(availableMeasures, query.measure) || spec.default_measure;
+  if (!measure) {
+    measure = 'count';
+  }
+
+  let visualization = normalizeVisualization(query.visualization, query.group_by === 'none' ? 'metric' : 'bar');
+  let groupBy = normalizeColumnValue(availableDimensions, query.group_by) || spec.default_dimension;
+  if (!groupBy) {
+    groupBy = 'none';
+  }
+
+  if (SINGLE_VALUE_VISUALS.has(visualization) || isMetricVisualization(visualization)) {
+    groupBy = 'none';
+  } else if (groupBy === 'none' && !isTableVisualization(visualization)) {
+    groupBy = spec.default_dimension || 'none';
+  }
+
+  const dateColumn = spec.date_columns.includes(groupBy)
+    ? groupBy
+    : spec.date_columns[0] || null;
+  const period = resolveTablePeriod(table.rows || [], dateColumn, query.time_period || '30 hari terakhir');
+
+  let filteredRows = Array.isArray(table.rows) ? table.rows : [];
+  if (period.start && period.end && dateColumn) {
+    const start = new Date(period.start).getTime();
+    const end = new Date(period.end).getTime();
+    filteredRows = filteredRows.filter((row) => {
+      const parsed = parseFlexibleDate(row?.[dateColumn]);
+      if (!parsed || Number.isNaN(parsed.getTime())) return false;
+      const ts = parsed.getTime();
+      return ts >= start && ts <= end;
+    });
+  }
+
+  const limit = Number.parseInt(String(query.limit || 20), 10) || 20;
+
+  if (isTableVisualization(visualization) && groupBy === 'none') {
+    const availableColumns = Array.isArray(table.columns) ? table.columns : [];
+    const requestedColumns = Array.isArray(query.columns)
+      ? query.columns.filter((column) => availableColumns.includes(column))
+      : [];
+    const columns = requestedColumns.length > 0 ? requestedColumns : availableColumns;
+    const rows = filteredRows
+      .slice(0, Math.min(limit, 200))
+      .map((row) => {
+        if (!columns.length) {
+          return row;
+        }
+        return columns.reduce((acc, column) => {
+          acc[column] = row?.[column];
+          return acc;
+        }, {});
+      });
+    const artifact = {
+      kind: 'table',
+      title: query.title || table.name || 'Tabel',
+      columns,
+      rows,
+    };
+    return {
+      period,
+      rows,
+      artifact,
+      agent_context: {
+        period_adjusted: false,
+        period_source: period.source || 'unknown',
+        period_anchored: Boolean(period.anchored),
+        anchor_date: period.anchor_date || null,
+      },
+      query: {
+        dataset: query.dataset,
+        group_by: groupBy,
+        measure,
+        visualization,
+        title: query.title || artifact.title,
+        columns,
+      },
+    };
+  }
+
+  if (groupBy === 'none') {
+    const numericValues = filteredRows.map((row) => parseIndonesianNumber(row?.[measure]) ?? 0);
+    const value = measure === 'count'
+      ? filteredRows.length
+      : numericValues.reduce((sum, val) => sum + (Number.isFinite(val) ? val : 0), 0);
+    const rows = [{ value }];
+    const artifact = rowsToArtifact(
+      {
+        ...query,
+        group_by: groupBy,
+        visualization,
+        title: query.title || table.name || 'Metrik',
+        measure,
+      },
+      rows,
+    );
+    return {
+      period,
+      rows,
+      artifact,
+      agent_context: {
+        period_adjusted: false,
+        period_source: period.source || 'unknown',
+        period_anchored: Boolean(period.anchored),
+        anchor_date: period.anchor_date || null,
+      },
+      query: {
+        dataset: query.dataset,
+        group_by: groupBy,
+        measure,
+        visualization,
+        title: query.title || artifact.title,
+      },
+    };
+  }
+
+  const grouped = new Map();
+  filteredRows.forEach((row) => {
+    const label = row?.[groupBy] ?? 'Tidak diketahui';
+    const key = String(label);
+    const current = grouped.get(key) || 0;
+    const value = measure === 'count'
+      ? 1
+      : parseIndonesianNumber(row?.[measure]) ?? 0;
+    grouped.set(key, current + (Number.isFinite(value) ? value : 0));
+  });
+
+  const rows = Array.from(grouped.entries())
+    .map(([label, value]) => ({ label, value }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, Math.min(limit, 500));
+
+  const artifact = rowsToArtifact(
+    {
+      ...query,
+      group_by: groupBy,
+      visualization,
+      title: query.title || table.name || 'Grafik',
+      measure,
+    },
+    rows,
+  );
+
+  logAudit({
+    tenantId,
+    userId,
+    action: 'canvas_query_execute',
+    resourceType: 'builder_query',
+    resourceId: query.dataset,
+    metadata: {
+      dataset: query.dataset,
+      group_by: groupBy,
+      measure,
+      limit,
+      period,
+      rows: rows.length,
+    },
+  });
+
+  return {
+    period,
+    rows,
+    artifact,
+    agent_context: {
+      period_adjusted: false,
+      period_source: period.source || 'unknown',
+      period_anchored: Boolean(period.anchored),
+      anchor_date: period.anchor_date || null,
+    },
+    query: {
+      dataset: query.dataset,
+      group_by: groupBy,
+      measure,
+      visualization,
+      title: query.title || artifact.title,
+    },
+  };
+}
+
 export function executeBuilderQuery({ tenantId, userId, query }) {
+  const table = query?.dataset ? getDatasetTable(tenantId, query.dataset) : null;
+  if (table) {
+    return executeTableQuery({ tenantId, userId, query, table });
+  }
+
   const normalized = buildBuilderParts(query);
   let period = resolveAgenticPeriod(tenantId, query.time_period || '30 hari terakhir', normalized.dataset);
   const limit = normalizeLimit(query.limit, normalized.groupBy === 'none' ? 1 : 20, 500);
@@ -726,7 +1018,35 @@ export function executeBuilderQuery({ tenantId, userId, query }) {
   };
 }
 
-export function getBuilderSchema() {
+export function getBuilderSchema(tenantId = null) {
+  const tables = tenantId ? listDatasetTables(tenantId) : [];
+  if (tables.length > 0) {
+    const datasets = tables.map((table) => {
+      const spec = datasetTableSpec(table);
+      const profileColumns = Array.isArray(table.profile?.columns)
+        ? table.profile.columns.map((column) => ({
+          name: column.name,
+          kind: column.kind,
+          sample_values: column.sample_values || [],
+        }))
+        : [];
+      return {
+        id: table.id,
+        label: table.name || table.id,
+        measures: spec.measures,
+        dimensions: spec.dimensions,
+        columns: profileColumns,
+        row_count: table.row_count,
+        description: `${table.row_count} baris • ${profileColumns.length} kolom`,
+      };
+    });
+    return {
+      datasets,
+      visualizations: CHART_CATALOG,
+      default_time_period: '30 hari terakhir',
+    };
+  }
+
   return {
     datasets: [
       {
@@ -742,7 +1062,7 @@ export function getBuilderSchema() {
         dimensions: ['none', 'day', 'category', 'branch', 'recurring'],
       },
     ],
-    visualizations: ['metric', 'table', 'line', 'bar', 'pie'],
+    visualizations: CHART_CATALOG,
     default_time_period: '30 hari terakhir',
   };
 }

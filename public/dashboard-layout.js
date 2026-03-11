@@ -136,6 +136,28 @@ export function suggestDashboardLayout(existingWidgets = [], kind = 'chart', pre
   );
 }
 
+function compactLayoutVertically(occupiedLayouts, layout, kind = 'chart') {
+  const normalized = normalizeDashboardLayout(layout, {
+    kind,
+    page: Number(layout?.page || 1),
+  });
+
+  for (let y = 0; y <= normalized.y; y += 1) {
+    const candidate = normalizeDashboardLayout({
+      ...normalized,
+      y,
+    }, {
+      kind,
+      page: normalized.page,
+    });
+    if (!occupiedLayouts.some((entry) => layoutsIntersect(candidate, entry))) {
+      return candidate;
+    }
+  }
+
+  return normalized;
+}
+
 export function packDashboardLayout(items = []) {
   const occupiedLayouts = [];
 
@@ -149,10 +171,11 @@ export function packDashboardLayout(items = []) {
       : null;
 
     if (explicitLayout && !occupiedLayouts.some((entry) => layoutsIntersect(explicitLayout, entry))) {
-      occupiedLayouts.push(explicitLayout);
+      const compactedLayout = compactLayoutVertically(occupiedLayouts, explicitLayout, kind);
+      occupiedLayouts.push(compactedLayout);
       return {
         ...item,
-        layout: explicitLayout,
+        layout: compactedLayout,
       };
     }
 

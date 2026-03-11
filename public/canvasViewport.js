@@ -23,11 +23,11 @@ export function resolveCanvasViewportTarget({
 
   const rawLeft = wideFocus
     ? centeredLeft
-    : focus.left - Math.round((viewport.width - focus.width) / 2);
+    : focus.left - edgeMargin;
 
   const rawTop = tallFocus
     ? centeredTop
-    : focus.top - Math.round((viewport.height - focus.height) / 2);
+    : focus.top - edgeMargin;
 
   return {
     scrollLeft: clamp(Math.round(rawLeft), 0, maxScrollLeft),

@@ -9,6 +9,7 @@ import { initializeDatabase, run } from '../src/db.mjs';
 import { Router } from '../src/router.mjs';
 import { registerChatRoutes } from '../src/routes/chat.mjs';
 import { ingestUploadedSource } from '../src/services/ingestion.mjs';
+import { createDashboard } from '../src/services/dashboards.mjs';
 import { getChatHistory, processChatMessage } from '../src/services/chat.mjs';
 import { resetGeminiQuotaCooldown } from '../src/services/gemini.mjs';
 
@@ -266,12 +267,14 @@ async function withMockGeminiResponses(responses, runTest) {
   const previousGeminiModelLight = config.geminiModelLight;
   const previousFetch = globalThis.fetch;
   const queue = [...responses];
+  const urls = [];
 
   resetGeminiQuotaCooldown();
   config.geminiApiKey = 'test-key';
   config.geminiModel = 'gemini-test';
   config.geminiModelLight = 'gemini-test-light';
-  globalThis.fetch = async () => {
+  globalThis.fetch = async (url) => {
+    urls.push(String(url || ''));
     const next = queue.shift();
     if (!next) {
       throw new Error('unexpected_gemini_fetch');
@@ -288,7 +291,7 @@ async function withMockGeminiResponses(responses, runTest) {
   };
 
   try {
-    return await runTest();
+    return await runTest({ urls });
   } finally {
     resetGeminiQuotaCooldown();
     globalThis.fetch = previousFetch;
@@ -397,6 +400,149 @@ test('processChatMessage retries incomplete clarification replies for follow-up 
   });
 });
 
+test('processChatMessage auto-builds a dashboard when route classification stays vague but dataset is ready', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  const filePath = await seedDataset({ tenantId, userId });
+
+  await withMockGeminiResponses([
+    routePayload('ask_clarification', { reason: 'permintaan masih samar' }),
+    ...createMinimalDashboardAgentResponses(),
+  ], async () => {
+    try {
+      const response = await processChatMessage({
+        tenantId,
+        userId,
+        message: 'buatin dashboard dong',
+      });
+
+      assert.equal(response.presentation_mode, 'canvas');
+      assert.equal(response.intent.intent, 'create_dashboard');
+      assert.equal(response.content_format, 'markdown');
+      assert.match(response.answer, /Ringkasan dashboard:/);
+      assert.ok(response.dashboard?.id);
+      assert.equal(response.draft_dashboard?.saved_dashboard_id, response.dashboard.id);
+    } finally {
+      fs.unlinkSync(filePath);
+      cleanupTenant(tenantId);
+    }
+  });
+});
+
+test('processChatMessage continues dashboard creation for vague follow-up replies after an earlier dashboard ask', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  let filePath = null;
+
+  try {
+    const initial = await withMockGeminiResponses([
+      routePayload('ask_clarification', { reason: 'assistant meminta preferensi dashboard' }),
+      surfaceReplyPayload('Mau fokus ke metrik atau dimensi tertentu untuk dashboard-nya?', {
+        replyKind: 'clarification',
+      }),
+    ], async () => processChatMessage({
+      tenantId,
+      userId,
+      message: 'bro buatin dashboard dong',
+    }));
+
+    filePath = await seedDataset({ tenantId, userId });
+
+    const followUp = await withMockGeminiResponses([
+      routePayload('ask_clarification', { reason: 'permintaan follow-up masih samar' }),
+      ...createMinimalDashboardAgentResponses(),
+    ], async () => processChatMessage({
+      tenantId,
+      userId,
+      conversationId: initial.conversation_id,
+      message: 'ngga tau buat aja',
+    }));
+
+    assert.equal(followUp.presentation_mode, 'canvas');
+    assert.equal(followUp.intent.intent, 'create_dashboard');
+    assert.equal(followUp.content_format, 'markdown');
+    assert.ok(followUp.dashboard?.id);
+  } finally {
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    cleanupTenant(tenantId);
+  }
+});
+
+test('processChatMessage promotes inspect_dataset to dashboard creation when the user still asks for a dashboard', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  const filePath = await seedDataset({ tenantId, userId });
+
+  await withMockGeminiResponses([
+    routePayload('inspect_dataset', { reason: 'user menyebut lihat dataset' }),
+    ...createMinimalDashboardAgentResponses(),
+  ], async () => {
+    try {
+      const response = await processChatMessage({
+        tenantId,
+        userId,
+        message: 'lihat aja datasetnya dan buatin dashboard',
+      });
+
+      assert.equal(response.presentation_mode, 'canvas');
+      assert.equal(response.intent.intent, 'create_dashboard');
+      assert.equal(response.content_format, 'markdown');
+      assert.ok(response.dashboard?.id);
+    } finally {
+      fs.unlinkSync(filePath);
+      cleanupTenant(tenantId);
+    }
+  });
+});
+
+test('processChatMessage asks whether to edit or create when a meaningful dashboard already exists', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  const filePath = await seedDataset({ tenantId, userId });
+  const existingDashboard = createDashboard(tenantId, userId, 'Dashboard Aktif', {
+    mode: 'manual',
+    pages: 1,
+    components: [
+      { id: 'metric_1', type: 'MetricCard', title: 'Omzet', metric: 'revenue' },
+      { id: 'trend_1', type: 'TrendChart', title: 'Trend Omzet', metric: 'revenue', granularity: 'day' },
+    ],
+    updated_by: 'assistant',
+  });
+
+  try {
+    const initial = await withMockGeminiResponses([
+      routePayload('create_dashboard', { reason: 'user meminta dashboard baru' }),
+    ], async () => processChatMessage({
+      tenantId,
+      userId,
+      message: 'buatin dashboard dong',
+      dashboardId: existingDashboard.id,
+    }));
+
+    assert.equal(initial.intent.intent, 'clarify_dashboard_choice');
+    assert.equal(initial.presentation_mode, 'chat');
+    assert.equal(initial.content_format, 'markdown');
+    assert.match(initial.answer, /balas `edit`/i);
+    assert.match(initial.answer, /balas `baru`/i);
+
+    const followUp = await withMockGeminiResponses([
+      ...createMinimalDashboardAgentResponses(),
+    ], async () => processChatMessage({
+      tenantId,
+      userId,
+      message: 'baru',
+      conversationId: initial.conversation_id,
+      dashboardId: existingDashboard.id,
+    }));
+
+    assert.equal(followUp.presentation_mode, 'canvas');
+    assert.ok(followUp.dashboard?.id);
+    assert.notEqual(followUp.dashboard.id, existingDashboard.id);
+    assert.equal(followUp.draft_dashboard?.saved_dashboard_id, followUp.dashboard.id);
+  } finally {
+    fs.unlinkSync(filePath);
+    cleanupTenant(tenantId);
+  }
+});
+
 test('processChatMessage allows acknowledgment prompts as conversation', async () => {
   const { tenantId, userId } = seedTenantUser();
   await withMockGeminiResponses([
@@ -437,6 +583,24 @@ test('processChatMessage handles extended greetings through Gemini classificatio
         assert.equal(typeof response.answer, 'string');
         assert.ok(response.answer.length > 0);
       }
+    } finally {
+      cleanupTenant(tenantId);
+    }
+  });
+});
+
+test('processChatMessage uses the light Gemini model for surface replies', async () => {
+  const { tenantId, userId } = seedTenantUser();
+  await withMockGeminiResponses([
+    routePayload('conversational', { reason: 'sapaan' }),
+    surfaceReplyPayload('Halo, ada yang ingin Anda tanyakan?'),
+  ], async ({ urls }) => {
+    try {
+      const response = await processChatMessage({ tenantId, userId, message: 'permisi' });
+
+      assert.equal(response.intent.intent, 'smalltalk');
+      assert.match(urls[0] || '', /models\/gemini-test:generateContent/);
+      assert.match(urls[1] || '', /models\/gemini-test-light:generateContent/);
     } finally {
       cleanupTenant(tenantId);
     }
