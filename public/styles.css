@@ -3226,11 +3226,11 @@ label {
   }
 
 	  .canvas-pane {
-	    position: fixed;
-	    inset: var(--app-header-height, 0px) 0 0 0;
+	    position: relative;
 	    z-index: 30;
 	    background: var(--bg-warm);
 	    display: none;
+      min-height: 80vh; 
 	  }
 
   .canvas-viewport {
@@ -3324,14 +3324,23 @@ label {
   }
 
   .workspace-shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
   }
 
   .workspace-shell.session-rail-collapsed,
   .workspace-page.canvas-open .workspace-shell.session-rail-collapsed {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .chat-pane {
+    flex: 1;
+    min-height: 60vh;
+  }
+
+  .panel-divider {
+    display: none !important;
   }
 
   .session-rail-handle {
