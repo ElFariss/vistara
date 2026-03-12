@@ -67,7 +67,7 @@ export const config = {
   geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-pro',
   geminiModelLight: process.env.GEMINI_MODEL_LIGHT || 'gemini-2.5-flash',
   geminiVisionModel: process.env.GEMINI_VISION_MODEL || 'gemini-3-flash-preview',
-  rawUploadAiFallbackEnabled: toBoolean(process.env.RAW_UPLOAD_AI_FALLBACK_ENABLED, false),
+  rawUploadAiFallbackEnabled: toBoolean(process.env.RAW_UPLOAD_AI_FALLBACK_ENABLED, true),
   pythonAgentUrl: process.env.PYTHON_AGENT_URL || '',
   pythonAgentToken: process.env.PYTHON_AGENT_TOKEN || '',
   pythonAgentTimeoutMs: toInt(process.env.PYTHON_AGENT_TIMEOUT_MS, 3500),

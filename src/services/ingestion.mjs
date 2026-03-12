@@ -238,7 +238,11 @@ export async function parseDataset(filePath, fileType, filename) {
       throw unsupportedUploadError();
     }
 
-    return parseWithAiFallback(buffer, filename);
+    try {
+      return await parseWithAiFallback(buffer, filename);
+    } catch {
+      throw unsupportedUploadError();
+    }
   }
 
   try {
@@ -263,7 +267,11 @@ export async function parseDataset(filePath, fileType, filename) {
     throw unsupportedUploadError();
   }
 
-  return parseWithAiFallback(buffer, filename);
+  try {
+    return await parseWithAiFallback(buffer, filename);
+  } catch {
+    throw unsupportedUploadError();
+  }
 }
 
 function normalizeText(value) {

@@ -406,12 +406,6 @@
             </div>
             <div id="sessionList" class="session-list" aria-live="polite"></div>
           </div>
-          <div class="rail-section">
-            <div class="rail-section-head">
-              <span>Dashboard</span>
-            </div>
-            <div id="dashboardList" class="session-list dashboard-list" aria-live="polite"></div>
-          </div>
         </aside>
 
         <section id="chatPane" class="workspace-pane chat-pane">
@@ -523,9 +517,18 @@
                     <button id="canvasAddPage" type="button" class="ghost canvas-tool-btn canvas-page-btn" aria-label="Tambah halaman" title="Tambah halaman">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
                     </button>
+                    <button id="canvasDeletePage" type="button" class="ghost canvas-tool-btn canvas-page-btn" aria-label="Hapus halaman" title="Hapus halaman">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                    </button>
                     <button id="canvasNextPage" type="button" class="ghost canvas-tool-btn canvas-page-btn" aria-label="Halaman berikutnya" title="Halaman berikutnya">
                       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 5 7 7-7 7"></path></svg>
                     </button>
+                  </div>
+                  <div class="canvas-dashboard-versions">
+                    <button id="dashboardVersionsBtn" type="button" class="ghost canvas-tool-btn" aria-expanded="false" title="Versi Dashboard">
+                      Versi <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+                    </button>
+                    <div id="dashboardList" class="dashboard-list hidden" aria-live="polite"></div>
                   </div>
                 </div>
               </div>

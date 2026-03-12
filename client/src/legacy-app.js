@@ -208,6 +208,7 @@ const refs = {
   sessionRailToggleLabel: document.getElementById('sessionRailToggleLabel'),
   sessionList: document.getElementById('sessionList'),
   dashboardList: document.getElementById('dashboardList'),
+  dashboardVersionsBtn: document.getElementById('dashboardVersionsBtn'),
   newSessionBtn: document.getElementById('newSessionBtn'),
 
   chatPane: document.getElementById('chatPane'),
@@ -269,6 +270,7 @@ const refs = {
   canvasPrevPage: document.getElementById('canvasPrevPage'),
   canvasNextPage: document.getElementById('canvasNextPage'),
   canvasAddPage: document.getElementById('canvasAddPage'),
+  canvasDeletePage: document.getElementById('canvasDeletePage'),
   canvasPageIndicator: document.getElementById('canvasPageIndicator'),
   canvasDock: document.getElementById('canvasDock'),
   canvasGrid: document.getElementById('canvasGrid'),
@@ -3631,6 +3633,10 @@ function renderDashboardList() {
     refs.dashboardList.append(card);
   });
 
+  if (refs.dashboardVersionsBtn) {
+    refs.dashboardVersionsBtn.innerHTML = `Versi (${dashboards.length}) <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>`;
+  }
+
   // Notify dashboard switcher of available dashboards
   document.dispatchEvent(new CustomEvent('vistara:dashboards-updated', {
     detail: {
@@ -5060,6 +5066,56 @@ if (refs.zoomOutBtn) {
 if (refs.zoomResetBtn) {
   refs.zoomResetBtn.addEventListener('click', () => {
     setStageZoom(1, { recenter: true });
+  });
+}
+
+if (refs.canvasDeletePage) {
+  refs.canvasDeletePage.addEventListener('click', () => {
+    if (state.canvasPagesCount <= 1) {
+      showToast('Tidak bisa menghapus halaman terakhir.');
+      return;
+    }
+    if (typeof window.confirm === 'function' && !window.confirm(`Hapus halaman ${state.canvasPage}?`)) {
+      return;
+    }
+
+    const pageToDelete = state.canvasPage;
+    state.canvasWidgets = state.canvasWidgets.filter((w) => Number(w.layout?.page || 1) !== pageToDelete);
+
+    state.canvasWidgets.forEach((w) => {
+      const p = Number(w.layout?.page || 1);
+      if (p > pageToDelete) {
+        w.layout.page = p - 1;
+      }
+    });
+
+    state.canvasPagesCount -= 1;
+    if (state.canvasPage > state.canvasPagesCount) {
+      state.canvasPage = state.canvasPagesCount;
+    }
+
+    renderCanvas();
+    scheduleCanvasSave();
+  });
+}
+
+if (refs.dashboardVersionsBtn) {
+  refs.dashboardVersionsBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const expanded = refs.dashboardVersionsBtn.getAttribute('aria-expanded') === 'true';
+    refs.dashboardVersionsBtn.setAttribute('aria-expanded', String(!expanded));
+    if (refs.dashboardList) {
+      refs.dashboardList.classList.toggle('hidden', expanded);
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    if (refs.dashboardVersionsBtn && !refs.dashboardVersionsBtn.contains(event.target)) {
+      refs.dashboardVersionsBtn.setAttribute('aria-expanded', 'false');
+      if (refs.dashboardList) {
+        refs.dashboardList.classList.add('hidden');
+      }
+    }
   });
 }
 
