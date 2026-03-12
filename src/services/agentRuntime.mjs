@@ -3965,6 +3965,20 @@ export async function runDashboardAgent({
           ...(argusResult.result?.directives?.add_templates || []),
         ],
       });
+
+      emitDashboardPatch(hooks, {
+        status: 'drafting',
+        note: 'Citra memperbarui tata letak berdasarkan tinjauan Argus...',
+        widgets: reviewedDraft.widgets,
+        artifacts: reviewedDraft.artifacts,
+        analysis_brief: analyst.brief,
+        changed_widgets: reviewedDraft.widgets.map((widget) => ({
+          id: widget.id,
+          title: widget.title || widget.artifact?.title || 'Widget',
+        })),
+        page_count: reviewedDraft.pageCount || 1,
+      });
+
       continue;
     }
 
