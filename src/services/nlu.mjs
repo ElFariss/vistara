@@ -1,6 +1,7 @@
 import { generateJsonWithGemini } from './gemini.mjs';
 import { listTemplateIds } from './queryTemplates.mjs';
 import { normalizeWhitespace, toLowerAlnum } from '../utils/text.mjs';
+import { Prompts } from './agents/index.mjs';
 
 const INTENTS = [
   'show_metric',
@@ -212,8 +213,7 @@ export async function parseIntent(message, history = []) {
 
   const result = await generateJsonWithGemini({
     systemPrompt: [
-      'Kamu adalah NLU engine Vistara untuk analitik bisnis berbahasa Indonesia.',
-      'Kembalikan JSON valid tanpa markdown.',
+      Prompts.NLU_AGENT,
       `intent harus salah satu: ${INTENTS.join(', ')}`,
       `template_id harus null atau salah satu: ${listTemplateIds().join(', ')}`,
     ].join(' '),

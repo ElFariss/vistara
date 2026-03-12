@@ -1,5 +1,5 @@
-import { renderArtifact } from '/vendor/chart-lite.js';
-import { createGridStackLite } from '/vendor/gridstack-lite.js';
+import { renderArtifact } from '@/vendor/chart-lite.js';
+import { createGridStackLite } from '@/vendor/gridstack-lite.js';
 import { resolveCanvasViewportTarget } from '@/dashboard/canvasViewport.js';
 import { shouldRetryNonStreamChatRequest } from '@/chat/chatRequestPolicy.js';
 import { summarizeChartArtifactForExport } from '@/utils/exportSummary.js';

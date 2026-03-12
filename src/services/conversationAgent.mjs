@@ -12,6 +12,7 @@ import {
   updateConversationAgentState,
   mergeConversationAgentMemory,
 } from './conversationState.mjs';
+import { Prompts } from './agents/index.mjs';
 
 const TEAM = {
   surface: 'Vira',
@@ -535,14 +536,7 @@ async function classifyRoute({ message, history, datasetReady, agentState, userD
   const result = await generateWithGeminiTools({
     systemPrompt: [
       `Kamu adalah ${TEAM.orchestrator}, orchestrator agent untuk Vistara.`,
-      'Pilih satu action terbaik untuk pesan user: conversational, analyze, inspect_dataset, create_dashboard, edit_dashboard, atau ask_clarification.',
-      'Gunakan conversational untuk sapaan atau obrolan ringan.',
-      'Gunakan analyze untuk insight/metrik/perbandingan/ranking yang cukup dijawab di chat.',
-      'Gunakan create_dashboard bila user meminta dashboard, canvas, atau visual lengkap.',
-      'Gunakan edit_dashboard bila user ingin mengubah dashboard yang sedang aktif.',
-      'Gunakan inspect_dataset bila user ingin mengecek struktur atau kualitas dataset.',
-      'Jika dataset tersedia dan user meminta dashboard meskipun masih samar, utamakan create_dashboard dan biarkan agent menyusun visual terbaik dari data yang ada.',
-      'Jika user sebelumnya sudah meminta dashboard lalu menulis hal seperti "buat aja", "terserah", "lihat aja datasetnya", atau hanya menyebut fokus bisnis seperti penjualan/omzet, tetap pilih create_dashboard.',
+      Prompts.ORCHESTRATOR_AGENT,
       'Jika belum jelas, gunakan ask_clarification.',
       userDisplayName ? `Nama user: ${userDisplayName}.` : 'Nama user belum diketahui.',
       datasetReady ? 'Dataset user tersedia.' : 'Dataset user belum tersedia.',
@@ -629,19 +623,12 @@ async function classifyRoute({ message, history, datasetReady, agentState, userD
 async function generateSurfaceReply({ message, history, datasetReady, userDisplayName, draftDashboard, routeReason = null }) {
   const baseSystemPrompt = [
     `Kamu adalah ${TEAM.surface}, wajah percakapan Vistara untuk user bisnis non-teknis.`,
-    'Jawab natural dalam Bahasa Indonesia.',
-    'Untuk sapaan atau obrolan ringan, balas dengan 1 kalimat singkat yang utuh.',
-    'Untuk pertanyaan kemampuan, balas maksimal 2 kalimat pendek yang utuh.',
-    'Untuk pertanyaan yang masih kabur, balas dengan 1 pertanyaan klarifikasi yang utuh dan bisa langsung dijawab user.',
-    'Jika dataset belum tersedia dan relevan, arahkan user untuk upload file atau gunakan demo dengan bahasa sederhana.',
-    'Jangan menyebut agent internal lain kecuali bila diminta secara eksplisit.',
-    'Jangan memanggil user dengan nama kecuali diminta secara eksplisit.',
-    'Jangan menyebut namamu sendiri kecuali user memintanya.',
+    Prompts.SURFACE_AGENT,
     datasetReady ? 'Dataset tersedia.' : 'Dataset belum tersedia.',
     draftDashboard ? 'Ada draft dashboard aktif.' : 'Belum ada draft dashboard aktif.',
     routeReason ? `Konteks keputusan Atlas: ${routeReason}.` : '',
     userDisplayName ? `Info internal: nama user ${userDisplayName}.` : '',
-  ].join(' ');
+  ].join('\n\n');
 
   const userPrompt = buildHistoryContext(history)
     ? `Riwayat:\n${buildHistoryContext(history)}\n\nPesan terbaru: ${message}`

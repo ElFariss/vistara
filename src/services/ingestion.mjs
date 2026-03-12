@@ -13,6 +13,7 @@ import { storeDatasetTables, deleteDatasetTablesForTenant, deleteDatasetTablesFo
 import { generateJsonWithGemini } from './gemini.mjs';
 import { logAudit } from './audit.mjs';
 import { config } from '../config.mjs';
+import { Prompts } from './agents/index.mjs';
 
 function detectFileType(filename, contentType = '') {
   const ext = path.extname(filename || '').toLowerCase();
@@ -127,12 +128,7 @@ async function parseWithAiFallback(buffer, filename) {
   }
 
   const result = await generateJsonWithGemini({
-    systemPrompt: [
-      'Kamu parser data untuk aplikasi analytics Vistara.',
-      'Ekstrak data menjadi JSON tabular.',
-      'Wajib output JSON valid tanpa markdown dengan format {"columns":[],"rows":[{}]}.',
-      'Jika tidak bisa diekstrak dengan yakin, kembalikan {"columns":[],"rows":[]}.',
-    ].join(' '),
+    systemPrompt: Prompts.INGESTION_AGENT,
     userPrompt: JSON.stringify({
       filename,
       text_sample: text.slice(0, 12000),

@@ -1,5 +1,6 @@
 import { generateJsonWithGemini } from './gemini.mjs';
 import { toLowerAlnum } from '../utils/text.mjs';
+import { Prompts } from './agents/index.mjs';
 
 const TRANSACTION_FIELDS = [
   'transaction_date',
@@ -187,12 +188,7 @@ function sanitizeMapping(columns, rawMapping, datasetType) {
 
 async function aiMapping(columns, sampleRows, datasetType, fallbackMapping) {
   const result = await generateJsonWithGemini({
-    systemPrompt: [
-      'Kamu adalah AI mapper kolom data Vistara untuk bisnis Indonesia.',
-      'Tugasmu: petakan kolom file ke field internal analytics.',
-      'WAJIB output JSON valid tanpa markdown.',
-      'Jika tidak yakin, gunakan mapping fallback yang diberikan.',
-    ].join(' '),
+    systemPrompt: Prompts.COLUMN_MAPPER_AGENT,
     userPrompt: JSON.stringify({
       instruction:
         'Pilih mapping terbaik. Gunakan hanya nama kolom yang tersedia. Jika field tidak ada, jangan isi.',

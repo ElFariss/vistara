@@ -8,18 +8,13 @@ export default defineConfig({
     outDir: path.resolve(__dirname, '..', 'dist'),
     emptyOutDir: true,
     rollupOptions: {
-      // Vendor scripts in public/ are served as-is, not bundled
-      external: [
-        '/vendor/chart-lite.js',
-        '/vendor/gridstack-lite.js',
-      ],
     },
   },
   server: {
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:8080',
         changeOrigin: true,
       },
     },

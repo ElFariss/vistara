@@ -3,6 +3,7 @@ import { generateId } from '../utils/ids.mjs';
 import { executeAnalyticsIntent } from './queryEngine.mjs';
 import { getDashboard, getLatestDashboard } from './dashboards.mjs';
 import { config } from '../config.mjs';
+import { Prompts } from './agents/index.mjs';
 import { generateReport } from './reports.mjs';
 import { createGoal } from './goals.mjs';
 import { logAudit } from './audit.mjs';
@@ -679,10 +680,7 @@ function lookupUserDisplayName(tenantId, userId) {
 async function generateConversationalReply({ message, history, datasetReady, userDisplayName }) {
   const contextParts = [
     'Kamu adalah Vistara, asisten AI analitik bisnis UMKM berbahasa Indonesia.',
-    'Jawab dengan singkat, ramah, dan natural. Maksimal 2-3 kalimat.',
-    'Jika user menyapa, balas sapaan dengan hangat.',
-    'Jika user bertanya kemampuanmu, jelaskan bahwa kamu bisa menganalisis data bisnis, membuat dashboard, menunjukkan tren penjualan, membandingkan performa, dan membuat laporan.',
-    'Jika user berterima kasih atau memberikan respon positif, balas dengan sopan.',
+    Prompts.CHAT_AGENT,
     'Jika user bertanya nama mereka, ' + (userDisplayName ? `nama mereka adalah ${userDisplayName}.` : 'katakan bahwa kamu belum mengetahui nama mereka dan sarankan untuk mengisi profil di Pengaturan.'),
     datasetReady
       ? 'Dataset user sudah tersedia dan siap dianalisis.'
