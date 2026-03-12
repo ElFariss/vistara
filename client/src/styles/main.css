@@ -3324,14 +3324,31 @@ label {
   }
 
   .workspace-shell {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
   }
 
   .workspace-shell.session-rail-collapsed,
+  .workspace-page.canvas-open .workspace-shell,
   .workspace-page.canvas-open .workspace-shell.session-rail-collapsed {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .panel-divider {
+    display: none !important;
+  }
+
+  .chat-pane {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 50vh;
+  }
+
+  .canvas-pane {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 50vh;
   }
 
   .session-rail-handle {
