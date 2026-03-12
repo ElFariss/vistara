@@ -684,82 +684,84 @@ function insertTransactions({ tenantId, userId, sourceId, rows, mapping }) {
   let minDate = null;
   let maxDate = null;
 
-  for (const row of rows) {
-    const normalized = normalizeTransactionRow(row, mapping);
+  withTransaction(() => {
+    for (const row of rows) {
+      const normalized = normalizeTransactionRow(row, mapping);
 
-    if (!normalized.transaction_date || normalized.total_revenue === null) {
-      skipped += 1;
-      continue;
-    }
-
-    if (normalized.total_revenue < 0) {
-      skipped += 1;
-      continue;
-    }
-
-    const branchId = ensureBranch(tenantId, normalized.branch_name);
-    const productId = ensureProduct(tenantId, normalized.product_name, normalized.category);
-
-    const checksum = createChecksum({
-      tenantId,
-      date: normalized.transaction_date.toISOString(),
-      product: normalized.product_name,
-      qty: normalized.quantity,
-      revenue: normalized.total_revenue,
-      branch: normalized.branch_name,
-      channel: normalized.channel,
-    });
-
-    try {
-      run(
-        `
-          INSERT INTO transactions (
-            id, tenant_id, transaction_date, product_id, branch_id,
-            quantity, unit_price, total_revenue, cogs, discount,
-            channel, payment_method, source_file_id, raw_data,
-            checksum, created_at
-          ) VALUES (
-            :id, :tenant_id, :transaction_date, :product_id, :branch_id,
-            :quantity, :unit_price, :total_revenue, :cogs, :discount,
-            :channel, :payment_method, :source_file_id, :raw_data,
-            :checksum, :created_at
-          )
-        `,
-        {
-          id: generateId(),
-          tenant_id: tenantId,
-          transaction_date: normalized.transaction_date.toISOString(),
-          product_id: productId,
-          branch_id: branchId,
-          quantity: normalized.quantity,
-          unit_price: normalized.unit_price,
-          total_revenue: normalized.total_revenue,
-          cogs: normalized.cogs,
-          discount: normalized.discount,
-          channel: normalized.channel,
-          payment_method: normalized.payment_method,
-          source_file_id: sourceId,
-          raw_data: JSON.stringify(row),
-          checksum,
-          created_at: new Date().toISOString(),
-        },
-      );
-      inserted += 1;
-
-      if (!minDate || normalized.transaction_date < minDate) {
-        minDate = normalized.transaction_date;
-      }
-      if (!maxDate || normalized.transaction_date > maxDate) {
-        maxDate = normalized.transaction_date;
-      }
-    } catch (error) {
-      if (String(error.message).includes('UNIQUE constraint failed')) {
-        duplicates += 1;
+      if (!normalized.transaction_date || normalized.total_revenue === null) {
+        skipped += 1;
         continue;
       }
-      throw error;
+
+      if (normalized.total_revenue < 0) {
+        skipped += 1;
+        continue;
+      }
+
+      const branchId = ensureBranch(tenantId, normalized.branch_name);
+      const productId = ensureProduct(tenantId, normalized.product_name, normalized.category);
+
+      const checksum = createChecksum({
+        tenantId,
+        date: normalized.transaction_date.toISOString(),
+        product: normalized.product_name,
+        qty: normalized.quantity,
+        revenue: normalized.total_revenue,
+        branch: normalized.branch_name,
+        channel: normalized.channel,
+      });
+
+      try {
+        run(
+          `
+            INSERT INTO transactions (
+              id, tenant_id, transaction_date, product_id, branch_id,
+              quantity, unit_price, total_revenue, cogs, discount,
+              channel, payment_method, source_file_id, raw_data,
+              checksum, created_at
+            ) VALUES (
+              :id, :tenant_id, :transaction_date, :product_id, :branch_id,
+              :quantity, :unit_price, :total_revenue, :cogs, :discount,
+              :channel, :payment_method, :source_file_id, :raw_data,
+              :checksum, :created_at
+            )
+          `,
+          {
+            id: generateId(),
+            tenant_id: tenantId,
+            transaction_date: normalized.transaction_date.toISOString(),
+            product_id: productId,
+            branch_id: branchId,
+            quantity: normalized.quantity,
+            unit_price: normalized.unit_price,
+            total_revenue: normalized.total_revenue,
+            cogs: normalized.cogs,
+            discount: normalized.discount,
+            channel: normalized.channel,
+            payment_method: normalized.payment_method,
+            source_file_id: sourceId,
+            raw_data: JSON.stringify(row),
+            checksum,
+            created_at: new Date().toISOString(),
+          },
+        );
+        inserted += 1;
+
+        if (!minDate || normalized.transaction_date < minDate) {
+          minDate = normalized.transaction_date;
+        }
+        if (!maxDate || normalized.transaction_date > maxDate) {
+          maxDate = normalized.transaction_date;
+        }
+      } catch (error) {
+        if (String(error.message).includes('UNIQUE constraint failed')) {
+          duplicates += 1;
+          continue;
+        }
+        throw error;
+      }
     }
-  }
+  });
 
   logAudit({
     tenantId,
@@ -785,47 +787,49 @@ function insertExpenses({ tenantId, userId, sourceId, rows, mapping }) {
   let minDate = null;
   let maxDate = null;
 
-  for (const row of rows) {
-    const normalized = normalizeExpenseRow(row, mapping);
-    if (!normalized.expense_date || normalized.amount === null) {
-      skipped += 1;
-      continue;
-    }
+  withTransaction(() => {
+    for (const row of rows) {
+      const normalized = normalizeExpenseRow(row, mapping);
+      if (!normalized.expense_date || normalized.amount === null) {
+        skipped += 1;
+        continue;
+      }
 
-    const branchId = ensureBranch(tenantId, normalized.branch_name);
+      const branchId = ensureBranch(tenantId, normalized.branch_name);
 
-    run(
-      `
-        INSERT INTO expenses (
-          id, tenant_id, expense_date, category, amount,
-          branch_id, description, recurring, source_file_id, created_at
-        ) VALUES (
-          :id, :tenant_id, :expense_date, :category, :amount,
-          :branch_id, :description, :recurring, :source_file_id, :created_at
-        )
-      `,
-      {
-        id: generateId(),
-        tenant_id: tenantId,
-        expense_date: normalized.expense_date.toISOString(),
-        category: normalized.category,
-        amount: normalized.amount,
-        branch_id: branchId,
-        description: normalized.description,
-        recurring: normalized.recurring ? 1 : 0,
-        source_file_id: sourceId,
-        created_at: new Date().toISOString(),
-      },
-    );
+      run(
+        `
+          INSERT INTO expenses (
+            id, tenant_id, expense_date, category, amount,
+            branch_id, description, recurring, source_file_id, created_at
+          ) VALUES (
+            :id, :tenant_id, :expense_date, :category, :amount,
+            :branch_id, :description, :recurring, :source_file_id, :created_at
+          )
+        `,
+        {
+          id: generateId(),
+          tenant_id: tenantId,
+          expense_date: normalized.expense_date.toISOString(),
+          category: normalized.category,
+          amount: normalized.amount,
+          branch_id: branchId,
+          description: normalized.description,
+          recurring: normalized.recurring ? 1 : 0,
+          source_file_id: sourceId,
+          created_at: new Date().toISOString(),
+        },
+      );
 
-    inserted += 1;
-    if (!minDate || normalized.expense_date < minDate) {
-      minDate = normalized.expense_date;
+      inserted += 1;
+      if (!minDate || normalized.expense_date < minDate) {
+        minDate = normalized.expense_date;
+      }
+      if (!maxDate || normalized.expense_date > maxDate) {
+        maxDate = normalized.expense_date;
+      }
     }
-    if (!maxDate || normalized.expense_date > maxDate) {
-      maxDate = normalized.expense_date;
-    }
-  }
+  });
 
   logAudit({
     tenantId,
