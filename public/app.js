@@ -269,6 +269,7 @@ const refs = {
   canvasPrevPage: document.getElementById('canvasPrevPage'),
   canvasNextPage: document.getElementById('canvasNextPage'),
   canvasAddPage: document.getElementById('canvasAddPage'),
+  canvasDeletePage: document.getElementById('canvasDeletePage'),
   canvasPageIndicator: document.getElementById('canvasPageIndicator'),
   canvasDock: document.getElementById('canvasDock'),
   canvasGrid: document.getElementById('canvasGrid'),
@@ -853,6 +854,36 @@ function createAppError(message, options = {}) {
   return error;
 }
 
+async function refreshDemoSession() {
+  const requestUrl = `${API_BASE_URL}/api/auth/demo`;
+  const headers = new Headers();
+  headers.set('Content-Type', 'application/json');
+
+  const response = await fetchWithRetry(requestUrl, {
+    method: 'POST',
+    headers,
+  }, {
+    retries: 1,
+    baseDelayMs: 350,
+  });
+
+  if (!response.ok) {
+    return false;
+  }
+
+  const payload = await response.json();
+  if (!payload?.token) {
+    return false;
+  }
+
+  setAuth(payload.token, payload.user, {
+    persist: false,
+    isDemo: true,
+  });
+
+  return true;
+}
+
 async function api(path, options = {}) {
   const requestUrl = /^https?:\/\//i.test(path)
     ? path
@@ -884,6 +915,24 @@ async function api(path, options = {}) {
   const payload = contentType.includes('application/json') ? await response.json() : await response.text();
 
   if (!response.ok) {
+    if (response.status === 401 && state.token) {
+      if (state.isDemoSession && !options._demoReauthTried) {
+        const refreshed = await refreshDemoSession();
+        if (refreshed) {
+          return api(path, { ...options, _demoReauthTried: true });
+        }
+      }
+
+      setAuth('', null);
+      showToast(state.isDemoSession
+        ? 'Sesi demo berakhir. Silakan mulai demo lagi.'
+        : 'Sesi Anda berakhir. Silakan login lagi.');
+      throw createAppError('Sesi Anda berakhir. Silakan login lagi.', {
+        code: 'UNAUTHORIZED',
+        statusCode: 401,
+      });
+    }
+
     throw createAppError(payload?.error?.message || response.statusText || 'Request gagal', {
       code: payload?.error?.code || null,
       statusCode: payload?.error?.status || response.status,
@@ -5035,6 +5084,47 @@ if (refs.zoomOutBtn) {
 if (refs.zoomResetBtn) {
   refs.zoomResetBtn.addEventListener('click', () => {
     setStageZoom(1, { recenter: true });
+  });
+}
+
+if (refs.canvasDeletePage) {
+  refs.canvasDeletePage.addEventListener('click', () => {
+    if (state.canvasPagesCount <= 1) {
+      if (typeof window.confirm === 'function'
+        && !window.confirm('Hapus semua widget di dashboard?')) {
+        return;
+      }
+
+      state.canvasWidgets = [];
+      state.canvasPagesCount = 1;
+      state.canvasPage = 1;
+      renderCanvas();
+      scheduleCanvasSave();
+      showToast('Dashboard dikosongkan.');
+      return;
+    }
+
+    if (typeof window.confirm === 'function' && !window.confirm(`Hapus halaman ${state.canvasPage}?`)) {
+      return;
+    }
+
+    const pageToDelete = state.canvasPage;
+    state.canvasWidgets = state.canvasWidgets.filter((w) => Number(w.layout?.page || 1) !== pageToDelete);
+
+    state.canvasWidgets.forEach((w) => {
+      const p = Number(w.layout?.page || 1);
+      if (p > pageToDelete) {
+        w.layout.page = p - 1;
+      }
+    });
+
+    state.canvasPagesCount -= 1;
+    if (state.canvasPage > state.canvasPagesCount) {
+      state.canvasPage = state.canvasPagesCount;
+    }
+
+    renderCanvas();
+    scheduleCanvasSave();
   });
 }
 

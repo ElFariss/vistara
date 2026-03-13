@@ -940,6 +940,37 @@ function createAppError(message, options = {}) {
   return error;
 }
 
+async function refreshDemoSession() {
+  const requestUrl = `${API_BASE_URL}/api/auth/demo`;
+  const headers = new Headers();
+  headers.set('Content-Type', 'application/json');
+
+  const response = await fetchWithRetry(requestUrl, {
+    method: 'POST',
+    headers,
+  }, {
+    retries: 1,
+    baseDelayMs: 350,
+    timeoutMs: DEFAULT_API_TIMEOUT_MS,
+  });
+
+  if (!response.ok) {
+    return false;
+  }
+
+  const payload = await response.json();
+  if (!payload?.token) {
+    return false;
+  }
+
+  setAuth(payload.token, payload.user, {
+    persist: false,
+    isDemo: true,
+  });
+
+  return true;
+}
+
 async function api(path, options = {}) {
   const requestUrl = /^https?:\/\//i.test(path)
     ? path
@@ -985,6 +1016,24 @@ async function api(path, options = {}) {
   const payload = contentType.includes('application/json') ? await response.json() : await response.text();
 
   if (!response.ok) {
+    if (response.status === 401 && state.token) {
+      if (state.isDemoSession && !options._demoReauthTried) {
+        const refreshed = await refreshDemoSession();
+        if (refreshed) {
+          return api(path, { ...options, _demoReauthTried: true });
+        }
+      }
+
+      setAuth('', null);
+      showToast(state.isDemoSession
+        ? 'Sesi demo berakhir. Silakan mulai demo lagi.'
+        : 'Sesi Anda berakhir. Silakan login lagi.');
+      throw createAppError('Sesi Anda berakhir. Silakan login lagi.', {
+        code: 'UNAUTHORIZED',
+        statusCode: 401,
+      });
+    }
+
     throw createAppError(payload?.error?.message || response.statusText || 'Request gagal', {
       code: payload?.error?.code || null,
       statusCode: payload?.error?.status || response.status,
@@ -5319,7 +5368,17 @@ if (refs.zoomResetBtn) {
 if (refs.canvasDeletePage) {
   refs.canvasDeletePage.addEventListener('click', () => {
     if (state.canvasPagesCount <= 1) {
-      showToast('Tidak bisa menghapus halaman terakhir.');
+      if (typeof window.confirm === 'function'
+        && !window.confirm('Hapus semua widget di dashboard?')) {
+        return;
+      }
+
+      state.canvasWidgets = [];
+      state.canvasPagesCount = 1;
+      state.canvasPage = 1;
+      renderCanvas();
+      scheduleCanvasSave();
+      showToast('Dashboard dikosongkan.');
       return;
     }
     if (typeof window.confirm === 'function' && !window.confirm(`Hapus halaman ${state.canvasPage}?`)) {
