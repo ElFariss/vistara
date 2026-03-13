@@ -51,7 +51,7 @@ export function registerChatRoutes(router) {
     'GET',
     '/api/chat/conversations',
     async (ctx) => {
-      const conversations = listChatConversations({
+      const conversations = await listChatConversations({
         tenantId: ctx.user.tenant_id,
         userId: ctx.user.id,
       });
@@ -68,7 +68,7 @@ export function registerChatRoutes(router) {
       const body = await ctx.getBody();
 
       try {
-        const conversation = createConversation({
+        const conversation = await createConversation({
           tenantId: ctx.user.tenant_id,
           userId: ctx.user.id,
           title: body.title || null,
@@ -96,7 +96,7 @@ export function registerChatRoutes(router) {
         return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'title wajib diisi.');
       }
 
-      const conversation = renameConversation({
+      const conversation = await renameConversation({
         tenantId: ctx.user.tenant_id,
         userId: ctx.user.id,
         conversationId: ctx.params.conversationId,
@@ -116,7 +116,7 @@ export function registerChatRoutes(router) {
     'DELETE',
     '/api/chat/conversations/:conversationId',
     async (ctx) => {
-      const removed = deleteConversation({
+      const removed = await deleteConversation({
         tenantId: ctx.user.tenant_id,
         userId: ctx.user.id,
         conversationId: ctx.params.conversationId,
@@ -257,7 +257,7 @@ export function registerChatRoutes(router) {
     '/api/chat/history',
     async (ctx) => {
       try {
-        const response = getChatHistory({
+      const response = await getChatHistory({
           tenantId: ctx.user.tenant_id,
           userId: ctx.user.id,
           conversationId: ctx.query.get('conversation_id') || null,
@@ -280,7 +280,7 @@ export function registerChatRoutes(router) {
         return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'message_id dan feedback wajib diisi.');
       }
 
-      const updated = setChatFeedback({
+      const updated = await setChatFeedback({
         tenantId: ctx.user.tenant_id,
         userId: ctx.user.id,
         messageId: body.message_id,

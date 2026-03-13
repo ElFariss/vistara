@@ -14,7 +14,6 @@ if (!yesFlag || !backupArg) {
 const backupRootDir = path.resolve(path.join(process.cwd(), 'backups'));
 const safetyBackup = await createBackup({
   dataDir: config.dataDir,
-  dbPath: config.dbPath,
   backupRootDir,
   label: 'pre-restore',
 });
@@ -22,13 +21,12 @@ const safetyBackup = await createBackup({
 const result = await restoreBackup({
   backupDir: backupArg,
   dataDir: config.dataDir,
-  dbPath: config.dbPath,
 });
 
 console.log(JSON.stringify({
   ok: true,
   restored_from: path.resolve(backupArg),
   pre_restore_backup: safetyBackup.backupDir,
-  restored_db_files: result.restoredDbFiles,
+  restored_tables: result.restoredTables,
   restored_uploads: result.restoredUploads,
 }, null, 2));

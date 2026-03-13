@@ -129,6 +129,11 @@ export function registerDataRoutes(router) {
     'POST',
     '/api/data/upload',
     async (ctx) => {
+      logger.info('upload_started', {
+        user_id: ctx.user?.id || null,
+        content_length: ctx.req.headers['content-length'] || null,
+        content_type: ctx.req.headers['content-type'] || null,
+      });
       const body = await ctx.getBody();
       const file = getUploadedFile(body);
 
@@ -136,11 +141,23 @@ export function registerDataRoutes(router) {
         return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'File wajib diupload melalui field "file".');
       }
 
+      logger.info('upload_parsed', {
+        user_id: ctx.user?.id || null,
+        filename: file.filename || null,
+        content_type: file.contentType || null,
+        bytes: file.buffer?.length || 0,
+      });
+
       const safeName = sanitizeFilename(file.filename || 'dataset.csv');
       const tempId = generateId();
       const storedPath = path.join(config.uploadDir, `${tempId}-${safeName}`);
 
       fs.writeFileSync(storedPath, file.buffer);
+      logger.info('upload_saved', {
+        user_id: ctx.user?.id || null,
+        stored_path: storedPath,
+        bytes: file.buffer?.length || 0,
+      });
 
       try {
         const ingested = await ingestFromStoredFile({
@@ -149,6 +166,15 @@ export function registerDataRoutes(router) {
           storedPath,
           safeName,
           contentType: file.contentType,
+        });
+
+        logger.info('upload_ingested', {
+          user_id: ctx.user?.id || null,
+          source_id: ingested.source?.id || null,
+          dataset_type: ingested.result?.datasetType || null,
+          inserted: ingested.result?.inserted || 0,
+          duplicates: ingested.result?.duplicates || 0,
+          skipped: ingested.result?.skipped || 0,
         });
 
         return sendJson(ctx.res, 201, {
@@ -170,11 +196,22 @@ export function registerDataRoutes(router) {
         if (fs.existsSync(storedPath)) {
           fs.unlinkSync(storedPath);
         }
+        logger.error('upload_failed', {
+          user_id: ctx.user?.id || null,
+          error: error?.message || 'unknown_error',
+        });
+        const msg = error?.message || '';
+        const isParserError =
+          msg.includes('Gunakan data tabular') ||
+          msg.includes('AI parser tidak menemukan') ||
+          msg.includes('Coba unggah') ||
+          msg.includes('Format file tidak didukung');
+
         return sendError(
           ctx.res,
           400,
           'UPLOAD_PROCESS_ERROR',
-          resolvePublicErrorMessage(error, 'File tidak bisa diproses sebagai dataset.'),
+          isParserError ? msg : resolvePublicErrorMessage(error, 'File tidak bisa diproses sebagai dataset.'),
         );
       }
     },
@@ -335,7 +372,7 @@ export function registerDataRoutes(router) {
     'GET',
     '/api/data/sources',
     async (ctx) => {
-      const sources = listSources(ctx.user.tenant_id).map((source) => ({
+      const sources = (await listSources(ctx.user.tenant_id)).map((source) => ({
         ...source,
         column_mapping: safeJsonParse(source.column_mapping, {}),
       }));
@@ -348,7 +385,7 @@ export function registerDataRoutes(router) {
     'GET',
     '/api/data/sources/:id/mapping',
     async (ctx) => {
-      const source = getSource(ctx.user.tenant_id, ctx.params.id);
+      const source = await getSource(ctx.user.tenant_id, ctx.params.id);
       if (!source) {
         return sendError(ctx.res, 404, 'SOURCE_NOT_FOUND', 'Data source tidak ditemukan.');
       }
@@ -372,7 +409,7 @@ export function registerDataRoutes(router) {
       }
 
       try {
-        updateSourceMapping({
+        await updateSourceMapping({
           tenantId: ctx.user.tenant_id,
           sourceId: ctx.params.id,
           datasetType: body.dataset_type || body.datasetType || 'transaction',
@@ -381,7 +418,7 @@ export function registerDataRoutes(router) {
 
         return sendJson(ctx.res, 200, {
           ok: true,
-          source: getSource(ctx.user.tenant_id, ctx.params.id),
+          source: await getSource(ctx.user.tenant_id, ctx.params.id),
         });
       } catch (error) {
         return sendError(
@@ -415,7 +452,7 @@ export function registerDataRoutes(router) {
     async (ctx) => {
       return sendJson(ctx.res, 200, {
         ok: true,
-        schema: getBuilderSchema(ctx.user.tenant_id),
+        schema: await getBuilderSchema(ctx.user.tenant_id),
       });
     },
     { auth: true },
@@ -425,7 +462,7 @@ export function registerDataRoutes(router) {
     'GET',
     '/api/data/tables',
     async (ctx) => {
-      const tables = listDatasetTables(ctx.user.tenant_id).map((table) => ({
+      const tables = (await listDatasetTables(ctx.user.tenant_id)).map((table) => ({
         id: table.id,
         name: table.name,
         row_count: table.row_count,
@@ -444,7 +481,7 @@ export function registerDataRoutes(router) {
     'GET',
     '/api/data/tables/:id/preview',
     async (ctx) => {
-      const table = getDatasetTable(ctx.user.tenant_id, ctx.params.id);
+      const table = await getDatasetTable(ctx.user.tenant_id, ctx.params.id);
       if (!table) {
         return sendError(ctx.res, 404, 'DATASET_TABLE_NOT_FOUND', 'Dataset table tidak ditemukan.');
       }
@@ -469,7 +506,7 @@ export function registerDataRoutes(router) {
     async (ctx) => {
       const body = await ctx.getBody();
       try {
-        const result = executeBuilderQuery({
+        const result = await executeBuilderQuery({
           tenantId: ctx.user.tenant_id,
           userId: ctx.user.id,
           query: body || {},
@@ -494,7 +531,7 @@ export function registerDataRoutes(router) {
     'DELETE',
     '/api/data/sources/:id',
     async (ctx) => {
-      const deleted = deleteSource(ctx.user.tenant_id, ctx.params.id);
+      const deleted = await deleteSource(ctx.user.tenant_id, ctx.params.id);
       if (!deleted) {
         return sendError(ctx.res, 404, 'SOURCE_NOT_FOUND', 'Data source tidak ditemukan.');
       }

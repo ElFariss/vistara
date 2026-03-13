@@ -39,7 +39,7 @@ function readTableFile(filePath) {
   }
 }
 
-export function storeDatasetTables({ tenantId, sourceId, tables = [], minRows = 6 } = {}) {
+export async function storeDatasetTables({ tenantId, sourceId, tables = [], minRows = 6 } = {}) {
   const stored = [];
   const cleanTables = Array.isArray(tables) ? tables : [];
 
@@ -57,7 +57,7 @@ export function storeDatasetTables({ tenantId, sourceId, tables = [], minRows = 
     const sampleRows = rows.slice(0, 12);
 
     writeTableFile(dataPath, { columns, rows });
-    run(
+    await run(
       `
         INSERT INTO dataset_tables (
           id, tenant_id, source_file_id, table_name, row_count,
@@ -95,8 +95,8 @@ export function storeDatasetTables({ tenantId, sourceId, tables = [], minRows = 
   return stored;
 }
 
-export function listDatasetTables(tenantId) {
-  const rows = all(
+export async function listDatasetTables(tenantId) {
+  const rows = await all(
     `
       SELECT *
       FROM dataset_tables
@@ -118,8 +118,8 @@ export function listDatasetTables(tenantId) {
   }));
 }
 
-export function getDatasetTable(tenantId, tableId) {
-  const row = get(
+export async function getDatasetTable(tenantId, tableId) {
+  const row = await get(
     `
       SELECT *
       FROM dataset_tables
@@ -147,8 +147,8 @@ export function getDatasetTable(tenantId, tableId) {
   };
 }
 
-export function deleteDatasetTablesForTenant(tenantId) {
-  const rows = listDatasetTables(tenantId);
+export async function deleteDatasetTablesForTenant(tenantId) {
+  const rows = await listDatasetTables(tenantId);
   rows.forEach((row) => {
     if (row.data_path && fs.existsSync(row.data_path)) {
       try {
@@ -158,11 +158,11 @@ export function deleteDatasetTablesForTenant(tenantId) {
       }
     }
   });
-  run(`DELETE FROM dataset_tables WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
+  await run(`DELETE FROM dataset_tables WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
 }
 
-export function deleteDatasetTablesForSource(sourceId) {
-  const rows = all(
+export async function deleteDatasetTablesForSource(sourceId) {
+  const rows = await all(
     `
       SELECT *
       FROM dataset_tables
@@ -179,5 +179,5 @@ export function deleteDatasetTablesForSource(sourceId) {
       }
     }
   });
-  run(`DELETE FROM dataset_tables WHERE source_file_id = :source_file_id`, { source_file_id: sourceId });
+  await run(`DELETE FROM dataset_tables WHERE source_file_id = :source_file_id`, { source_file_id: sourceId });
 }

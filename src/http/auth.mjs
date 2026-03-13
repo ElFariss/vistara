@@ -27,7 +27,7 @@ export function issueAuthToken(user) {
   );
 }
 
-export function authenticateRequest(req) {
+export async function authenticateRequest(req) {
   const token = getBearerToken(req);
   if (!token) {
     return null;
@@ -38,7 +38,7 @@ export function authenticateRequest(req) {
     return null;
   }
 
-  const user = get(
+  const user = await get(
     `
       SELECT id, tenant_id, email, name, role, phone, phone_verified
       FROM users

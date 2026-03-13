@@ -20,8 +20,8 @@ function parseStateRow(row) {
   };
 }
 
-export function getConversationAgentState({ tenantId, userId, conversationId }) {
-  const row = get(
+export async function getConversationAgentState({ tenantId, userId, conversationId }) {
+  const row = await get(
     `
       SELECT *
       FROM conversation_agent_state
@@ -40,14 +40,14 @@ export function getConversationAgentState({ tenantId, userId, conversationId }) 
   return parseStateRow(row);
 }
 
-export function ensureConversationAgentState({ tenantId, userId, conversationId }) {
-  const existing = getConversationAgentState({ tenantId, userId, conversationId });
+export async function ensureConversationAgentState({ tenantId, userId, conversationId }) {
+  const existing = await getConversationAgentState({ tenantId, userId, conversationId });
   if (existing) {
     return existing;
   }
 
   const now = new Date().toISOString();
-  run(
+  await run(
     `
       INSERT INTO conversation_agent_state (
         conversation_id,
@@ -100,7 +100,7 @@ function serializeField(value) {
   return JSON.stringify(value);
 }
 
-export function updateConversationAgentState({
+export async function updateConversationAgentState({
   tenantId,
   userId,
   conversationId,
@@ -110,7 +110,7 @@ export function updateConversationAgentState({
   pendingApproval,
   activeRun,
 } = {}) {
-  ensureConversationAgentState({ tenantId, userId, conversationId });
+  await ensureConversationAgentState({ tenantId, userId, conversationId });
   const now = new Date().toISOString();
   const fields = [];
   const params = {
@@ -146,7 +146,7 @@ export function updateConversationAgentState({
   }
 
   fields.push('updated_at = :updated_at');
-  run(
+  await run(
     `
       UPDATE conversation_agent_state
       SET ${fields.join(', ')}
@@ -160,8 +160,8 @@ export function updateConversationAgentState({
   return getConversationAgentState({ tenantId, userId, conversationId });
 }
 
-export function mergeConversationAgentMemory({ tenantId, userId, conversationId, patch = {} } = {}) {
-  const existing = ensureConversationAgentState({ tenantId, userId, conversationId });
+export async function mergeConversationAgentMemory({ tenantId, userId, conversationId, patch = {} } = {}) {
+  const existing = await ensureConversationAgentState({ tenantId, userId, conversationId });
   return updateConversationAgentState({
     tenantId,
     userId,

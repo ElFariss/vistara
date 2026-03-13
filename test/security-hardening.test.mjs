@@ -14,18 +14,18 @@ import { resolveHttpError, resolvePublicErrorMessage } from '../src/http/respons
 import { generateJsonWithGemini, generateWithGeminiTools, resetGeminiQuotaCooldown } from '../src/services/gemini.mjs';
 import { parseDataset } from '../src/services/ingestion.mjs';
 
-initializeDatabase();
+await initializeDatabase();
 
 function uid(prefix) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 }
 
-function seedTenantUser({ phone = '08123456789' } = {}) {
+async function seedTenantUser({ phone = '08123456789' } = {}) {
   const tenantId = uid('tenant');
   const userId = uid('user');
   const now = new Date().toISOString();
 
-  run(
+  await run(
     `
       INSERT INTO tenants (id, name, industry, city, timezone, currency, created_at)
       VALUES (:id, :name, :industry, :city, :timezone, :currency, :created_at)
@@ -41,7 +41,7 @@ function seedTenantUser({ phone = '08123456789' } = {}) {
     },
   );
 
-  run(
+  await run(
     `
       INSERT INTO users (id, tenant_id, email, password_hash, name, phone, phone_verified, created_at)
       VALUES (:id, :tenant_id, :email, :password_hash, :name, :phone, :phone_verified, :created_at)
@@ -61,8 +61,8 @@ function seedTenantUser({ phone = '08123456789' } = {}) {
   return { tenantId, userId, email: `${userId}@example.test` };
 }
 
-function cleanupTenant(tenantId) {
-  run(`DELETE FROM tenants WHERE id = :id`, { id: tenantId });
+async function cleanupTenant(tenantId) {
+  await run(`DELETE FROM tenants WHERE id = :id`, { id: tenantId });
 }
 
 function createMockResponse() {
@@ -229,7 +229,7 @@ test('OTP send does not reveal whether an unauthenticated email exists', async (
 });
 
 test('OTP send keeps preview hidden by default even for valid accounts', async () => {
-  const { tenantId, email } = seedTenantUser();
+  const { tenantId, email } = await seedTenantUser();
   const router = new Router();
   registerAuthRoutes(router);
 
@@ -241,12 +241,12 @@ test('OTP send keeps preview hidden by default even for valid accounts', async (
     assert.equal(response.statusCode, 200);
     assert.equal(response.payload.otp_preview, undefined);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('OTP send keeps preview hidden for public email flow even when opt-in is enabled', async () => {
-  const { tenantId, email } = seedTenantUser();
+  const { tenantId, email } = await seedTenantUser();
   const router = new Router();
   const previousOtpPreviewEnabled = config.otpPreviewEnabled;
   registerAuthRoutes(router);
@@ -262,12 +262,12 @@ test('OTP send keeps preview hidden for public email flow even when opt-in is en
     assert.equal(response.payload.otp_preview, undefined);
   } finally {
     config.otpPreviewEnabled = previousOtpPreviewEnabled;
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('OTP send reveals preview only for authenticated user flow when opt-in is enabled', async () => {
-  const { tenantId, userId, email } = seedTenantUser();
+  const { tenantId, userId, email } = await seedTenantUser();
   const router = new Router();
   const previousOtpPreviewEnabled = config.otpPreviewEnabled;
   registerAuthRoutes(router);
@@ -291,7 +291,7 @@ test('OTP send reveals preview only for authenticated user flow when opt-in is e
     assert.equal(typeof response.payload.otp_preview, 'string');
   } finally {
     config.otpPreviewEnabled = previousOtpPreviewEnabled;
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
@@ -313,7 +313,7 @@ test('OTP verify returns a generic invalid response for unknown emails', async (
 
 test('OTP verify consumes the code after the configured number of failed attempts', async () => {
   const phone = '08123456789';
-  const { tenantId, userId, email } = seedTenantUser({ phone });
+  const { tenantId, userId, email } = await seedTenantUser({ phone });
   const router = new Router();
   const previousOtpMaxAttempts = config.otpMaxAttempts;
   const previousOtpPreviewEnabled = config.otpPreviewEnabled;
@@ -345,7 +345,7 @@ test('OTP verify consumes the code after the configured number of failed attempt
       assert.equal(verifyResponse.payload.error.code, 'OTP_INVALID');
     }
 
-    const otp = get(
+    const otp = await get(
       `
         SELECT failed_attempts, consumed_at
         FROM otp_codes
@@ -370,7 +370,7 @@ test('OTP verify consumes the code after the configured number of failed attempt
   } finally {
     config.otpMaxAttempts = previousOtpMaxAttempts;
     config.otpPreviewEnabled = previousOtpPreviewEnabled;
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 

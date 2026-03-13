@@ -48,9 +48,9 @@ test('getSecurityHeaders returns hardening headers safe for the app shell', () =
   assert.match(headers['Content-Security-Policy'], /style-src 'self' 'unsafe-inline' https:\/\/fonts\.googleapis\.com/);
 });
 
-test('normalizeDatabaseError maps SQLite busy failures to a structured 503 error', () => {
+test('normalizeDatabaseError maps Postgres contention failures to a structured 503 error', () => {
   const busyError = Object.assign(new Error('database is locked'), {
-    code: 'ERR_SQLITE_ERROR',
+    code: '55P03',
   });
 
   const normalized = normalizeDatabaseError(busyError);

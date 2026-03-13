@@ -28,8 +28,8 @@ function parseDashboard(row) {
   };
 }
 
-export function ensureDefaultDashboard(tenantId, userId) {
-  const existing = get(
+export async function ensureDefaultDashboard(tenantId, userId) {
+  const existing = await get(
     `
       SELECT * FROM dashboards
       WHERE tenant_id = :tenant_id AND user_id = :user_id
@@ -47,7 +47,7 @@ export function ensureDefaultDashboard(tenantId, userId) {
   const now = new Date().toISOString();
   const config = defaultDashboardConfig();
 
-  run(
+  await run(
     `
       INSERT INTO dashboards (id, tenant_id, user_id, name, config_json, is_default, created_at, updated_at)
       VALUES (:id, :tenant_id, :user_id, :name, :config_json, 1, :created_at, :updated_at)
@@ -75,11 +75,11 @@ export function ensureDefaultDashboard(tenantId, userId) {
   };
 }
 
-export function listDashboards(tenantId, userId, options = {}) {
+export async function listDashboards(tenantId, userId, options = {}) {
   const conversationId = options.conversationId || null;
 
   if (conversationId) {
-    const rows = all(
+    const rows = await all(
       `
         SELECT *
         FROM dashboards
@@ -91,7 +91,7 @@ export function listDashboards(tenantId, userId, options = {}) {
     return rows.map(parseDashboard);
   }
 
-  const rows = all(
+  const rows = await all(
     `
       SELECT *
       FROM dashboards
@@ -104,8 +104,8 @@ export function listDashboards(tenantId, userId, options = {}) {
   return rows.map(parseDashboard);
 }
 
-export function getDashboard(tenantId, userId, dashboardId) {
-  const row = get(
+export async function getDashboard(tenantId, userId, dashboardId) {
+  const row = await get(
     `
       SELECT *
       FROM dashboards
@@ -121,8 +121,8 @@ export function getDashboard(tenantId, userId, dashboardId) {
   return parseDashboard(row);
 }
 
-export function getLatestDashboard(tenantId, userId) {
-  const row = get(
+export async function getLatestDashboard(tenantId, userId) {
+  const row = await get(
     `
       SELECT *
       FROM dashboards
@@ -139,13 +139,35 @@ export function getLatestDashboard(tenantId, userId) {
   return parseDashboard(row);
 }
 
-export function createDashboard(tenantId, userId, name, config, options = {}) {
+export async function getLatestDashboardForConversation(tenantId, userId, conversationId) {
+  if (!conversationId) {
+    return null;
+  }
+  const row = await get(
+    `
+      SELECT *
+      FROM dashboards
+      WHERE tenant_id = :tenant_id AND user_id = :user_id AND conversation_id = :conversation_id
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `,
+    {
+      tenant_id: tenantId,
+      user_id: userId,
+      conversation_id: conversationId,
+    },
+  );
+
+  return parseDashboard(row);
+}
+
+export async function createDashboard(tenantId, userId, name, config, options = {}) {
   const id = generateId();
   const now = new Date().toISOString();
   const payload = config || defaultDashboardConfig();
   const conversationId = options.conversationId || null;
 
-  run(
+  await run(
     `
       INSERT INTO dashboards (id, tenant_id, user_id, name, config_json, is_default, conversation_id, created_at, updated_at)
       VALUES (:id, :tenant_id, :user_id, :name, :config_json, 0, :conversation_id, :created_at, :updated_at)
@@ -165,8 +187,8 @@ export function createDashboard(tenantId, userId, name, config, options = {}) {
   return getDashboard(tenantId, userId, id);
 }
 
-export function updateDashboard(tenantId, userId, dashboardId, patch) {
-  const existing = getDashboard(tenantId, userId, dashboardId);
+export async function updateDashboard(tenantId, userId, dashboardId, patch) {
+  const existing = await getDashboard(tenantId, userId, dashboardId);
   if (!existing) {
     return null;
   }
@@ -176,7 +198,7 @@ export function updateDashboard(tenantId, userId, dashboardId, patch) {
     config: patch.config ?? existing.config,
   };
 
-  run(
+  await run(
     `
       UPDATE dashboards
       SET name = :name,
@@ -197,8 +219,8 @@ export function updateDashboard(tenantId, userId, dashboardId, patch) {
   return getDashboard(tenantId, userId, dashboardId);
 }
 
-export function deleteDashboard(tenantId, userId, dashboardId) {
-  const dashboard = getDashboard(tenantId, userId, dashboardId);
+export async function deleteDashboard(tenantId, userId, dashboardId) {
+  const dashboard = await getDashboard(tenantId, userId, dashboardId);
   if (!dashboard) {
     return false;
   }
@@ -207,7 +229,7 @@ export function deleteDashboard(tenantId, userId, dashboardId) {
     return false;
   }
 
-  run(
+  await run(
     `
       DELETE FROM dashboards
       WHERE id = :id AND tenant_id = :tenant_id AND user_id = :user_id
@@ -242,7 +264,7 @@ function componentForMetric(metric = 'omzet') {
   return { id: generateId(), type: 'MetricCard', title: 'Omzet', metric: 'revenue' };
 }
 
-export function applyDashboardModification({ tenantId, userId, dashboard, intent, originalMessage }) {
+export async function applyDashboardModification({ tenantId, userId, dashboard, intent, originalMessage }) {
   const config = {
     ...dashboard.config,
     components: Array.isArray(dashboard.config.components) ? [...dashboard.config.components] : [],
@@ -291,7 +313,7 @@ export function applyDashboardModification({ tenantId, userId, dashboard, intent
   }
 
   config.updated_by = 'assistant';
-  const updated = updateDashboard(tenantId, userId, dashboard.id, {
+  const updated = await updateDashboard(tenantId, userId, dashboard.id, {
     name: intent.dashboard_name || dashboard.name,
     config,
   });

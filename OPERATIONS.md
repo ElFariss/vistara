@@ -7,19 +7,20 @@ Operational notes for running Vistara in production.
 - Node: `24+`
 - Default port: `8080`
 - Health endpoint: `GET /api/health`
-- Data storage: SQLite database at `DB_PATH` plus uploaded files under `DATA_DIR/uploads`
+- Data storage: PostgreSQL database plus uploaded files under `DATA_DIR/uploads`
 
 ## Required Environment
 
 - `NODE_ENV=production`
 - `JWT_SECRET=<strong random secret>`
+- `DATABASE_URL=postgresql://user:pass@host:5432/dbname`
 - `GEMINI_API_KEY=<key>` if Gemini-backed mapping/NLU is enabled
 - `ALLOWED_ORIGINS=https://your-app.example.com`
 
 Recommended:
 
 - `DATA_DIR=/app/data`
-- `DB_PATH=/app/data/umkm.db`
+- `DATABASE_URL=postgresql://postgres:<password>@postgres:5432/umkm`
 - `GEMINI_MODEL=gemini-2.5-pro`
 - `PYTHON_AGENT_URL=http://python-agent:8091`
 - `PYTHON_AGENT_TOKEN=<shared token>`
@@ -52,7 +53,7 @@ The app now handles `SIGTERM` and `SIGINT` gracefully:
 
 - stops accepting new API traffic
 - closes the HTTP server
-- closes the SQLite connection
+- closes the PostgreSQL connection pool
 
 For controlled maintenance windows:
 
@@ -62,7 +63,7 @@ docker compose stop app
 
 ## Backup
 
-Create a filesystem backup of the SQLite database, WAL/SHM sidecars, and uploads:
+Create a filesystem backup of the PostgreSQL tables and uploads:
 
 ```bash
 npm run backup
@@ -77,7 +78,7 @@ npm run backup -- ./backups
 Each backup writes a timestamped directory containing:
 
 - `manifest.json`
-- `db/`
+- `db/` (JSON table snapshots)
 - `uploads/`
 
 Recommendation:

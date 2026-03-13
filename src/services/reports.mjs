@@ -5,9 +5,9 @@ import { toRupiah } from '../utils/text.mjs';
 import { getAnomalies } from './insights.mjs';
 import { logAudit } from './audit.mjs';
 
-function summarizeRevenue(tenantId, start, end) {
+async function summarizeRevenue(tenantId, start, end) {
   return (
-    get(
+    await get(
       `
         SELECT
           COALESCE(SUM(total_revenue), 0) AS revenue,
@@ -25,7 +25,7 @@ function summarizeRevenue(tenantId, start, end) {
   );
 }
 
-function topProducts(tenantId, start, end, limit = 5) {
+async function topProducts(tenantId, start, end, limit = 5) {
   return all(
     `
       SELECT p.name,
@@ -44,7 +44,7 @@ function topProducts(tenantId, start, end, limit = 5) {
   );
 }
 
-function branchRanking(tenantId, start, end, limit = 5) {
+async function branchRanking(tenantId, start, end, limit = 5) {
   return all(
     `
       SELECT b.name,
@@ -97,12 +97,12 @@ function buildMarkdownReport({ title, periodLabel, summary, products, branches, 
   ].join('\n');
 }
 
-export function generateReport({ tenantId, userId, title, period }) {
+export async function generateReport({ tenantId, userId, title, period }) {
   const parsedPeriod = parseTimePeriod(period || 'minggu ini');
-  const summary = summarizeRevenue(tenantId, parsedPeriod.start, parsedPeriod.end);
-  const products = topProducts(tenantId, parsedPeriod.start, parsedPeriod.end);
-  const branches = branchRanking(tenantId, parsedPeriod.start, parsedPeriod.end);
-  const anomalies = getAnomalies(tenantId, null);
+  const summary = await summarizeRevenue(tenantId, parsedPeriod.start, parsedPeriod.end);
+  const products = await topProducts(tenantId, parsedPeriod.start, parsedPeriod.end);
+  const branches = await branchRanking(tenantId, parsedPeriod.start, parsedPeriod.end);
+  const anomalies = await getAnomalies(tenantId, null);
 
   const reportTitle = title || `Laporan ${parsedPeriod.label}`;
   const markdown = buildMarkdownReport({
@@ -115,7 +115,7 @@ export function generateReport({ tenantId, userId, title, period }) {
   });
 
   const id = generateId();
-  run(
+  await run(
     `
       INSERT INTO reports (
         id, tenant_id, user_id, title, period_start, period_end,
@@ -157,7 +157,7 @@ export function generateReport({ tenantId, userId, title, period }) {
   };
 }
 
-export function listReports(tenantId, userId) {
+export async function listReports(tenantId, userId) {
   return all(
     `
       SELECT id, title, period_start, period_end, format, status, created_at
@@ -169,7 +169,7 @@ export function listReports(tenantId, userId) {
   );
 }
 
-export function getReport(tenantId, userId, reportId) {
+export async function getReport(tenantId, userId, reportId) {
   return get(
     `
       SELECT id, title, period_start, period_end, format, status, content, created_at

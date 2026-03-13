@@ -7,7 +7,7 @@ export function registerReportRoutes(router) {
     '/api/reports/generate',
     async (ctx) => {
       const body = await ctx.getBody();
-      const report = generateReport({
+      const report = await generateReport({
         tenantId: ctx.user.tenant_id,
         userId: ctx.user.id,
         title: body.title || null,
@@ -22,7 +22,7 @@ export function registerReportRoutes(router) {
     'GET',
     '/api/reports',
     async (ctx) => {
-      const reports = listReports(ctx.user.tenant_id, ctx.user.id);
+      const reports = await listReports(ctx.user.tenant_id, ctx.user.id);
       return sendJson(ctx.res, 200, { ok: true, reports });
     },
     { auth: true },
@@ -32,7 +32,7 @@ export function registerReportRoutes(router) {
     'GET',
     '/api/reports/:id/download',
     async (ctx) => {
-      const report = getReport(ctx.user.tenant_id, ctx.user.id, ctx.params.id);
+      const report = await getReport(ctx.user.tenant_id, ctx.user.id, ctx.params.id);
       if (!report) {
         return sendError(ctx.res, 404, 'REPORT_NOT_FOUND', 'Report tidak ditemukan.');
       }

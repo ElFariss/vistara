@@ -62,17 +62,25 @@ export function getClientIp(req) {
   });
 }
 
-export async function readBody(req, maxBytes = config.maxUploadSizeBytes) {
+export async function readBody(
+  req,
+  maxBytes = config.maxUploadSizeBytes,
+  timeoutMs = config.requestBodyTimeoutMs,
+) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
     let settled = false;
+    let timeoutId = null;
 
     const finishReject = (error) => {
       if (settled) {
         return;
       }
       settled = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       reject(error);
     };
 
@@ -81,10 +89,39 @@ export async function readBody(req, maxBytes = config.maxUploadSizeBytes) {
         return;
       }
       settled = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
       resolve(value);
     };
 
+    if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      timeoutId = setTimeout(() => {
+        finishReject(new RequestBodyError(
+          'REQUEST_TIMEOUT',
+          `Request body melebihi batas waktu ${timeoutMs}ms.`,
+          408,
+          'Upload memakan waktu terlalu lama. Coba lagi.',
+        ));
+        req.destroy();
+      }, timeoutMs);
+    }
+
+    const declaredLength = Number(req.headers['content-length'] || 0);
+    if (declaredLength > 0 && declaredLength > maxBytes) {
+      finishReject(new RequestBodyError(
+        'PAYLOAD_TOO_LARGE',
+        `Payload melebihi batas ${maxBytes} bytes.`,
+        413,
+        'Ukuran request melebihi batas maksimum.',
+      ));
+      req.resume();
+    }
+
     req.on('data', (chunk) => {
+      if (settled) {
+        return;
+      }
       size += chunk.length;
       if (size > maxBytes) {
         finishReject(new RequestBodyError(
@@ -108,6 +145,26 @@ export async function readBody(req, maxBytes = config.maxUploadSizeBytes) {
         return;
       }
       finishReject(error);
+    });
+
+    req.on('aborted', () => {
+      finishReject(new RequestBodyError(
+        'REQUEST_ABORTED',
+        'Request dibatalkan sebelum selesai dibaca.',
+        400,
+        'Upload dibatalkan sebelum selesai.',
+      ));
+    });
+
+    req.on('close', () => {
+      if (!settled && !req.readableEnded) {
+        finishReject(new RequestBodyError(
+          'REQUEST_ABORTED',
+          'Koneksi terputus sebelum body selesai dibaca.',
+          400,
+          'Koneksi terputus saat upload.',
+        ));
+      }
     });
   });
 }

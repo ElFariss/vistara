@@ -44,6 +44,9 @@ const PRECHAT_FADE_MS = 320;
 
 const runtimeConfig = window.__VISTARA_RUNTIME__ || {};
 const API_BASE_URL = String(runtimeConfig.API_BASE_URL || '').trim().replace(/\/+$/, '');
+const DEFAULT_API_TIMEOUT_MS = 30000;
+const UPLOAD_API_TIMEOUT_MS = 180000;
+const STREAM_API_TIMEOUT_MS = 0;
 
 const DEFAULT_SETTINGS = {
   theme_mode: 'system',
@@ -816,12 +819,38 @@ function wait(ms) {
 async function fetchWithRetry(url, options = {}, config = {}) {
   const retries = Number.isFinite(Number(config.retries)) ? Number(config.retries) : 2;
   const baseDelay = Number.isFinite(Number(config.baseDelayMs)) ? Number(config.baseDelayMs) : 450;
+  const timeoutMs = Number.isFinite(Number(config.timeoutMs)) ? Number(config.timeoutMs) : 30000;
   let attempt = 0;
   let lastError = null;
 
   while (attempt <= retries) {
     try {
-      return await fetch(url, options);
+      let controller = null;
+      let timeoutId = null;
+      let signal = options.signal;
+      if (timeoutMs > 0) {
+        controller = new AbortController();
+        if (signal && typeof signal.addEventListener === 'function') {
+          if (signal.aborted) {
+            controller.abort(signal.reason);
+          } else {
+            signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+          }
+        }
+        signal = controller.signal;
+        timeoutId = window.setTimeout(() => controller.abort('timeout'), timeoutMs);
+      }
+
+      try {
+        return await fetch(url, {
+          ...options,
+          signal,
+        });
+      } finally {
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+        }
+      }
     } catch (error) {
       lastError = error;
       if (!isNetworkLikeError(error) || attempt >= retries) {
@@ -861,6 +890,9 @@ async function api(path, options = {}) {
     : `${API_BASE_URL}${path}`;
   const headers = new Headers(options.headers || {});
   const isFormData = options.body instanceof FormData;
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs))
+    ? Number(options.timeoutMs)
+    : DEFAULT_API_TIMEOUT_MS;
 
   if (!isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
@@ -870,13 +902,24 @@ async function api(path, options = {}) {
     headers.set('Authorization', `Bearer ${state.token}`);
   }
 
-  const response = await fetchWithRetry(requestUrl, {
-    ...options,
-    headers,
-  }, {
-    retries: 2,
-    baseDelayMs: 550,
-  });
+  let response;
+  try {
+    response = await fetchWithRetry(requestUrl, {
+      ...options,
+      headers,
+    }, {
+      retries: 2,
+      baseDelayMs: 550,
+      timeoutMs,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError' || String(error?.message || '').includes('timeout')) {
+      throw createAppError('Permintaan melebihi batas waktu. Coba lagi.', {
+        code: 'REQUEST_TIMEOUT',
+      });
+    }
+    throw error;
+  }
 
   if (response.status === 204) {
     return { ok: true };
@@ -907,6 +950,9 @@ async function apiBlob(path, options = {}) {
     : `${API_BASE_URL}${path}`;
   const headers = new Headers(options.headers || {});
   const isFormData = options.body instanceof FormData;
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs))
+    ? Number(options.timeoutMs)
+    : DEFAULT_API_TIMEOUT_MS;
 
   if (!isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
@@ -916,13 +962,24 @@ async function apiBlob(path, options = {}) {
     headers.set('Authorization', `Bearer ${state.token}`);
   }
 
-  const response = await fetchWithRetry(requestUrl, {
-    ...options,
-    headers,
-  }, {
-    retries: 2,
-    baseDelayMs: 550,
-  });
+  let response;
+  try {
+    response = await fetchWithRetry(requestUrl, {
+      ...options,
+      headers,
+    }, {
+      retries: 2,
+      baseDelayMs: 550,
+      timeoutMs,
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError' || String(error?.message || '').includes('timeout')) {
+      throw createAppError('Permintaan melebihi batas waktu. Coba lagi.', {
+        code: 'REQUEST_TIMEOUT',
+      });
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     const contentType = response.headers.get('content-type') || '';
@@ -2908,7 +2965,7 @@ function datasetSupportsVisualization(dataset, visualization) {
 
 function visualizationAvailable(visualization) {
   const datasets = Array.isArray(state.datasetTables) ? state.datasetTables : [];
-  if (!datasets.length) return true;
+  if (!datasets.length) return false;
   return datasets.some((dataset) => datasetSupportsVisualization(dataset, visualization));
 }
 
@@ -2916,17 +2973,13 @@ function renderWidgetTypeGrid() {
   if (!refs.widgetTypeGrid) return;
   refs.widgetTypeGrid.innerHTML = '';
 
-  CHART_CATALOG.forEach((item) => {
-    const compatible = visualizationAvailable(item.id);
+  const availableCharts = CHART_CATALOG.filter((item) => visualizationAvailable(item.id));
+  availableCharts.forEach((item) => {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = 'widget-type-card';
     if (state.widgetBuilderSelection.visualization === item.id) {
       card.classList.add('is-selected');
-    }
-    if (!compatible) {
-      card.classList.add('is-disabled');
-      card.disabled = true;
     }
     card.innerHTML = `
       <div class="widget-type-icon">${item.icon}</div>
@@ -3755,22 +3808,17 @@ async function refreshChatHistory(conversationId = state.conversationId) {
 async function loadConversation(conversationId) {
   setCanvasOpen(false);
   await refreshChatHistory(conversationId);
-  setSessionRailCollapsed(true);
 }
 
 async function startNewConversation() {
-  const response = await api('/api/chat/conversations', {
-    method: 'POST',
-    body: JSON.stringify({}),
-  });
-
+  // Don't persist to DB yet — only create the conversation when the user sends a message.
   resetConversationWorkspaceState({
-    conversationId: response.conversation?.id || null,
-    conversationTitle: response.conversation?.title || 'Percakapan baru',
+    conversationId: null,
+    conversationTitle: 'Percakapan baru',
     preserveDashboard: true,
   });
-  upsertConversation(response.conversation);
-  setSessionRailCollapsed(true);
+  renderConversationList();
+  syncComposerChrome();
 }
 
 async function deleteConversationById(conversationId) {
@@ -3931,6 +3979,18 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
     return null;
   }
 
+  if (demo) {
+    console.info('[upload] demo_start');
+  } else if (file) {
+    console.info('[upload] start', {
+      name: file.name,
+      size: file.size,
+      type: file.type,
+    });
+  } else {
+    console.info('[upload] start without file');
+  }
+
   state.isUploadingDataset = true;
   syncComposerChrome();
   document.dispatchEvent(new CustomEvent('vistara:message-sending'));
@@ -3939,6 +3999,7 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
     if (demo) {
       response = await api('/api/data/demo/import', {
         method: 'POST',
+        timeoutMs: UPLOAD_API_TIMEOUT_MS,
       });
     } else {
       if (!file) {
@@ -3951,6 +4012,7 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
       response = await api('/api/data/upload', {
         method: 'POST',
         body: formData,
+        timeoutMs: UPLOAD_API_TIMEOUT_MS,
       });
     }
 
@@ -3965,11 +4027,19 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
       });
     }
 
+    console.info('[upload] success', {
+      sourceId: response.source?.id || null,
+      filename: response.source?.filename || null,
+      inserted: response.ingestion?.inserted ?? null,
+      datasetType: response.ingestion?.dataset_type || null,
+    });
+
     showToast(demo ? 'Demo dataset berhasil diimport.' : 'Dataset berhasil diupload.');
     document.dispatchEvent(new CustomEvent('vistara:upload-complete', { detail: { success: true, message: 'Upload selesai!' } }));
     document.dispatchEvent(new CustomEvent('vistara:message-sent'));
     return response;
   } catch (uploadError) {
+    console.warn('[upload] failed', uploadError);
     document.dispatchEvent(new CustomEvent('vistara:upload-error', { detail: { message: uploadError.message || 'Upload gagal.' } }));
     document.dispatchEvent(new CustomEvent('vistara:message-error'));
     throw uploadError;
@@ -4168,6 +4238,7 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
   }, {
     retries: 1,
     baseDelayMs: 450,
+    timeoutMs: STREAM_API_TIMEOUT_MS,
   });
 
   if (!response.ok) {
@@ -4308,6 +4379,25 @@ async function sendChatMessage(userText) {
   syncComposerChrome();
   showTyping();
   document.dispatchEvent(new CustomEvent('vistara:message-sending'));
+
+  // Lazily create the conversation on first message if it doesn't exist yet
+  if (!state.conversationId) {
+    try {
+      const convResponse = await api('/api/chat/conversations', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      state.conversationId = convResponse.conversation?.id || null;
+      state.conversationTitle = normalizeConversationTitle(convResponse.conversation?.title || 'Percakapan baru');
+      upsertConversation(convResponse.conversation);
+    } catch (convError) {
+      hideTyping();
+      state.isSendingMessage = false;
+      syncComposerChrome();
+      showToast(`Gagal memulai percakapan: ${convError.message}`);
+      return;
+    }
+  }
 
   try {
     let response;
@@ -4807,6 +4897,27 @@ refs.chatFile.addEventListener('change', () => {
     refs.fileLabel.textContent = file ? file.name : 'Tidak ada file';
   }
   syncComposerChrome();
+
+  if (!file) {
+    return;
+  }
+
+  const userText = refs.chatInput?.value?.trim() || '';
+  if (!userText && !state.isUploadingDataset) {
+    (async () => {
+      try {
+        await uploadDataset({ file });
+      } catch (error) {
+        showToast(`Upload gagal: ${error.message}`);
+      } finally {
+        refs.chatFile.value = '';
+        if (refs.fileLabel) {
+          refs.fileLabel.textContent = 'Tidak ada file';
+          refs.fileLabel.hidden = true;
+        }
+      }
+    })();
+  }
 });
 
 refs.gateUploadInput?.addEventListener('change', () => {

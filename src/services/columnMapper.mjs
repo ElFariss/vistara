@@ -222,6 +222,15 @@ async function aiMapping(columns, sampleRows, datasetType, fallbackMapping) {
 }
 
 export async function suggestColumnMapping(columns, sampleRows) {
+  if (!columns || columns.length === 0) {
+    return {
+      datasetType: 'raw',
+      mapping: {},
+      confidence: 1.0,
+      method: 'fallback',
+    };
+  }
+
   const datasetType = detectDatasetType(columns);
   const heuristic = heuristicMapping(columns, datasetType);
 
@@ -246,6 +255,9 @@ export async function suggestColumnMapping(columns, sampleRows) {
 export function requiredFieldsForDataset(datasetType) {
   if (datasetType === 'expense') {
     return ['expense_date', 'expense_amount'];
+  }
+  if (datasetType === 'raw') {
+    return [];
   }
   return ['transaction_date', 'total_revenue'];
 }

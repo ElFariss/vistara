@@ -52,8 +52,8 @@ function endOfUtcDay(date) {
   return value;
 }
 
-function latestTransactionDate(tenantId) {
-  const row = get(
+async function latestTransactionDate(tenantId) {
+  const row = await get(
     `
       SELECT MAX(transaction_date) AS latest
       FROM transactions
@@ -65,8 +65,8 @@ function latestTransactionDate(tenantId) {
   return toDateOrNull(row?.latest);
 }
 
-function transactionCoverage(tenantId) {
-  const row = get(
+async function transactionCoverage(tenantId) {
+  const row = await get(
     `
       SELECT MIN(transaction_date) AS start_date,
              MAX(transaction_date) AS end_date,
@@ -88,8 +88,8 @@ function transactionCoverage(tenantId) {
   };
 }
 
-function resolveInsightAnchor(tenantId) {
-  const latest = latestTransactionDate(tenantId);
+async function resolveInsightAnchor(tenantId) {
+  const latest = await latestTransactionDate(tenantId);
   const now = new Date();
   const staleByDays = latest ? Math.floor((now.getTime() - latest.getTime()) / DAY_MS) : 0;
   const anchorDate = latest && staleByDays > 2 ? latest : now;
@@ -101,12 +101,12 @@ function resolveInsightAnchor(tenantId) {
     anchorDay: anchorDate.toISOString().slice(0, 10),
     anchored,
     source: anchored ? 'latest_dataset_date' : 'system_now',
-    coverage: transactionCoverage(tenantId),
+    coverage: await transactionCoverage(tenantId),
   };
 }
 
-function queryDailyRevenue(tenantId, days = 30) {
-  const anchor = resolveInsightAnchor(tenantId);
+async function queryDailyRevenue(tenantId, days = 30) {
+  const anchor = await resolveInsightAnchor(tenantId);
   const period = {
     ...lastNDays(days, anchor.anchorDate),
     anchor_date: anchor.anchorDateIso,
@@ -115,7 +115,7 @@ function queryDailyRevenue(tenantId, days = 30) {
     coverage: anchor.coverage,
   };
 
-  const points = all(
+  const points = await all(
     `
       SELECT DATE(transaction_date) AS day,
              ROUND(COALESCE(SUM(total_revenue), 0), 2) AS revenue,
@@ -173,14 +173,14 @@ function detectRevenueAnomalies(series) {
   return anomalies;
 }
 
-function detectMarginCompression(tenantId, anchorDate) {
+async function detectMarginCompression(tenantId, anchorDate) {
   const currentPeriod = lastNDays(7, anchorDate);
   const baselinePeriod = {
     start: startOfUtcDay(addDays(anchorDate, -36)).toISOString(),
     end: endOfUtcDay(addDays(anchorDate, -7)).toISOString(),
   };
 
-  const current = get(
+  const current = await get(
     `
       SELECT
         CASE WHEN SUM(total_revenue) = 0 THEN 0
@@ -197,7 +197,7 @@ function detectMarginCompression(tenantId, anchorDate) {
     },
   ) || { margin: 0 };
 
-  const baseline = get(
+  const baseline = await get(
     `
       SELECT
         CASE WHEN SUM(total_revenue) = 0 THEN 0
@@ -229,10 +229,10 @@ function detectMarginCompression(tenantId, anchorDate) {
   return null;
 }
 
-export function getAnomalies(tenantId, userId = null) {
-  const revenue = queryDailyRevenue(tenantId, 30);
+export async function getAnomalies(tenantId, userId = null) {
+  const revenue = await queryDailyRevenue(tenantId, 30);
   const anomalies = detectRevenueAnomalies(revenue.points);
-  const margin = detectMarginCompression(tenantId, new Date(revenue.period.anchor_date));
+  const margin = await detectMarginCompression(tenantId, new Date(revenue.period.anchor_date));
 
   if (margin) {
     anomalies.push(margin);
@@ -252,8 +252,8 @@ export function getAnomalies(tenantId, userId = null) {
   return anomalies;
 }
 
-export function getTrends(tenantId, userId = null) {
-  const revenue = queryDailyRevenue(tenantId, 30);
+export async function getTrends(tenantId, userId = null) {
+  const revenue = await queryDailyRevenue(tenantId, 30);
   const revenueValues = revenue.points.map((x) => Number(x.revenue || 0));
   const profitValues = revenue.points.map((x) => Number(x.profit || 0));
 
@@ -299,11 +299,11 @@ function pickRecommendation(anomalies, latestRevenue, previousRevenue) {
   return 'Pertahankan ritme penjualan dan pantau margin harian.';
 }
 
-export function getDailyVerdict(tenantId, userId = null) {
-  const anchor = resolveInsightAnchor(tenantId);
+export async function getDailyVerdict(tenantId, userId = null) {
+  const anchor = await resolveInsightAnchor(tenantId);
   const previousAnchor = addDays(anchor.anchorDate, -1);
 
-  const today = get(
+  const today = await get(
     `
       SELECT COALESCE(SUM(total_revenue), 0) AS revenue,
              COALESCE(SUM(total_revenue - COALESCE(cogs, 0) - COALESCE(discount, 0)), 0) AS profit
@@ -314,7 +314,7 @@ export function getDailyVerdict(tenantId, userId = null) {
     { tenant_id: tenantId, anchor_date: anchor.anchorDateIso },
   ) || { revenue: 0, profit: 0 };
 
-  const yesterday = get(
+  const yesterday = await get(
     `
       SELECT COALESCE(SUM(total_revenue), 0) AS revenue,
              COALESCE(SUM(total_revenue - COALESCE(cogs, 0) - COALESCE(discount, 0)), 0) AS profit
@@ -325,7 +325,7 @@ export function getDailyVerdict(tenantId, userId = null) {
     { tenant_id: tenantId, anchor_date: previousAnchor.toISOString() },
   ) || { revenue: 0, profit: 0 };
 
-  const anomalies = getAnomalies(tenantId, null);
+  const anomalies = await getAnomalies(tenantId, null);
 
   const todayRevenue = Number(today.revenue || 0);
   const yesterdayRevenue = Number(yesterday.revenue || 0);

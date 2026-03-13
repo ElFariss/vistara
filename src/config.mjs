@@ -37,7 +37,6 @@ function toList(value) {
 
 const rootDir = process.cwd();
 const dataDir = path.resolve(rootDir, process.env.DATA_DIR || './data');
-const dbPath = path.resolve(rootDir, process.env.DB_PATH || path.join(dataDir, 'umkm.db'));
 const uploadDir = path.join(dataDir, 'uploads');
 
 fs.mkdirSync(dataDir, { recursive: true });
@@ -46,18 +45,40 @@ fs.mkdirSync(uploadDir, { recursive: true });
 const env = process.env.NODE_ENV || 'development';
 const runtimeJwtSecret = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
 
+function buildDatabaseUrl() {
+  if (process.env.DATABASE_URL) {
+    return process.env.DATABASE_URL;
+  }
+  const host = process.env.PGHOST;
+  const user = process.env.PGUSER;
+  const password = process.env.PGPASSWORD;
+  const database = process.env.PGDATABASE;
+  const port = process.env.PGPORT;
+  if (!host && !user && !password && !database && !port) {
+    return '';
+  }
+
+  const safeUser = encodeURIComponent(user || 'postgres');
+  const safePassword = password ? encodeURIComponent(password) : '';
+  const auth = safePassword ? `${safeUser}:${safePassword}` : safeUser;
+  const targetHost = host || 'localhost';
+  const targetPort = port || '5432';
+  const targetDatabase = database || 'umkm';
+  return `postgresql://${auth}@${targetHost}:${targetPort}/${targetDatabase}`;
+}
+
 export const config = {
   env,
   isProduction: env === 'production',
   port: toInt(process.env.PORT, 8080),
   dataDir,
-  dbPath,
   uploadDir,
+  databaseUrl: buildDatabaseUrl(),
   tokenTtlSeconds: toInt(process.env.TOKEN_TTL_SECONDS, 60 * 60 * 24 * 7),
   jwtSecret: runtimeJwtSecret,
   rateLimitPerMinute: toInt(process.env.RATE_LIMIT_PER_MINUTE, 120),
-  dbBusyTimeoutMs: Math.max(1000, toInt(process.env.DB_BUSY_TIMEOUT_MS, 5000)),
   maxUploadSizeBytes: toInt(process.env.MAX_UPLOAD_SIZE_MB, 20) * 1024 * 1024,
+  requestBodyTimeoutMs: Math.max(5000, toInt(process.env.REQUEST_BODY_TIMEOUT_MS, 180000)),
   allowedOrigins: toList(process.env.ALLOWED_ORIGINS),
   apiBaseUrl: process.env.API_BASE_URL || '',
   cspConnectSrc: toList(process.env.CSP_CONNECT_SRC),

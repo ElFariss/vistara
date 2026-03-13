@@ -47,7 +47,7 @@ export function registerAuthRoutes(router) {
     const now = new Date().toISOString();
     const demoEmail = `demo_${userId.slice(0, 10)}@guest.local`;
 
-    run(
+    await run(
       `
         INSERT INTO tenants (id, name, industry, city, timezone, currency, morning_verdict_time, created_at)
         VALUES (:id, :name, :industry, :city, :timezone, :currency, :morning_verdict_time, :created_at)
@@ -64,7 +64,7 @@ export function registerAuthRoutes(router) {
       },
     );
 
-    run(
+    await run(
       `
         INSERT INTO users (id, tenant_id, email, password_hash, name, phone, phone_verified, role, created_at)
         VALUES (:id, :tenant_id, :email, :password_hash, :name, :phone, :phone_verified, :role, :created_at)
@@ -135,7 +135,7 @@ export function registerAuthRoutes(router) {
       return sendError(ctx.res, 400, 'VALIDATION_ERROR', error);
     }
 
-    const existing = get(`SELECT id FROM users WHERE LOWER(email) = LOWER(:email)`, {
+    const existing = await get(`SELECT id FROM users WHERE LOWER(email) = LOWER(:email)`, {
       email: body.email,
     });
 
@@ -147,7 +147,7 @@ export function registerAuthRoutes(router) {
     const userId = generateId();
     const now = new Date().toISOString();
 
-    run(
+    await run(
       `
         INSERT INTO tenants (id, name, industry, city, created_at)
         VALUES (:id, :name, :industry, :city, :created_at)
@@ -161,7 +161,7 @@ export function registerAuthRoutes(router) {
       },
     );
 
-    run(
+    await run(
       `
         INSERT INTO users (id, tenant_id, email, password_hash, name, phone, phone_verified, role, created_at)
         VALUES (:id, :tenant_id, :email, :password_hash, :name, :phone, :phone_verified, :role, :created_at)
@@ -205,7 +205,7 @@ export function registerAuthRoutes(router) {
       return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'email dan password wajib diisi.');
     }
 
-    const user = get(
+    const user = await get(
       `
         SELECT id, tenant_id, email, password_hash, name, role, phone, phone_verified
         FROM users
@@ -243,7 +243,7 @@ export function registerAuthRoutes(router) {
 
     let user = ctx.user;
     if (!user) {
-      user = get(
+      user = await get(
         `
           SELECT id, tenant_id, email, name, role, phone, phone_verified
           FROM users
@@ -266,7 +266,7 @@ export function registerAuthRoutes(router) {
     }
 
     const code = randomNumericCode(6);
-    run(
+    await run(
       `
         UPDATE otp_codes
         SET consumed_at = :consumed_at
@@ -279,7 +279,7 @@ export function registerAuthRoutes(router) {
       },
     );
 
-    run(
+    await run(
       `
         INSERT INTO otp_codes (id, user_id, phone, code_hash, expires_at, consumed_at, created_at, failed_attempts)
         VALUES (:id, :user_id, :phone, :code_hash, :expires_at, NULL, :created_at, 0)
@@ -306,7 +306,7 @@ export function registerAuthRoutes(router) {
       return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'email dan code wajib diisi.');
     }
 
-    const user = get(
+    const user = await get(
       `
         SELECT id, tenant_id, email, name, role, phone, phone_verified
         FROM users
@@ -319,7 +319,7 @@ export function registerAuthRoutes(router) {
       return sendInvalidOtp(ctx.res);
     }
 
-    const otp = get(
+    const otp = await get(
       `
         SELECT id, code_hash, expires_at, failed_attempts
         FROM otp_codes
@@ -336,7 +336,7 @@ export function registerAuthRoutes(router) {
     }
 
     if (new Date(otp.expires_at).getTime() < Date.now()) {
-      run(`UPDATE otp_codes SET consumed_at = :consumed_at WHERE id = :id`, {
+      await run(`UPDATE otp_codes SET consumed_at = :consumed_at WHERE id = :id`, {
         id: otp.id,
         consumed_at: new Date().toISOString(),
       });
@@ -344,7 +344,7 @@ export function registerAuthRoutes(router) {
     }
 
     if (Number(otp.failed_attempts || 0) >= config.otpMaxAttempts) {
-      run(`UPDATE otp_codes SET consumed_at = :consumed_at WHERE id = :id`, {
+      await run(`UPDATE otp_codes SET consumed_at = :consumed_at WHERE id = :id`, {
         id: otp.id,
         consumed_at: new Date().toISOString(),
       });
@@ -354,7 +354,7 @@ export function registerAuthRoutes(router) {
     const codeHash = sha256(body.code);
     if (codeHash !== otp.code_hash) {
       const nextFailedAttempts = Number(otp.failed_attempts || 0) + 1;
-      run(
+    await run(
         `
           UPDATE otp_codes
           SET failed_attempts = :failed_attempts,
@@ -374,12 +374,12 @@ export function registerAuthRoutes(router) {
       return sendInvalidOtp(ctx.res);
     }
 
-    run(`UPDATE otp_codes SET consumed_at = :consumed_at WHERE id = :id`, {
+    await run(`UPDATE otp_codes SET consumed_at = :consumed_at WHERE id = :id`, {
       id: otp.id,
       consumed_at: new Date().toISOString(),
     });
 
-    run(`UPDATE users SET phone_verified = 1 WHERE id = :id`, {
+    await run(`UPDATE users SET phone_verified = 1 WHERE id = :id`, {
       id: user.id,
     });
 

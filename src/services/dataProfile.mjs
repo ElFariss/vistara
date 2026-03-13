@@ -11,7 +11,7 @@ function parseJsonSafe(input, fallback = {}) {
   }
 }
 
-function latestSourceRecord(tenantId) {
+async function latestSourceRecord(tenantId) {
   return get(
     `
       SELECT *
@@ -271,7 +271,7 @@ function buildProfilePayload(source, parsed, mappingInfo) {
 }
 
 export async function getDatasetProfile(tenantId) {
-  const source = latestSourceRecord(tenantId);
+  const source = await latestSourceRecord(tenantId);
   if (!source?.file_path) {
     return null;
   }

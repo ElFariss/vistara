@@ -61,13 +61,12 @@ const TEMPLATE_DEFINITIONS = {
              ROUND(COALESCE(SUM(t.quantity), 0), 2) AS total_qty,
              ROUND(COALESCE(SUM(t.total_revenue), 0), 2) AS total_revenue
       FROM transactions t
-      LEFT JOIN products p ON p.id = t.product_id
+      JOIN products p ON p.id = t.product_id
       WHERE t.tenant_id = :tenant_id
         AND t.transaction_date BETWEEN :start_date AND :end_date
         {branch_filter}
         {channel_filter}
       GROUP BY p.name
-      HAVING p.name IS NOT NULL
       ORDER BY total_revenue DESC
       LIMIT :limit
     `,
@@ -80,12 +79,11 @@ const TEMPLATE_DEFINITIONS = {
              ROUND(COALESCE(SUM(t.total_revenue), 0), 2) AS revenue,
              ROUND(COALESCE(SUM(t.total_revenue - COALESCE(t.cogs, 0) - COALESCE(t.discount, 0)), 0), 2) AS profit
       FROM transactions t
-      LEFT JOIN branches b ON b.id = t.branch_id
+      JOIN branches b ON b.id = t.branch_id
       WHERE t.tenant_id = :tenant_id
         AND t.transaction_date BETWEEN :start_date AND :end_date
         {channel_filter}
       GROUP BY b.name
-      HAVING b.name IS NOT NULL
       ORDER BY revenue DESC
       LIMIT :limit
     `,

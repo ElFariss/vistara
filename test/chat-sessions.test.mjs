@@ -17,14 +17,14 @@ function uid(prefix) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 }
 
-initializeDatabase();
+await initializeDatabase();
 
-function seedTenantUser() {
+async function seedTenantUser() {
   const tenantId = uid('tenant');
   const userId = uid('user');
   const now = new Date().toISOString();
 
-  run(
+  await run(
     `
       INSERT INTO tenants (id, name, industry, city, timezone, currency, created_at)
       VALUES (:id, :name, :industry, :city, :timezone, :currency, :created_at)
@@ -40,7 +40,7 @@ function seedTenantUser() {
     },
   );
 
-  run(
+  await run(
     `
       INSERT INTO users (id, tenant_id, email, password_hash, name, created_at)
       VALUES (:id, :tenant_id, :email, :password_hash, :name, :created_at)
@@ -58,8 +58,8 @@ function seedTenantUser() {
   return { tenantId, userId };
 }
 
-function cleanupTenant(tenantId) {
-  run(`DELETE FROM tenants WHERE id = :id`, { id: tenantId });
+async function cleanupTenant(tenantId) {
+  await run(`DELETE FROM tenants WHERE id = :id`, { id: tenantId });
 }
 
 function createMockResponse() {
@@ -302,7 +302,7 @@ async function withMockGeminiResponses(responses, runTest) {
 }
 
 test('processChatMessage allows hi as smalltalk through the agent runtime', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   await withMockGeminiResponses([
     routePayload('conversational', { reason: 'sapaan' }),
     surfaceReplyPayload('Halo juga. Ada yang ingin Anda cek dari bisnis Anda?'),
@@ -314,13 +314,13 @@ test('processChatMessage allows hi as smalltalk through the agent runtime', asyn
       assert.equal(response.presentation_mode, 'chat');
       assert.match(response.answer, /halo/i);
     } finally {
-      cleanupTenant(tenantId);
+      await cleanupTenant(tenantId);
     }
   });
 });
 
 test('processChatMessage retries truncated Vira replies before persisting', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   await withMockGeminiResponses([
     routePayload('conversational', { reason: 'sapaan' }),
     surfaceReplyPayload('Halo juga! Ada yang bisa Vira.', { complete: false }),
@@ -333,13 +333,13 @@ test('processChatMessage retries truncated Vira replies before persisting', asyn
       assert.equal(response.answer, 'Halo. Ada yang ingin Anda cek dari bisnis Anda?');
       assert.doesNotMatch(response.answer, /demo user/i);
     } finally {
-      cleanupTenant(tenantId);
+      await cleanupTenant(tenantId);
     }
   });
 });
 
 test("processChatMessage allows what's up as natural conversation", async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   await withMockGeminiResponses([
     routePayload('conversational', { reason: 'obrolan ringan' }),
     surfaceReplyPayload('Lagi siap bantu analisis. Mau cek tren atau minta dashboard?'),
@@ -351,13 +351,13 @@ test("processChatMessage allows what's up as natural conversation", async () => 
       assert.equal(response.presentation_mode, 'chat');
       assert.match(response.answer, /siap/i);
     } finally {
-      cleanupTenant(tenantId);
+      await cleanupTenant(tenantId);
     }
   });
 });
 
 test('processChatMessage returns a complete onboarding reply for capability questions', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   await withMockGeminiResponses([
     routePayload('conversational', { reason: 'pertanyaan kemampuan awal' }),
     surfaceReplyPayload('Mulainya gampang: upload file lewat tombol plus atau drag file ke chat, lalu tulis pertanyaan analisis yang Anda butuhkan.', {
@@ -371,13 +371,13 @@ test('processChatMessage returns a complete onboarding reply for capability ques
       assert.match(response.answer, /upload file|drag file|chat/i);
       assert.match(response.answer, /[.!?]$/);
     } finally {
-      cleanupTenant(tenantId);
+      await cleanupTenant(tenantId);
     }
   });
 });
 
 test('processChatMessage retries incomplete clarification replies for follow-up prompts', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   await withMockGeminiResponses([
     routePayload('ask_clarification', { reason: 'follow-up masih kabur' }),
     surfaceReplyPayload('Mohon maaf, sepertinya.', {
@@ -395,13 +395,13 @@ test('processChatMessage retries incomplete clarification replies for follow-up 
       assert.match(response.answer, /cara mulai|analisis data|dashboard/i);
       assert.match(response.answer, /\?$/);
     } finally {
-      cleanupTenant(tenantId);
+      await cleanupTenant(tenantId);
     }
   });
 });
 
 test('processChatMessage auto-builds a dashboard when route classification stays vague but dataset is ready', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const filePath = await seedDataset({ tenantId, userId });
 
   await withMockGeminiResponses([
@@ -423,13 +423,13 @@ test('processChatMessage auto-builds a dashboard when route classification stays
       assert.equal(response.draft_dashboard?.saved_dashboard_id, response.dashboard.id);
     } finally {
       fs.unlinkSync(filePath);
-      cleanupTenant(tenantId);
+      await cleanupTenant(tenantId);
     }
   });
 });
 
 test('processChatMessage continues dashboard creation for vague follow-up replies after an earlier dashboard ask', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   let filePath = null;
 
   try {
@@ -464,12 +464,12 @@ test('processChatMessage continues dashboard creation for vague follow-up replie
     if (filePath && fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('processChatMessage promotes inspect_dataset to dashboard creation when the user still asks for a dashboard', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const filePath = await seedDataset({ tenantId, userId });
 
   await withMockGeminiResponses([
@@ -489,15 +489,15 @@ test('processChatMessage promotes inspect_dataset to dashboard creation when the
       assert.ok(response.dashboard?.id);
     } finally {
       fs.unlinkSync(filePath);
-      cleanupTenant(tenantId);
+      await cleanupTenant(tenantId);
     }
   });
 });
 
 test('processChatMessage asks whether to edit or create when a meaningful dashboard already exists', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const filePath = await seedDataset({ tenantId, userId });
-  const existingDashboard = createDashboard(tenantId, userId, 'Dashboard Aktif', {
+  const existingDashboard = await createDashboard(tenantId, userId, 'Dashboard Aktif', {
     mode: 'manual',
     pages: 1,
     components: [
@@ -539,12 +539,12 @@ test('processChatMessage asks whether to edit or create when a meaningful dashbo
     assert.equal(followUp.draft_dashboard?.saved_dashboard_id, followUp.dashboard.id);
   } finally {
     fs.unlinkSync(filePath);
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('processChatMessage allows acknowledgment prompts as conversation', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   await withMockGeminiResponses([
     routePayload('conversational', { reason: 'respons positif' }),
     surfaceReplyPayload('Siap. Kalau mau, saya lanjut bantu baca insight berikutnya.'),
@@ -556,13 +556,13 @@ test('processChatMessage allows acknowledgment prompts as conversation', async (
       assert.equal(response.presentation_mode, 'chat');
       assert.match(response.answer, /siap/i);
     } finally {
-      cleanupTenant(tenantId);
+      await cleanupTenant(tenantId);
     }
   });
 });
 
 test('processChatMessage handles extended greetings through Gemini classification', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   await withMockGeminiResponses([
     routePayload('conversational', { reason: 'sapaan' }),
     surfaceReplyPayload('Halo, ada yang ingin Anda tanyakan?'),
@@ -584,13 +584,13 @@ test('processChatMessage handles extended greetings through Gemini classificatio
         assert.ok(response.answer.length > 0);
       }
     } finally {
-      cleanupTenant(tenantId);
+      await cleanupTenant(tenantId);
     }
   });
 });
 
 test('processChatMessage uses the light Gemini model for surface replies', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   await withMockGeminiResponses([
     routePayload('conversational', { reason: 'sapaan' }),
     surfaceReplyPayload('Halo, ada yang ingin Anda tanyakan?'),
@@ -602,13 +602,13 @@ test('processChatMessage uses the light Gemini model for surface replies', async
       assert.match(urls[0] || '', /models\/gemini-test:generateContent/);
       assert.match(urls[1] || '', /models\/gemini-test-light:generateContent/);
     } finally {
-      cleanupTenant(tenantId);
+      await cleanupTenant(tenantId);
     }
   });
 });
 
 test('processChatMessage asks for clarification instead of throwing for unclear prompts', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   await withMockGeminiResponses([
     routePayload('ask_clarification', { reason: 'permintaan terlalu kabur' }),
     surfaceReplyPayload('Bisa diperjelas sedikit? Misalnya metrik, periode, atau dashboard yang ingin Anda lihat.', {
@@ -622,16 +622,16 @@ test('processChatMessage asks for clarification instead of throwing for unclear 
       assert.equal(response.presentation_mode, 'chat');
       assert.match(response.answer, /perjelas/i);
 
-      const history = getChatHistory({ tenantId, userId, conversationId: response.conversation_id });
+      const history = await getChatHistory({ tenantId, userId, conversationId: response.conversation_id });
       assert.equal(history.messages.at(-1)?.payload?.error, undefined);
     } finally {
-      cleanupTenant(tenantId);
+      await cleanupTenant(tenantId);
     }
   });
 });
 
 test('processChatMessage returns AI_SERVICE_UNAVAILABLE for dashboard requests without Gemini', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const previousGeminiApiKey = config.geminiApiKey;
   let filePath = null;
   try {
@@ -647,12 +647,12 @@ test('processChatMessage returns AI_SERVICE_UNAVAILABLE for dashboard requests w
       (error) => error?.code === 'AI_SERVICE_UNAVAILABLE' && error?.statusCode === 503,
     );
 
-    const history = getChatHistory({ tenantId, userId });
+    const history = await getChatHistory({ tenantId, userId });
     assert.equal(history.messages.at(-1)?.payload?.error?.code, 'AI_SERVICE_UNAVAILABLE');
     assert.equal(history.messages.at(-1)?.content, 'Layanan AI belum tersedia.');
   } finally {
     config.geminiApiKey = previousGeminiApiKey;
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
     if (filePath && fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -660,7 +660,7 @@ test('processChatMessage returns AI_SERVICE_UNAVAILABLE for dashboard requests w
 });
 
 test('processChatMessage routes dashboard refinement through the creator runtime and stores a draft', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   let filePath = null;
   try {
     filePath = await seedDataset({ tenantId, userId });
@@ -681,12 +681,12 @@ test('processChatMessage routes dashboard refinement through the creator runtime
       assert.ok(response.draft_dashboard);
       assert.ok(Array.isArray(response.draft_dashboard.widgets));
 
-      const history = getChatHistory({ tenantId, userId, conversationId: response.conversation_id });
+      const history = await getChatHistory({ tenantId, userId, conversationId: response.conversation_id });
       assert.ok(history.agent_state?.draft_dashboard);
       assert.ok(Array.isArray(history.agent_state.draft_dashboard.widgets));
     });
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
     if (filePath && fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -694,7 +694,7 @@ test('processChatMessage routes dashboard refinement through the creator runtime
 });
 
 test('chat stream error events include persisted conversation metadata for dashboard failures', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const previousGeminiApiKey = config.geminiApiKey;
   let filePath = null;
   try {
@@ -723,7 +723,7 @@ test('chat stream error events include persisted conversation metadata for dashb
     assert.ok(errorEvent.conversation_id);
   } finally {
     config.geminiApiKey = previousGeminiApiKey;
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
     if (filePath && fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -731,7 +731,7 @@ test('chat stream error events include persisted conversation metadata for dashb
 });
 
 test('chat stream keeps simple smalltalk free of timeline events', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   try {
     const router = new Router();
     registerChatRoutes(router);
@@ -756,12 +756,12 @@ test('chat stream keeps simple smalltalk free of timeline events', async () => {
       assert.equal(events.at(-1)?.type, 'final');
     });
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('processChatMessage returns explicit AI error when Vira stays incomplete after retry', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   try {
     await assert.rejects(
       () => withMockGeminiResponses([
@@ -772,12 +772,12 @@ test('processChatMessage returns explicit AI error when Vira stays incomplete af
       (error) => error?.code === 'AI_SERVICE_UNAVAILABLE' && error?.reason === 'surface_reply_incomplete',
     );
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('chat route returns persisted conversation metadata for non-stream dashboard failures', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const previousGeminiApiKey = config.geminiApiKey;
   let filePath = null;
   try {
@@ -800,7 +800,7 @@ test('chat route returns persisted conversation metadata for non-stream dashboar
     assert.ok(payload.conversation_id);
   } finally {
     config.geminiApiKey = previousGeminiApiKey;
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
     if (filePath && fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }

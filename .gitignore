@@ -18,6 +18,8 @@ data/*.db-shm
 data/.restore-stash-*
 data/uploads/*
 !data/uploads/.gitkeep
+data/tables/*
+!data/tables/.gitkeep
 __pycache__/
 *.pyc
 .blackboxcli/

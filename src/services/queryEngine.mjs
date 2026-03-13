@@ -102,9 +102,9 @@ function resolveTablePeriod(rows = [], dateColumn, rawPeriodInput) {
   };
 }
 
-function latestDataDate(tenantId, dataset = 'transactions') {
+async function latestDataDate(tenantId, dataset = 'transactions') {
   if (dataset === 'expenses') {
-    const row = get(
+    const row = await get(
       `
         SELECT MAX(expense_date) AS latest
         FROM expenses
@@ -115,7 +115,7 @@ function latestDataDate(tenantId, dataset = 'transactions') {
     return toDateOrNull(row?.latest);
   }
 
-  const tx = get(
+  const tx = await get(
     `
       SELECT MAX(transaction_date) AS latest
       FROM transactions
@@ -124,7 +124,7 @@ function latestDataDate(tenantId, dataset = 'transactions') {
     { tenant_id: tenantId },
   );
 
-  const expense = get(
+  const expense = await get(
     `
       SELECT MAX(expense_date) AS latest
       FROM expenses
@@ -146,9 +146,9 @@ function latestDataDate(tenantId, dataset = 'transactions') {
   return txDate > expenseDate ? txDate : expenseDate;
 }
 
-function coveragePeriodForDataset(tenantId, dataset = 'transactions') {
+async function coveragePeriodForDataset(tenantId, dataset = 'transactions') {
   if (dataset === 'expenses') {
-    const row = get(
+    const row = await get(
       `
         SELECT MIN(expense_date) AS start_date, MAX(expense_date) AS end_date, COUNT(*) AS count_rows
         FROM expenses
@@ -171,7 +171,7 @@ function coveragePeriodForDataset(tenantId, dataset = 'transactions') {
     };
   }
 
-  const row = get(
+  const row = await get(
     `
       SELECT MIN(transaction_date) AS start_date, MAX(transaction_date) AS end_date, COUNT(*) AS count_rows
       FROM transactions
@@ -194,7 +194,7 @@ function coveragePeriodForDataset(tenantId, dataset = 'transactions') {
   };
 }
 
-function resolveAgenticPeriod(tenantId, rawPeriodInput, dataset = 'transactions') {
+async function resolveAgenticPeriod(tenantId, rawPeriodInput, dataset = 'transactions') {
   const input = rawPeriodInput || (dataset === 'expenses' ? '30 hari terakhir' : '7 hari terakhir');
   const useRelativeAnchor = isRelativePeriodInput(input);
 
@@ -206,7 +206,7 @@ function resolveAgenticPeriod(tenantId, rawPeriodInput, dataset = 'transactions'
     };
   }
 
-  const latest = latestDataDate(tenantId, dataset);
+  const latest = await latestDataDate(tenantId, dataset);
   if (!latest) {
     return {
       ...parseTimePeriod(input),
@@ -227,9 +227,9 @@ function resolveAgenticPeriod(tenantId, rawPeriodInput, dataset = 'transactions'
   };
 }
 
-function hasRowsInPeriod(tenantId, dataset, period) {
+async function hasRowsInPeriod(tenantId, dataset, period) {
   if (dataset === 'expenses') {
-    const row = get(
+    const row = await get(
       `
         SELECT COUNT(*) AS value
         FROM expenses
@@ -245,7 +245,7 @@ function hasRowsInPeriod(tenantId, dataset, period) {
     return Number(row?.value || 0) > 0;
   }
 
-  const row = get(
+  const row = await get(
     `
       SELECT COUNT(*) AS value
       FROM transactions
@@ -261,13 +261,13 @@ function hasRowsInPeriod(tenantId, dataset, period) {
   return Number(row?.value || 0) > 0;
 }
 
-function resultLooksEmpty(result, tenantId, dataset) {
+async function resultLooksEmpty(result, tenantId, dataset) {
   if (result.type === 'list' || result.type === 'trend') {
     return !Array.isArray(result.data) || result.data.length === 0;
   }
 
   if (result.type === 'metric') {
-    return !hasRowsInPeriod(tenantId, dataset, result.period);
+    return !(await hasRowsInPeriod(tenantId, dataset, result.period));
   }
 
   return false;
@@ -324,7 +324,7 @@ function inferTemplate(intent) {
   }
 }
 
-function executeQuery(templateId, { tenantId, period, branch, channel, limit }) {
+async function executeQuery(templateId, { tenantId, period, branch, channel, limit }) {
   const query = buildTemplateQuery(templateId, {
     tenantId,
     startDate: period.start,
@@ -335,7 +335,7 @@ function executeQuery(templateId, { tenantId, period, branch, channel, limit }) 
   });
 
   if (query.template.type === 'metric') {
-    const row = get(query.sql, query.params) || { value: 0 };
+    const row = (await get(query.sql, query.params)) || { value: 0 };
     return {
       type: query.template.type,
       templateId,
@@ -347,7 +347,7 @@ function executeQuery(templateId, { tenantId, period, branch, channel, limit }) 
     };
   }
 
-  const rows = all(query.sql, query.params);
+  const rows = await all(query.sql, query.params);
   return {
     type: query.template.type,
     templateId,
@@ -520,12 +520,12 @@ function calculateComparison(currentValue, previousValue) {
   };
 }
 
-export function executeAnalyticsIntent({ tenantId, userId, intent }) {
+export async function executeAnalyticsIntent({ tenantId, userId, intent }) {
   const templateId = inferTemplate(intent);
   const dataset = datasetForTemplate(templateId);
-  let period = resolveAgenticPeriod(tenantId, intent.time_period || intent.period || '7 hari terakhir', dataset);
+  let period = await resolveAgenticPeriod(tenantId, intent.time_period || intent.period || '7 hari terakhir', dataset);
 
-  let primary = executeQuery(templateId, {
+  let primary = await executeQuery(templateId, {
     tenantId,
     period,
     branch: intent.branch,
@@ -534,11 +534,11 @@ export function executeAnalyticsIntent({ tenantId, userId, intent }) {
   });
 
   let periodAdjusted = false;
-  if (resultLooksEmpty(primary, tenantId, dataset)) {
-    const coverage = coveragePeriodForDataset(tenantId, dataset);
+  if (await resultLooksEmpty(primary, tenantId, dataset)) {
+    const coverage = await coveragePeriodForDataset(tenantId, dataset);
     if (coverage && (coverage.start !== period.start || coverage.end !== period.end)) {
       period = coverage;
-      primary = executeQuery(templateId, {
+      primary = await executeQuery(templateId, {
         tenantId,
         period,
         branch: intent.branch,
@@ -551,7 +551,7 @@ export function executeAnalyticsIntent({ tenantId, userId, intent }) {
 
   let comparison = null;
   if (intent.intent === 'compare' && primary.type === 'metric') {
-    const prev = executeQuery(templateId, {
+    const prev = await executeQuery(templateId, {
       tenantId,
       period: previousPeriod(period),
       branch: intent.branch,
@@ -908,14 +908,14 @@ function executeTableQuery({ tenantId, userId, query, table }) {
   };
 }
 
-export function executeBuilderQuery({ tenantId, userId, query }) {
-  const table = query?.dataset ? getDatasetTable(tenantId, query.dataset) : null;
+export async function executeBuilderQuery({ tenantId, userId, query }) {
+  const table = query?.dataset ? await getDatasetTable(tenantId, query.dataset) : null;
   if (table) {
     return executeTableQuery({ tenantId, userId, query, table });
   }
 
   const normalized = buildBuilderParts(query);
-  let period = resolveAgenticPeriod(tenantId, query.time_period || '30 hari terakhir', normalized.dataset);
+  let period = await resolveAgenticPeriod(tenantId, query.time_period || '30 hari terakhir', normalized.dataset);
   const limit = normalizeLimit(query.limit, normalized.groupBy === 'none' ? 1 : 20, 500);
 
   const params = {
@@ -952,21 +952,21 @@ export function executeBuilderQuery({ tenantId, userId, query }) {
     params.limit = limit;
   }
 
-  let rows = all(sql, params);
+  let rows = await all(sql, params);
 
   let periodAdjusted = false;
   const needsCoverageFallback =
     normalized.groupBy !== 'none'
       ? rows.length === 0
-      : !hasRowsInPeriod(tenantId, normalized.dataset, period);
+      : !(await hasRowsInPeriod(tenantId, normalized.dataset, period));
 
   if (needsCoverageFallback) {
-    const coverage = coveragePeriodForDataset(tenantId, normalized.dataset);
+    const coverage = await coveragePeriodForDataset(tenantId, normalized.dataset);
     if (coverage && (coverage.start !== period.start || coverage.end !== period.end)) {
       period = coverage;
       params.start_date = period.start;
       params.end_date = period.end;
-      rows = all(sql, params);
+      rows = await all(sql, params);
       periodAdjusted = true;
     }
   }
@@ -1018,8 +1018,31 @@ export function executeBuilderQuery({ tenantId, userId, query }) {
   };
 }
 
-export function getBuilderSchema(tenantId = null) {
-  const tables = tenantId ? listDatasetTables(tenantId) : [];
+const DEFAULT_BUILDER_SCHEMA = {
+  datasets: [
+    {
+      id: 'transactions',
+      label: 'Transaksi',
+      measures: ['revenue', 'profit', 'quantity', 'margin', 'cogs', 'count'],
+      dimensions: ['none', 'day', 'product', 'branch', 'channel', 'payment_method', 'category'],
+    },
+    {
+      id: 'expenses',
+      label: 'Biaya',
+      measures: ['amount', 'count', 'avg'],
+      dimensions: ['none', 'day', 'category', 'branch', 'recurring'],
+    },
+  ],
+  visualizations: CHART_CATALOG,
+  default_time_period: '30 hari terakhir',
+};
+
+export function getDefaultBuilderSchema() {
+  return DEFAULT_BUILDER_SCHEMA;
+}
+
+export async function getBuilderSchema(tenantId = null) {
+  const tables = tenantId ? await listDatasetTables(tenantId) : [];
   if (tables.length > 0) {
     const datasets = tables.map((table) => {
       const spec = datasetTableSpec(table);
@@ -1047,22 +1070,5 @@ export function getBuilderSchema(tenantId = null) {
     };
   }
 
-  return {
-    datasets: [
-      {
-        id: 'transactions',
-        label: 'Transaksi',
-        measures: ['revenue', 'profit', 'quantity', 'margin', 'cogs', 'count'],
-        dimensions: ['none', 'day', 'product', 'branch', 'channel', 'payment_method', 'category'],
-      },
-      {
-        id: 'expenses',
-        label: 'Biaya',
-        measures: ['amount', 'count', 'avg'],
-        dimensions: ['none', 'day', 'category', 'branch', 'recurring'],
-      },
-    ],
-    visualizations: CHART_CATALOG,
-    default_time_period: '30 hari terakhir',
-  };
+  return DEFAULT_BUILDER_SCHEMA;
 }

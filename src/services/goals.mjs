@@ -3,13 +3,13 @@ import { generateId } from '../utils/ids.mjs';
 import { parseFlexibleDate } from '../utils/parse.mjs';
 import { logAudit } from './audit.mjs';
 
-function goalActualValue(tenantId, goal) {
+async function goalActualValue(tenantId, goal) {
   if (!goal) {
     return 0;
   }
 
   if (goal.metric === 'profit') {
-    const row = get(
+    const row = await get(
       `
         SELECT COALESCE(SUM(total_revenue - COALESCE(cogs, 0) - COALESCE(discount, 0)), 0) AS value
         FROM transactions
@@ -26,7 +26,7 @@ function goalActualValue(tenantId, goal) {
   }
 
   if (goal.metric === 'margin') {
-    const row = get(
+    const row = await get(
       `
         SELECT
           CASE WHEN SUM(total_revenue) = 0 THEN 0
@@ -45,7 +45,7 @@ function goalActualValue(tenantId, goal) {
     return Number(row?.value || 0);
   }
 
-  const revenue = get(
+  const revenue = await get(
     `
       SELECT COALESCE(SUM(total_revenue), 0) AS value
       FROM transactions
@@ -62,7 +62,7 @@ function goalActualValue(tenantId, goal) {
   return Number(revenue?.value || 0);
 }
 
-export function createGoal({ tenantId, userId, metric = 'revenue', targetValue, startDate, endDate }) {
+export async function createGoal({ tenantId, userId, metric = 'revenue', targetValue, startDate, endDate }) {
   const start = parseFlexibleDate(startDate) || new Date();
   const end = parseFlexibleDate(endDate) || new Date(new Date().setMonth(new Date().getMonth() + 1));
 
@@ -71,7 +71,7 @@ export function createGoal({ tenantId, userId, metric = 'revenue', targetValue, 
   }
 
   const id = generateId();
-  run(
+  await run(
     `
       INSERT INTO goals (id, tenant_id, user_id, metric, target_value, start_date, end_date, status, created_at)
       VALUES (:id, :tenant_id, :user_id, :metric, :target_value, :start_date, :end_date, :status, :created_at)
@@ -101,7 +101,7 @@ export function createGoal({ tenantId, userId, metric = 'revenue', targetValue, 
   return getGoal(tenantId, userId, id);
 }
 
-export function listGoals(tenantId, userId) {
+export async function listGoals(tenantId, userId) {
   return all(
     `
       SELECT id, metric, target_value, start_date, end_date, status, created_at
@@ -113,7 +113,7 @@ export function listGoals(tenantId, userId) {
   );
 }
 
-export function getGoal(tenantId, userId, goalId) {
+export async function getGoal(tenantId, userId, goalId) {
   return get(
     `
       SELECT id, metric, target_value, start_date, end_date, status, created_at
@@ -124,13 +124,13 @@ export function getGoal(tenantId, userId, goalId) {
   );
 }
 
-export function getGoalProgress(tenantId, userId, goalId) {
-  const goal = getGoal(tenantId, userId, goalId);
+export async function getGoalProgress(tenantId, userId, goalId) {
+  const goal = await getGoal(tenantId, userId, goalId);
   if (!goal) {
     return null;
   }
 
-  const actual = goalActualValue(tenantId, goal);
+  const actual = await goalActualValue(tenantId, goal);
   const target = Number(goal.target_value || 0);
   const progressPct = target <= 0 ? 0 : (actual / target) * 100;
 

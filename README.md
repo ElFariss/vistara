@@ -22,7 +22,7 @@ This build now focuses on a linear, production-ready MVP flow:
 ## Tech Stack
 
 - Runtime: Node.js 24+
-- Database: SQLite (`node:sqlite`, WAL mode)
+- Database: PostgreSQL (via `pg`, in-memory `pg-mem` for tests)
 - API: native HTTP server + custom router
 - AI: Gemini API using model **`gemini-2.5-pro`** by default (configurable)
 - Frontend: vanilla JS + GridStack + Chart.js (self-hosted vendor assets)
@@ -33,6 +33,7 @@ Copy `.env.example` to `.env` and set values.
 
 Key fields:
 
+- `DATABASE_URL` or `PGHOST`/`PGUSER`/`PGPASSWORD`/`PGDATABASE`/`PGPORT` (required for PostgreSQL)
 - `GEMINI_API` or `GEMINI_API_KEY` (required for AI mapping/NLU)
 - `GEMINI_MODEL=gemini-2.5-pro`
 - `API_BASE_URL` (optional frontend runtime override)
@@ -126,4 +127,4 @@ Operational runbook, backup/restore flow, and rollback notes live in [OPERATIONS
 - Endpoint `/api/data/sources/:id/process` is deprecated because upload now does parse+ingest in one step.
 - XLSX ingestion supports common single-sheet exports (`.xlsx`).
 - Legacy `.xls` is supported via `ssconvert` conversion to CSV before normalization.
-- For production-scale multi-tenant SaaS, switch DB to PostgreSQL and enforce RLS at database level.
+- For production-scale multi-tenant SaaS, consider enforcing RLS at the database level.

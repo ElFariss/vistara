@@ -190,14 +190,27 @@ export async function parseDatasetTables(filePath, fileType, filename) {
     return parseXlsxSheets(filePath);
   }
 
-  const parsed = await parseDataset(filePath, fileType, filename);
-  return [
-    {
-      name: datasetNameFromFilename(filename),
-      columns: parsed.columns,
-      rows: parsed.rows,
-    },
-  ];
+  try {
+    const parsed = await parseDataset(filePath, fileType, filename);
+    return [
+      {
+        name: datasetNameFromFilename(filename),
+        columns: parsed.columns,
+        rows: parsed.rows,
+      },
+    ];
+  } catch (error) {
+    if (fileType === 'text' || error.message.includes('Gunakan data tabular') || error.message.includes('AI parser tidak menemukan') || error.message.includes('Coba unggah') || error.message.includes('Format file tidak didukung')) {
+      return [
+        {
+          name: datasetNameFromFilename(filename),
+          columns: [],
+          rows: [],
+        },
+      ];
+    }
+    throw error;
+  }
 }
 
 export async function parseDataset(filePath, fileType, filename) {
@@ -240,7 +253,10 @@ export async function parseDataset(filePath, fileType, filename) {
 
     try {
       return await parseWithAiFallback(buffer, filename);
-    } catch {
+    } catch (error) {
+      if (error.message.includes('Gunakan data tabular') || error.message.includes('AI parser tidak menemukan') || error.message.includes('Coba unggah')) {
+        throw error;
+      }
       throw unsupportedUploadError();
     }
   }
@@ -269,7 +285,10 @@ export async function parseDataset(filePath, fileType, filename) {
 
   try {
     return await parseWithAiFallback(buffer, filename);
-  } catch {
+  } catch (error) {
+    if (error.message.includes('Gunakan data tabular') || error.message.includes('AI parser tidak menemukan') || error.message.includes('Coba unggah')) {
+      throw error;
+    }
     throw unsupportedUploadError();
   }
 }
@@ -414,12 +433,12 @@ function mappingSupportsProductDimension(mapping = {}, columns = []) {
   return false;
 }
 
-function ensureBranch(tenantId, branchName) {
+async function ensureBranch(tenantId, branchName) {
   if (!branchName) {
     return null;
   }
 
-  const existing = get(
+  const existing = await get(
     `SELECT id FROM branches WHERE tenant_id = :tenant_id AND LOWER(name) = LOWER(:name)`,
     { tenant_id: tenantId, name: branchName },
   );
@@ -429,7 +448,7 @@ function ensureBranch(tenantId, branchName) {
   }
 
   const id = generateId();
-  run(
+  await run(
     `
       INSERT INTO branches (id, tenant_id, name, created_at)
       VALUES (:id, :tenant_id, :name, :created_at)
@@ -445,12 +464,12 @@ function ensureBranch(tenantId, branchName) {
   return id;
 }
 
-function ensureProduct(tenantId, name, category = null) {
+async function ensureProduct(tenantId, name, category = null) {
   if (!name) {
     return null;
   }
 
-  const existing = get(
+  const existing = await get(
     `SELECT id FROM products WHERE tenant_id = :tenant_id AND LOWER(name) = LOWER(:name)`,
     { tenant_id: tenantId, name },
   );
@@ -460,7 +479,7 @@ function ensureProduct(tenantId, name, category = null) {
   }
 
   const id = generateId();
-  run(
+  await run(
     `
       INSERT INTO products (id, tenant_id, name, category, created_at)
       VALUES (:id, :tenant_id, :name, :category, :created_at)
@@ -563,7 +582,7 @@ export async function readParsedSourceFile({ filePath, fileType, filename }) {
   return parseDataset(filePath, fileType, filename);
 }
 
-export function storeSourceFileRecord({
+export async function storeSourceFileRecord({
   tenantId,
   filename,
   fileType,
@@ -575,7 +594,7 @@ export function storeSourceFileRecord({
   primaryTable = null,
 }) {
   const id = generateId();
-  run(
+  await run(
     `
       INSERT INTO source_files (
         id, tenant_id, filename, file_type, file_path,
@@ -638,8 +657,8 @@ function parseColumnMapping(source) {
   }
 }
 
-function updateSourceSummary(sourceId, { rowCount, startDate, endDate, status }) {
-  run(
+async function updateSourceSummary(sourceId, { rowCount, startDate, endDate, status }) {
+  await run(
     `
       UPDATE source_files
       SET row_count = :row_count,
@@ -658,8 +677,8 @@ function updateSourceSummary(sourceId, { rowCount, startDate, endDate, status })
   );
 }
 
-function markSourceFailed(sourceId, reason) {
-  const current = get(`SELECT metadata_json FROM source_files WHERE id = :id`, { id: sourceId }) || {};
+async function markSourceFailed(sourceId, reason) {
+  const current = (await get(`SELECT metadata_json FROM source_files WHERE id = :id`, { id: sourceId })) || {};
   let metadata = {};
   try {
     metadata = current.metadata_json ? JSON.parse(current.metadata_json) : {};
@@ -669,7 +688,7 @@ function markSourceFailed(sourceId, reason) {
 
   metadata.error = String(reason || 'unknown_error').slice(0, 400);
 
-  run(
+  await run(
     `
       UPDATE source_files
       SET status = :status,
@@ -684,7 +703,7 @@ function markSourceFailed(sourceId, reason) {
   );
 }
 
-function insertTransactions({ tenantId, userId, sourceId, rows, mapping }) {
+async function insertTransactions({ tenantId, userId, sourceId, rows, mapping }) {
   let inserted = 0;
   let duplicates = 0;
   let skipped = 0;
@@ -692,84 +711,84 @@ function insertTransactions({ tenantId, userId, sourceId, rows, mapping }) {
   let minDate = null;
   let maxDate = null;
 
-  withTransaction(() => {
-    for (const row of rows) {
-      const normalized = normalizeTransactionRow(row, mapping);
+  // NOTE: No withTransaction here — callers (ingestUploadedSource, processSourceFile)
+  // already wrap this in their own transaction to keep ingestion atomic.
+  for (const row of rows) {
+    const normalized = normalizeTransactionRow(row, mapping);
 
-      if (!normalized.transaction_date || normalized.total_revenue === null) {
-        skipped += 1;
-        continue;
-      }
-
-      if (normalized.total_revenue < 0) {
-        skipped += 1;
-        continue;
-      }
-
-      const branchId = ensureBranch(tenantId, normalized.branch_name);
-      const productId = ensureProduct(tenantId, normalized.product_name, normalized.category);
-
-      const checksum = createChecksum({
-        tenantId,
-        date: normalized.transaction_date.toISOString(),
-        product: normalized.product_name,
-        qty: normalized.quantity,
-        revenue: normalized.total_revenue,
-        branch: normalized.branch_name,
-        channel: normalized.channel,
-      });
-
-      try {
-        run(
-          `
-            INSERT INTO transactions (
-              id, tenant_id, transaction_date, product_id, branch_id,
-              quantity, unit_price, total_revenue, cogs, discount,
-              channel, payment_method, source_file_id, raw_data,
-              checksum, created_at
-            ) VALUES (
-              :id, :tenant_id, :transaction_date, :product_id, :branch_id,
-              :quantity, :unit_price, :total_revenue, :cogs, :discount,
-              :channel, :payment_method, :source_file_id, :raw_data,
-              :checksum, :created_at
-            )
-          `,
-          {
-            id: generateId(),
-            tenant_id: tenantId,
-            transaction_date: normalized.transaction_date.toISOString(),
-            product_id: productId,
-            branch_id: branchId,
-            quantity: normalized.quantity,
-            unit_price: normalized.unit_price,
-            total_revenue: normalized.total_revenue,
-            cogs: normalized.cogs,
-            discount: normalized.discount,
-            channel: normalized.channel,
-            payment_method: normalized.payment_method,
-            source_file_id: sourceId,
-            raw_data: JSON.stringify(row),
-            checksum,
-            created_at: new Date().toISOString(),
-          },
-        );
-        inserted += 1;
-
-        if (!minDate || normalized.transaction_date < minDate) {
-          minDate = normalized.transaction_date;
-        }
-        if (!maxDate || normalized.transaction_date > maxDate) {
-          maxDate = normalized.transaction_date;
-        }
-      } catch (error) {
-        if (String(error.message).includes('UNIQUE constraint failed')) {
-          duplicates += 1;
-          continue;
-        }
-        throw error;
-      }
+    if (!normalized.transaction_date || normalized.total_revenue === null) {
+      skipped += 1;
+      continue;
     }
-  });
+
+    if (normalized.total_revenue < 0) {
+      skipped += 1;
+      continue;
+    }
+
+    const branchId = await ensureBranch(tenantId, normalized.branch_name);
+    const productId = await ensureProduct(tenantId, normalized.product_name, normalized.category);
+
+    const checksum = createChecksum({
+      tenantId,
+      date: normalized.transaction_date.toISOString(),
+      product: normalized.product_name,
+      qty: normalized.quantity,
+      revenue: normalized.total_revenue,
+      branch: normalized.branch_name,
+      channel: normalized.channel,
+    });
+
+    try {
+      await run(
+        `
+          INSERT INTO transactions (
+            id, tenant_id, transaction_date, product_id, branch_id,
+            quantity, unit_price, total_revenue, cogs, discount,
+            channel, payment_method, source_file_id, raw_data,
+            checksum, created_at
+          ) VALUES (
+            :id, :tenant_id, :transaction_date, :product_id, :branch_id,
+            :quantity, :unit_price, :total_revenue, :cogs, :discount,
+            :channel, :payment_method, :source_file_id, :raw_data,
+            :checksum, :created_at
+          )
+        `,
+        {
+          id: generateId(),
+          tenant_id: tenantId,
+          transaction_date: normalized.transaction_date.toISOString(),
+          product_id: productId,
+          branch_id: branchId,
+          quantity: normalized.quantity,
+          unit_price: normalized.unit_price,
+          total_revenue: normalized.total_revenue,
+          cogs: normalized.cogs,
+          discount: normalized.discount,
+          channel: normalized.channel,
+          payment_method: normalized.payment_method,
+          source_file_id: sourceId,
+          raw_data: JSON.stringify(row),
+          checksum,
+          created_at: new Date().toISOString(),
+        },
+      );
+      inserted += 1;
+
+      if (!minDate || normalized.transaction_date < minDate) {
+        minDate = normalized.transaction_date;
+      }
+      if (!maxDate || normalized.transaction_date > maxDate) {
+        maxDate = normalized.transaction_date;
+      }
+    } catch (error) {
+      if (error?.code === '23505' || String(error.message).toLowerCase().includes('duplicate key')) {
+        duplicates += 1;
+        continue;
+      }
+      throw error;
+    }
+  }
 
   logAudit({
     tenantId,
@@ -789,55 +808,54 @@ function insertTransactions({ tenantId, userId, sourceId, rows, mapping }) {
   };
 }
 
-function insertExpenses({ tenantId, userId, sourceId, rows, mapping }) {
+async function insertExpenses({ tenantId, userId, sourceId, rows, mapping }) {
   let inserted = 0;
   let skipped = 0;
   let minDate = null;
   let maxDate = null;
 
-  withTransaction(() => {
-    for (const row of rows) {
-      const normalized = normalizeExpenseRow(row, mapping);
-      if (!normalized.expense_date || normalized.amount === null) {
-        skipped += 1;
-        continue;
-      }
-
-      const branchId = ensureBranch(tenantId, normalized.branch_name);
-
-      run(
-        `
-          INSERT INTO expenses (
-            id, tenant_id, expense_date, category, amount,
-            branch_id, description, recurring, source_file_id, created_at
-          ) VALUES (
-            :id, :tenant_id, :expense_date, :category, :amount,
-            :branch_id, :description, :recurring, :source_file_id, :created_at
-          )
-        `,
-        {
-          id: generateId(),
-          tenant_id: tenantId,
-          expense_date: normalized.expense_date.toISOString(),
-          category: normalized.category,
-          amount: normalized.amount,
-          branch_id: branchId,
-          description: normalized.description,
-          recurring: normalized.recurring ? 1 : 0,
-          source_file_id: sourceId,
-          created_at: new Date().toISOString(),
-        },
-      );
-
-      inserted += 1;
-      if (!minDate || normalized.expense_date < minDate) {
-        minDate = normalized.expense_date;
-      }
-      if (!maxDate || normalized.expense_date > maxDate) {
-        maxDate = normalized.expense_date;
-      }
+  // NOTE: No withTransaction here — callers already wrap this in their own transaction.
+  for (const row of rows) {
+    const normalized = normalizeExpenseRow(row, mapping);
+    if (!normalized.expense_date || normalized.amount === null) {
+      skipped += 1;
+      continue;
     }
-  });
+
+    const branchId = await ensureBranch(tenantId, normalized.branch_name);
+
+    await run(
+      `
+        INSERT INTO expenses (
+          id, tenant_id, expense_date, category, amount,
+          branch_id, description, recurring, source_file_id, created_at
+        ) VALUES (
+          :id, :tenant_id, :expense_date, :category, :amount,
+          :branch_id, :description, :recurring, :source_file_id, :created_at
+        )
+      `,
+      {
+        id: generateId(),
+        tenant_id: tenantId,
+        expense_date: normalized.expense_date.toISOString(),
+        category: normalized.category,
+        amount: normalized.amount,
+        branch_id: branchId,
+        description: normalized.description,
+        recurring: normalized.recurring ? 1 : 0,
+        source_file_id: sourceId,
+        created_at: new Date().toISOString(),
+      },
+    );
+
+    inserted += 1;
+    if (!minDate || normalized.expense_date < minDate) {
+      minDate = normalized.expense_date;
+    }
+    if (!maxDate || normalized.expense_date > maxDate) {
+      maxDate = normalized.expense_date;
+    }
+  }
 
   logAudit({
     tenantId,
@@ -857,26 +875,26 @@ function insertExpenses({ tenantId, userId, sourceId, rows, mapping }) {
   };
 }
 
-export function replaceTenantDataset(tenantId, { keepFilePaths = [] } = {}) {
-  const sources = all(`SELECT file_path FROM source_files WHERE tenant_id = :tenant_id`, {
+export async function replaceTenantDataset(tenantId, { keepFilePaths = [] } = {}) {
+  const sources = await all(`SELECT file_path FROM source_files WHERE tenant_id = :tenant_id`, {
     tenant_id: tenantId,
   });
 
-  withTransaction(() => {
-    deleteTenantDatasetRecords(tenantId);
+  await withTransaction(async () => {
+    await deleteTenantDatasetRecords(tenantId);
   });
 
   cleanupSourceFiles(sources, keepFilePaths);
 }
 
-function deleteTenantDatasetRecords(tenantId) {
-  run(`DELETE FROM transactions WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
-  run(`DELETE FROM expenses WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
-  run(`DELETE FROM products WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
-  run(`DELETE FROM branches WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
-  run(`DELETE FROM customers WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
-  deleteDatasetTablesForTenant(tenantId);
-  run(`DELETE FROM source_files WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
+async function deleteTenantDatasetRecords(tenantId) {
+  await run(`DELETE FROM transactions WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
+  await run(`DELETE FROM expenses WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
+  await run(`DELETE FROM products WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
+  await run(`DELETE FROM branches WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
+  await run(`DELETE FROM customers WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
+  await deleteDatasetTablesForTenant(tenantId);
+  await run(`DELETE FROM source_files WHERE tenant_id = :tenant_id`, { tenant_id: tenantId });
 }
 
 function cleanupSourceFiles(sources = [], keepFilePaths = []) {
@@ -895,10 +913,10 @@ function cleanupSourceFiles(sources = [], keepFilePaths = []) {
   }
 }
 
-export function updateSourceMapping({ tenantId, sourceId, datasetType, mapping }) {
+export async function updateSourceMapping({ tenantId, sourceId, datasetType, mapping }) {
   validateMapping(datasetType, mapping);
 
-  run(
+  await run(
     `
       UPDATE source_files
       SET column_mapping = :column_mapping,
@@ -915,7 +933,7 @@ export function updateSourceMapping({ tenantId, sourceId, datasetType, mapping }
 }
 
 export async function processSourceFile({ tenantId, userId, sourceId }) {
-  const source = get(`SELECT * FROM source_files WHERE id = :id AND tenant_id = :tenant_id`, {
+  const source = await get(`SELECT * FROM source_files WHERE id = :id AND tenant_id = :tenant_id`, {
     id: sourceId,
     tenant_id: tenantId,
   });
@@ -931,9 +949,9 @@ export async function processSourceFile({ tenantId, userId, sourceId }) {
     const tables = await parseDatasetTables(source.file_path, source.file_type, source.filename);
     const primary = pickPrimaryTable(tables);
 
-    const summary = withTransaction(() => {
-      deleteDatasetTablesForSource(sourceId);
-      storeDatasetTables({ tenantId, sourceId, tables, minRows: 6 });
+    const summary = await withTransaction(async () => {
+      await deleteDatasetTablesForSource(sourceId);
+      await storeDatasetTables({ tenantId, sourceId, tables, minRows: 6 });
       if (mappingInfo.datasetType === 'expense') {
         return insertExpenses({
           tenantId,
@@ -953,7 +971,7 @@ export async function processSourceFile({ tenantId, userId, sourceId }) {
       });
     });
 
-    updateSourceSummary(sourceId, {
+    await updateSourceSummary(sourceId, {
       rowCount: summary.inserted,
       startDate: summary.minDate,
       endDate: summary.maxDate,
@@ -966,7 +984,7 @@ export async function processSourceFile({ tenantId, userId, sourceId }) {
       ...summary,
     };
   } catch (error) {
-    markSourceFailed(sourceId, error.message);
+    await markSourceFailed(sourceId, error.message);
     throw error;
   }
 }
@@ -985,15 +1003,15 @@ export async function ingestUploadedSource({
   if (replaceExisting) {
     const tables = await parseDatasetTables(filePath, analysis.fileType, filename);
     const primary = pickPrimaryTable(tables);
-    const previousSources = all(`SELECT file_path FROM source_files WHERE tenant_id = :tenant_id`, {
+    const previousSources = await all(`SELECT file_path FROM source_files WHERE tenant_id = :tenant_id`, {
       tenant_id: tenantId,
     });
     let sourceId = null;
     let result = null;
 
-    withTransaction(() => {
-      deleteTenantDatasetRecords(tenantId);
-      sourceId = storeSourceFileRecord({
+    await withTransaction(async () => {
+      await deleteTenantDatasetRecords(tenantId);
+      sourceId = await storeSourceFileRecord({
         tenantId,
         filename,
         fileType: analysis.fileType,
@@ -1005,8 +1023,8 @@ export async function ingestUploadedSource({
         primaryTable: analysis.primaryTable,
       });
 
-      storeDatasetTables({ tenantId, sourceId, tables, minRows: 6 });
-      result = processParsedRows({
+      await storeDatasetTables({ tenantId, sourceId, tables, minRows: 6 });
+      result = await processParsedRows({
         tenantId,
         userId,
         sourceId,
@@ -1021,11 +1039,11 @@ export async function ingestUploadedSource({
     return {
       analysis,
       result,
-      source: getSource(tenantId, sourceId),
+      source: await getSource(tenantId, sourceId),
     };
   }
 
-  const sourceId = storeSourceFileRecord({
+  const sourceId = await storeSourceFileRecord({
     tenantId,
     filename,
     fileType: analysis.fileType,
@@ -1046,22 +1064,40 @@ export async function ingestUploadedSource({
   return {
     analysis,
     result,
-    source: getSource(tenantId, sourceId),
+    source: await getSource(tenantId, sourceId),
   };
 }
 
-function processParsedRows({ tenantId, userId, sourceId, parsed, datasetType, mapping }) {
+async function processParsedRows({ tenantId, userId, sourceId, parsed, datasetType, mapping }) {
   validateMapping(datasetType, mapping);
 
+  if (datasetType === 'raw') {
+    await updateSourceSummary(sourceId, {
+      rowCount: 0,
+      startDate: null,
+      endDate: null,
+      status: 'ready',
+    });
+    return {
+      sourceId,
+      datasetType,
+      inserted: 0,
+      duplicates: 0,
+      skipped: 0,
+      minDate: null,
+      maxDate: null,
+    };
+  }
+
   const summary = datasetType === 'expense'
-    ? insertExpenses({
+    ? await insertExpenses({
       tenantId,
       userId,
       sourceId,
       rows: parsed.rows,
       mapping,
     })
-    : insertTransactions({
+    : await insertTransactions({
       tenantId,
       userId,
       sourceId,
@@ -1069,7 +1105,7 @@ function processParsedRows({ tenantId, userId, sourceId, parsed, datasetType, ma
       mapping,
     });
 
-  updateSourceSummary(sourceId, {
+  await updateSourceSummary(sourceId, {
     rowCount: summary.inserted,
     startDate: summary.minDate,
     endDate: summary.maxDate,
@@ -1089,7 +1125,7 @@ export async function repairLatestSourceIfNeeded({
   requiredCapability = 'product_dimension',
   reingestSource = ingestUploadedSource,
 } = {}) {
-  const latest = get(
+  const latest = await get(
     `
       SELECT *
       FROM source_files
@@ -1120,7 +1156,7 @@ export async function repairLatestSourceIfNeeded({
     || hasProductVariantColumn(columns)
     || hasProductBrandColumn(columns);
 
-  const productsCount = get(
+  const productsCount = await get(
     `
       SELECT COUNT(*) AS value
       FROM products
@@ -1207,7 +1243,7 @@ function toLowerSafe(value) {
   return String(value || '').trim().toLowerCase();
 }
 
-export function listSources(tenantId) {
+export async function listSources(tenantId) {
   return all(
     `
       SELECT id, filename, file_type, upload_date, row_count,
@@ -1220,7 +1256,7 @@ export function listSources(tenantId) {
   );
 }
 
-export function getSource(tenantId, sourceId) {
+export async function getSource(tenantId, sourceId) {
   return get(
     `
       SELECT id, filename, file_type, upload_date, row_count,
@@ -1232,8 +1268,8 @@ export function getSource(tenantId, sourceId) {
   );
 }
 
-export function deleteSource(tenantId, sourceId) {
-  const source = get(`SELECT * FROM source_files WHERE tenant_id = :tenant_id AND id = :id`, {
+export async function deleteSource(tenantId, sourceId) {
+  const source = await get(`SELECT * FROM source_files WHERE tenant_id = :tenant_id AND id = :id`, {
     tenant_id: tenantId,
     id: sourceId,
   });
@@ -1242,18 +1278,18 @@ export function deleteSource(tenantId, sourceId) {
     return false;
   }
 
-  withTransaction(() => {
-    run(`DELETE FROM transactions WHERE tenant_id = :tenant_id AND source_file_id = :source_file_id`, {
+  await withTransaction(async () => {
+    await run(`DELETE FROM transactions WHERE tenant_id = :tenant_id AND source_file_id = :source_file_id`, {
       tenant_id: tenantId,
       source_file_id: sourceId,
     });
 
-    run(`DELETE FROM expenses WHERE tenant_id = :tenant_id AND source_file_id = :source_file_id`, {
+    await run(`DELETE FROM expenses WHERE tenant_id = :tenant_id AND source_file_id = :source_file_id`, {
       tenant_id: tenantId,
       source_file_id: sourceId,
     });
 
-    run(`DELETE FROM source_files WHERE tenant_id = :tenant_id AND id = :id`, {
+    await run(`DELETE FROM source_files WHERE tenant_id = :tenant_id AND id = :id`, {
       tenant_id: tenantId,
       id: sourceId,
     });

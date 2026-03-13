@@ -1,5 +1,34 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { getPool, initializeDatabase } from '../src/db.mjs';
+
+const TABLES = [
+  'tenants',
+  'users',
+  'otp_codes',
+  'source_files',
+  'dataset_tables',
+  'products',
+  'branches',
+  'customers',
+  'transactions',
+  'expenses',
+  'conversations',
+  'chat_messages',
+  'conversation_agent_state',
+  'dashboards',
+  'reports',
+  'goals',
+  'audit_logs',
+];
+
+function timestampSlug(input = new Date()) {
+  return input.toISOString().replace(/[:]/g, '-').replace(/\..+/, '');
+}
+
+function safeIdentifier(value) {
+  return `"${String(value || '').replace(/"/g, '""')}"`;
+}
 
 async function pathExists(targetPath) {
   try {
@@ -10,28 +39,18 @@ async function pathExists(targetPath) {
   }
 }
 
-function timestampSlug(input = new Date()) {
-  return input.toISOString().replace(/[:]/g, '-').replace(/\..+/, '');
-}
-
-function dbSidecarTargets(dbPath) {
-  return [
-    { kind: 'main', source: dbPath, target: dbPath },
-    { kind: 'wal', source: `${dbPath}-wal`, target: `${dbPath}-wal` },
-    { kind: 'shm', source: `${dbPath}-shm`, target: `${dbPath}-shm` },
-  ];
-}
-
 export async function createBackup({
   dataDir,
-  dbPath,
   backupRootDir,
   label = 'backup',
   now = new Date(),
 } = {}) {
-  if (!dataDir || !dbPath || !backupRootDir) {
-    throw new Error('dataDir, dbPath, dan backupRootDir wajib diisi.');
+  if (!dataDir || !backupRootDir) {
+    throw new Error('dataDir dan backupRootDir wajib diisi.');
   }
+
+  await initializeDatabase();
+  const pool = getPool();
 
   const backupId = `${label}-${timestampSlug(now)}`;
   const backupDir = path.resolve(backupRootDir, backupId);
@@ -41,14 +60,12 @@ export async function createBackup({
 
   await fs.mkdir(dbDir, { recursive: true });
 
-  const copiedDbFiles = [];
-  for (const file of dbSidecarTargets(dbPath)) {
-    if (!(await pathExists(file.source))) {
-      continue;
-    }
-    const backupName = path.basename(file.source);
-    await fs.copyFile(file.source, path.join(dbDir, backupName));
-    copiedDbFiles.push({ kind: file.kind, filename: backupName });
+  const dbTables = [];
+  for (const table of TABLES) {
+    const result = await pool.query(`SELECT * FROM ${safeIdentifier(table)}`);
+    const filename = `${table}.json`;
+    await fs.writeFile(path.join(dbDir, filename), `${JSON.stringify(result.rows || [], null, 2)}\n`);
+    dbTables.push({ table, filename, rows: result.rows?.length || 0 });
   }
 
   const uploadsCopied = await pathExists(uploadsSourceDir);
@@ -60,9 +77,7 @@ export async function createBackup({
     label,
     created_at: now.toISOString(),
     data_dir: path.resolve(dataDir),
-    db_path: path.resolve(dbPath),
-    db_basename: path.basename(dbPath),
-    db_files: copiedDbFiles,
+    db_tables: dbTables,
     uploads_copied: uploadsCopied,
   };
 
@@ -77,11 +92,13 @@ export async function createBackup({
 export async function restoreBackup({
   backupDir,
   dataDir,
-  dbPath,
 } = {}) {
-  if (!backupDir || !dataDir || !dbPath) {
-    throw new Error('backupDir, dataDir, dan dbPath wajib diisi.');
+  if (!backupDir || !dataDir) {
+    throw new Error('backupDir dan dataDir wajib diisi.');
   }
+
+  await initializeDatabase();
+  const pool = getPool();
 
   const resolvedBackupDir = path.resolve(backupDir);
   const manifestPath = path.join(resolvedBackupDir, 'manifest.json');
@@ -94,30 +111,49 @@ export async function restoreBackup({
   const uploadsSourceDir = path.join(resolvedBackupDir, 'uploads');
   const uploadsTargetDir = path.join(dataDir, 'uploads');
 
-  await fs.mkdir(path.dirname(dbPath), { recursive: true });
-
-  for (const file of dbSidecarTargets(dbPath)) {
-    if (await pathExists(file.target)) {
-      await fs.rm(file.target, { force: true });
+  const client = await pool.connect();
+  let restoredTables = 0;
+  try {
+    await client.query('BEGIN');
+    for (const table of TABLES) {
+      await client.query(`TRUNCATE ${safeIdentifier(table)} CASCADE`);
     }
+
+    for (const table of TABLES) {
+      const tablePath = path.join(dbDir, `${table}.json`);
+      if (!(await pathExists(tablePath))) {
+        continue;
+      }
+      const rows = JSON.parse(await fs.readFile(tablePath, 'utf8'));
+      if (!Array.isArray(rows) || rows.length === 0) {
+        continue;
+      }
+
+      const columns = Object.keys(rows[0]);
+      if (columns.length === 0) {
+        continue;
+      }
+      const columnList = columns.map((column) => safeIdentifier(column)).join(', ');
+      const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ');
+      const insertSql = `INSERT INTO ${safeIdentifier(table)} (${columnList}) VALUES (${placeholders})`;
+
+      for (const row of rows) {
+        const values = columns.map((column) => (Object.prototype.hasOwnProperty.call(row, column) ? row[column] : null));
+        await client.query(insertSql, values);
+      }
+      restoredTables += 1;
+    }
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
   }
 
   if (await pathExists(uploadsTargetDir)) {
     await fs.rm(uploadsTargetDir, { recursive: true, force: true });
-  }
-
-  const restoredDbFiles = [];
-  for (const file of manifest.db_files || []) {
-    const sourcePath = path.join(dbDir, file.filename);
-    if (!(await pathExists(sourcePath))) {
-      continue;
-    }
-
-    const targetPath = file.kind === 'main'
-      ? dbPath
-      : `${dbPath}-${file.kind}`;
-    await fs.copyFile(sourcePath, targetPath);
-    restoredDbFiles.push(path.basename(targetPath));
   }
 
   const restoredUploads = await pathExists(uploadsSourceDir);
@@ -126,7 +162,7 @@ export async function restoreBackup({
   }
 
   return {
-    restoredDbFiles,
+    restoredTables,
     restoredUploads,
     manifest,
   };

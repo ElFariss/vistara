@@ -132,7 +132,12 @@ function serveStatic(pathname, res) {
   res.end(content);
 }
 
-initializeDatabase();
+try {
+  await initializeDatabase();
+} catch (error) {
+  logger.error('database_init_failed', { error: error.message });
+  process.exit(1);
+}
 
 const server = http.createServer(async (req, res) => {
   const started = Date.now();
@@ -205,7 +210,7 @@ const server = http.createServer(async (req, res) => {
   };
 
   if (route.auth) {
-    const user = authenticateRequest(req);
+    const user = await authenticateRequest(req);
     if (!user) {
       return sendError(res, 401, 'UNAUTHORIZED', 'Token tidak valid atau kadaluwarsa.');
     }
@@ -289,7 +294,7 @@ listenWithRetry(config.port).catch((error) => {
   process.exit(1);
 });
 
-function shutdown(signal) {
+async function shutdown(signal) {
   if (shuttingDown) {
     return;
   }
@@ -302,26 +307,25 @@ function shutdown(signal) {
   }, 10000);
   forceTimer.unref();
 
-  server.close((error) => {
+  try {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
+    });
+    await closeDatabase();
     clearTimeout(forceTimer);
-
-    if (error) {
-      logger.error('server_shutdown_failed', { signal, error: error.message });
-      process.exit(1);
-      return;
-    }
-
-    try {
-      closeDatabase();
-    } catch (closeError) {
-      logger.error('database_close_failed', { signal, error: closeError.message });
-      process.exit(1);
-      return;
-    }
-
     logger.info('server_shutdown_complete', { signal });
     process.exit(0);
-  });
+  } catch (error) {
+    clearTimeout(forceTimer);
+    logger.error('server_shutdown_failed', { signal, error: error.message });
+    process.exit(1);
+  }
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

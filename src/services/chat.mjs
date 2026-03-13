@@ -1,7 +1,7 @@
 import { all, get, run } from '../db.mjs';
 import { generateId } from '../utils/ids.mjs';
 import { executeAnalyticsIntent } from './queryEngine.mjs';
-import { getDashboard, getLatestDashboard } from './dashboards.mjs';
+import { getDashboard, getLatestDashboard, getLatestDashboardForConversation } from './dashboards.mjs';
 import { config } from '../config.mjs';
 import { Prompts } from './agents/index.mjs';
 import { generateReport } from './reports.mjs';
@@ -210,9 +210,9 @@ function buildConversationTitle(input) {
   return `${normalized.slice(0, AUTO_TITLE_MAX_LENGTH - 1).trimEnd()}…`;
 }
 
-function ensureConversation(tenantId, userId, conversationId = null) {
+async function ensureConversation(tenantId, userId, conversationId = null) {
   if (conversationId) {
-    const existing = get(
+    const existing = await get(
       `
         SELECT * FROM conversations
         WHERE id = :id AND tenant_id = :tenant_id AND user_id = :user_id
@@ -227,22 +227,18 @@ function ensureConversation(tenantId, userId, conversationId = null) {
     throw new ConversationNotFoundError(conversationId);
   }
 
-  const latest = get(
+  const latest = await get(
     `
       SELECT c.*
       FROM conversations c
+      LEFT JOIN (
+        SELECT conversation_id, MAX(created_at) AS last_message_at
+        FROM chat_messages
+        GROUP BY conversation_id
+      ) lm ON lm.conversation_id = c.id
       WHERE c.tenant_id = :tenant_id
         AND c.user_id = :user_id
-      ORDER BY COALESCE(
-        (
-          SELECT m.created_at
-          FROM chat_messages m
-          WHERE m.conversation_id = c.id
-          ORDER BY m.created_at DESC
-          LIMIT 1
-        ),
-        c.created_at
-      ) DESC,
+      ORDER BY COALESCE(lm.last_message_at, c.created_at) DESC,
       c.created_at DESC
       LIMIT 1
     `,
@@ -257,7 +253,7 @@ function ensureConversation(tenantId, userId, conversationId = null) {
   }
 
   const id = generateId();
-  run(
+  await run(
     `
       INSERT INTO conversations (id, tenant_id, user_id, title, created_at)
       VALUES (:id, :tenant_id, :user_id, :title, :created_at)
@@ -277,8 +273,8 @@ function ensureConversation(tenantId, userId, conversationId = null) {
   );
 }
 
-function touchConversation(tenantId, userId, conversationId) {
-  const conversation = get(
+async function touchConversation(tenantId, userId, conversationId) {
+  const conversation = await get(
     `
       SELECT c.id, c.title, c.created_at
       FROM conversations c
@@ -298,7 +294,7 @@ function touchConversation(tenantId, userId, conversationId) {
 
   return {
     ...conversation,
-    last_message_at: get(
+    last_message_at: (await get(
       `
         SELECT created_at
         FROM chat_messages
@@ -307,13 +303,13 @@ function touchConversation(tenantId, userId, conversationId) {
         LIMIT 1
       `,
       { conversation_id: conversationId },
-    )?.created_at || conversation.created_at,
+    ))?.created_at || conversation.created_at,
   };
 }
 
-function createMessage({ conversationId, tenantId, userId, role, content, payload = null }) {
+async function createMessage({ conversationId, tenantId, userId, role, content, payload = null }) {
   const id = generateId();
-  run(
+  await run(
     `
       INSERT INTO chat_messages (id, conversation_id, tenant_id, user_id, role, content, payload_json, created_at)
       VALUES (:id, :conversation_id, :tenant_id, :user_id, :role, :content, :payload_json, :created_at)
@@ -333,13 +329,13 @@ function createMessage({ conversationId, tenantId, userId, role, content, payloa
   return id;
 }
 
-function persistAssistantMessage({
+async function persistAssistantMessage({
   conversationId,
   tenantId,
   content,
   payload,
 }) {
-  createMessage({
+  await createMessage({
     conversationId,
     tenantId,
     userId: null,
@@ -349,7 +345,7 @@ function persistAssistantMessage({
   });
 }
 
-function persistAssistantErrorMessage({
+async function persistAssistantErrorMessage({
   conversationId,
   tenantId,
   error,
@@ -370,7 +366,7 @@ function persistAssistantErrorMessage({
     },
   };
 
-  createMessage({
+  await createMessage({
     conversationId,
     tenantId,
     userId: null,
@@ -394,8 +390,8 @@ function attachConversationContext(error, conversationId) {
   return error;
 }
 
-function maybeAutoTitleConversation({ tenantId, userId, conversationId, message }) {
-  const conversation = get(
+async function maybeAutoTitleConversation({ tenantId, userId, conversationId, message }) {
+  const conversation = await get(
     `
       SELECT id, title
       FROM conversations
@@ -413,7 +409,7 @@ function maybeAutoTitleConversation({ tenantId, userId, conversationId, message 
     return conversation;
   }
 
-  const userMessageCount = get(
+  const userMessageCount = await get(
     `
       SELECT COUNT(*) AS value
       FROM chat_messages
@@ -432,7 +428,7 @@ function maybeAutoTitleConversation({ tenantId, userId, conversationId, message 
   }
 
   const nextTitle = buildConversationTitle(message);
-  run(
+  await run(
     `
       UPDATE conversations
       SET title = :title
@@ -461,8 +457,8 @@ function maybeAutoTitleConversation({ tenantId, userId, conversationId, message 
   );
 }
 
-function getConversationWithStats(tenantId, userId, conversationId) {
-  const conversation = get(
+async function getConversationWithStats(tenantId, userId, conversationId) {
+  const conversation = await get(
     `
       SELECT c.id, c.title, c.created_at
       FROM conversations c
@@ -480,7 +476,7 @@ function getConversationWithStats(tenantId, userId, conversationId) {
     return null;
   }
 
-  const lastMessage = get(
+  const lastMessage = await get(
     `
       SELECT role, content, created_at
       FROM chat_messages
@@ -491,7 +487,7 @@ function getConversationWithStats(tenantId, userId, conversationId) {
     { conversation_id: conversationId },
   );
 
-  const messageCount = get(
+  const messageCount = await get(
     `
       SELECT COUNT(*) AS value
       FROM chat_messages
@@ -510,8 +506,8 @@ function getConversationWithStats(tenantId, userId, conversationId) {
   };
 }
 
-function historyForConversation(tenantId, userId, conversationId, limit = 50) {
-  return all(
+async function historyForConversation(tenantId, userId, conversationId, limit = 50) {
+  return (await all(
     `
       SELECT id, role, content, payload_json, feedback, created_at
       FROM chat_messages
@@ -527,7 +523,7 @@ function historyForConversation(tenantId, userId, conversationId, limit = 50) {
       user_id: userId,
       limit,
     },
-  ).map((item) => ({
+  )).map((item) => ({
     ...item,
     payload: item.payload_json ? JSON.parse(item.payload_json) : null,
   }));
@@ -584,8 +580,8 @@ function isComplexDashboardRequest(message, intent) {
   return false;
 }
 
-function hasDataset(tenantId) {
-  const readySource = get(
+async function hasDataset(tenantId) {
+  const readySource = await get(
     `
       SELECT id, row_count
       FROM source_files
@@ -601,11 +597,11 @@ function hasDataset(tenantId) {
     return true;
   }
 
-  const txCount = get(`SELECT COUNT(*) AS value FROM transactions WHERE tenant_id = :tenant_id`, {
+  const txCount = await get(`SELECT COUNT(*) AS value FROM transactions WHERE tenant_id = :tenant_id`, {
     tenant_id: tenantId,
   }) || { value: 0 };
 
-  const expenseCount = get(`SELECT COUNT(*) AS value FROM expenses WHERE tenant_id = :tenant_id`, {
+  const expenseCount = await get(`SELECT COUNT(*) AS value FROM expenses WHERE tenant_id = :tenant_id`, {
     tenant_id: tenantId,
   }) || { value: 0 };
 
@@ -657,11 +653,11 @@ function widgetsToArtifacts(widgets = []) {
     .filter(Boolean);
 }
 
-function lookupUserDisplayName(tenantId, userId) {
+async function lookupUserDisplayName(tenantId, userId) {
   if (!tenantId || !userId) {
     return null;
   }
-  const row = get(
+  const row = await get(
     `
       SELECT name
       FROM users
@@ -783,31 +779,31 @@ export async function processChatMessage({
   dashboardId,
   stream = null,
 }) {
-  let conversation = ensureConversation(tenantId, userId, conversationId);
-  createMessage({
+  let conversation = await ensureConversation(tenantId, userId, conversationId);
+  await createMessage({
     conversationId: conversation.id,
     tenantId,
     userId,
     role: 'user',
     content: message,
   });
-  conversation = maybeAutoTitleConversation({
+  conversation = (await maybeAutoTitleConversation({
     tenantId,
     userId,
     conversationId: conversation.id,
     message,
-  }) || conversation;
+  })) || conversation;
 
-  const history = historyForConversation(tenantId, userId, conversation.id, 12).map((item) => ({
+  const history = (await historyForConversation(tenantId, userId, conversation.id, 12)).map((item) => ({
     role: item.role,
     content: item.content,
   }));
 
-  const datasetReady = hasDataset(tenantId);
-  const userDisplayName = lookupUserDisplayName(tenantId, userId);
+  const datasetReady = await hasDataset(tenantId);
+  const userDisplayName = await lookupUserDisplayName(tenantId, userId);
   const savedDashboard = dashboardId
-    ? getDashboard(tenantId, userId, dashboardId)
-    : getLatestDashboard(tenantId, userId);
+    ? await getDashboard(tenantId, userId, dashboardId)
+    : await getLatestDashboardForConversation(tenantId, userId, conversation.id);
 
   let responsePayload = null;
   const bufferedStream = createBufferedTimelineStream(stream);
@@ -829,7 +825,7 @@ export async function processChatMessage({
     const fallbackIntent = error instanceof ConversationAgentError
       ? { intent: 'conversation', nlu_source: 'atlas_gemini' }
       : null;
-    persistAssistantErrorMessage({
+    await persistAssistantErrorMessage({
       conversationId: conversation.id,
       tenantId,
       error,
@@ -840,7 +836,7 @@ export async function processChatMessage({
     bufferedStream.finalize();
   }
 
-  persistAssistantMessage({
+  await persistAssistantMessage({
     conversationId: conversation.id,
     tenantId,
     content: responsePayload.answer,
@@ -866,22 +862,22 @@ export async function processChatMessage({
 
   return {
     conversation_id: conversation.id,
-    conversation: getConversationWithStats(tenantId, userId, conversation.id),
+    conversation: await getConversationWithStats(tenantId, userId, conversation.id),
     ...responsePayload,
   };
 }
 
-export function getChatHistory({ tenantId, userId, conversationId = null }) {
-  const convo = ensureConversation(tenantId, userId, conversationId);
-  const agentState = getConversationAgentState({
+export async function getChatHistory({ tenantId, userId, conversationId = null }) {
+  const convo = await ensureConversation(tenantId, userId, conversationId);
+  const agentState = await getConversationAgentState({
     tenantId,
     userId,
     conversationId: convo.id,
   });
   return {
     conversation_id: convo.id,
-    conversation: getConversationWithStats(tenantId, userId, convo.id),
-    messages: historyForConversation(tenantId, userId, convo.id, 200),
+    conversation: await getConversationWithStats(tenantId, userId, convo.id),
+    messages: await historyForConversation(tenantId, userId, convo.id, 200),
     agent_state: agentState,
   };
 }
@@ -893,7 +889,7 @@ export async function processConversationApproval({
   approvalId,
   decision,
 }) {
-  const conversation = ensureConversation(tenantId, userId, conversationId);
+  const conversation = await ensureConversation(tenantId, userId, conversationId);
   const responsePayload = await applyConversationApproval({
     tenantId,
     userId,
@@ -902,7 +898,7 @@ export async function processConversationApproval({
     decision,
   });
 
-  persistAssistantMessage({
+  await persistAssistantMessage({
     conversationId: conversation.id,
     tenantId,
     content: responsePayload.answer,
@@ -911,58 +907,46 @@ export async function processConversationApproval({
 
   return {
     conversation_id: conversation.id,
-    conversation: getConversationWithStats(tenantId, userId, conversation.id),
+    conversation: await getConversationWithStats(tenantId, userId, conversation.id),
     ...responsePayload,
   };
 }
 
 
-export function listChatConversations({ tenantId, userId, limit = 100 }) {
-  return all(
+export async function listChatConversations({ tenantId, userId, limit = 100 }) {
+  return (await all(
     `
       SELECT
         c.id,
         c.title,
         c.created_at,
-        COALESCE(
-          (
-            SELECT m.created_at
-            FROM chat_messages m
-            WHERE m.conversation_id = c.id
-            ORDER BY m.created_at DESC
-            LIMIT 1
-          ),
-          c.created_at
-        ) AS last_message_at,
-        COALESCE(
-          (
-            SELECT m.content
-            FROM chat_messages m
-            WHERE m.conversation_id = c.id
-            ORDER BY m.created_at DESC
-            LIMIT 1
-          ),
-          ''
-        ) AS last_message_preview,
-        COALESCE(
-          (
-            SELECT m.role
-            FROM chat_messages m
-            WHERE m.conversation_id = c.id
-            ORDER BY m.created_at DESC
-            LIMIT 1
-          ),
-          NULL
-        ) AS last_message_role,
-        (
-          SELECT COUNT(*)
-          FROM chat_messages m
-          WHERE m.conversation_id = c.id
-        ) AS message_count
+        COALESCE(lm.last_message_at, c.created_at) AS last_message_at,
+        COALESCE(lmd.content, '') AS last_message_preview,
+        lmd.role AS last_message_role,
+        COALESCE(cnt.message_count, 0) AS message_count
       FROM conversations c
+      LEFT JOIN (
+        SELECT conversation_id, MAX(created_at) AS last_message_at
+        FROM chat_messages
+        GROUP BY conversation_id
+      ) lm ON lm.conversation_id = c.id
+      LEFT JOIN (
+        SELECT m.conversation_id, m.content, m.role, m.created_at
+        FROM chat_messages m
+        JOIN (
+          SELECT conversation_id, MAX(created_at) AS last_message_at
+          FROM chat_messages
+          GROUP BY conversation_id
+        ) lm2 ON lm2.conversation_id = m.conversation_id AND lm2.last_message_at = m.created_at
+      ) lmd ON lmd.conversation_id = c.id
+      LEFT JOIN (
+        SELECT conversation_id, COUNT(*) AS message_count
+        FROM chat_messages
+        GROUP BY conversation_id
+      ) cnt ON cnt.conversation_id = c.id
       WHERE c.tenant_id = :tenant_id
         AND c.user_id = :user_id
-      ORDER BY datetime(last_message_at) DESC, datetime(c.created_at) DESC
+      ORDER BY last_message_at DESC, c.created_at DESC
       LIMIT :limit
     `,
     {
@@ -970,7 +954,7 @@ export function listChatConversations({ tenantId, userId, limit = 100 }) {
       user_id: userId,
       limit,
     },
-  ).map((item) => ({
+  )).map((item) => ({
     ...item,
     title: String(item.title || '').trim() || DEFAULT_CONVERSATION_TITLE,
     message_count: Number(item.message_count || 0),
@@ -978,10 +962,10 @@ export function listChatConversations({ tenantId, userId, limit = 100 }) {
   }));
 }
 
-export function createConversation({ tenantId, userId, title = null }) {
+export async function createConversation({ tenantId, userId, title = null }) {
   const id = generateId();
   const createdAt = new Date().toISOString();
-  run(
+  await run(
     `
       INSERT INTO conversations (id, tenant_id, user_id, title, created_at)
       VALUES (:id, :tenant_id, :user_id, :title, :created_at)
@@ -995,7 +979,7 @@ export function createConversation({ tenantId, userId, title = null }) {
     },
   );
 
-  const conversation = get(
+  const conversation = await get(
     `
       SELECT *
       FROM conversations
@@ -1011,7 +995,7 @@ export function createConversation({ tenantId, userId, title = null }) {
   const nextTitle = String(title || '').trim();
 
   if (nextTitle) {
-    run(
+    await run(
       `
         UPDATE conversations
         SET title = :title
@@ -1026,7 +1010,7 @@ export function createConversation({ tenantId, userId, title = null }) {
     );
   }
 
-  const created = getConversationWithStats(tenantId, userId, conversation.id);
+  const created = await getConversationWithStats(tenantId, userId, conversation.id);
   logAudit({
     tenantId,
     userId,
@@ -1038,14 +1022,14 @@ export function createConversation({ tenantId, userId, title = null }) {
   return created;
 }
 
-export function renameConversation({ tenantId, userId, conversationId, title }) {
-  const existing = getConversationWithStats(tenantId, userId, conversationId);
+export async function renameConversation({ tenantId, userId, conversationId, title }) {
+  const existing = await getConversationWithStats(tenantId, userId, conversationId);
   if (!existing) {
     return null;
   }
 
   const nextTitle = buildConversationTitle(title);
-  run(
+  await run(
     `
       UPDATE conversations
       SET title = :title
@@ -1071,13 +1055,26 @@ export function renameConversation({ tenantId, userId, conversationId, title }) 
   return getConversationWithStats(tenantId, userId, conversationId);
 }
 
-export function deleteConversation({ tenantId, userId, conversationId }) {
-  const existing = getConversationWithStats(tenantId, userId, conversationId);
+export async function deleteConversation({ tenantId, userId, conversationId }) {
+  const existing = await getConversationWithStats(tenantId, userId, conversationId);
   if (!existing) {
     return false;
   }
 
-  run(
+  // Delete dashboards tied to this conversation
+  await run(
+    `
+      DELETE FROM dashboards
+      WHERE conversation_id = :conversation_id AND tenant_id = :tenant_id AND user_id = :user_id
+    `,
+    {
+      conversation_id: conversationId,
+      tenant_id: tenantId,
+      user_id: userId,
+    },
+  );
+
+  await run(
     `
       DELETE FROM conversations
       WHERE id = :id AND tenant_id = :tenant_id AND user_id = :user_id
@@ -1101,8 +1098,8 @@ export function deleteConversation({ tenantId, userId, conversationId }) {
   return true;
 }
 
-export function setChatFeedback({ tenantId, userId, messageId, feedback }) {
-  const target = get(
+export async function setChatFeedback({ tenantId, userId, messageId, feedback }) {
+  const target = await get(
     `
       SELECT id
       FROM chat_messages
@@ -1115,7 +1112,7 @@ export function setChatFeedback({ tenantId, userId, messageId, feedback }) {
     return false;
   }
 
-  run(
+  await run(
     `
       UPDATE chat_messages
       SET feedback = :feedback

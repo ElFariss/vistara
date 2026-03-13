@@ -1,10 +1,11 @@
 import { generateId } from '../utils/ids.mjs';
 import { parseIndonesianNumber } from '../utils/parse.mjs';
-import { executeAnalyticsIntent, executeBuilderQuery, getBuilderSchema } from './queryEngine.mjs';
+import { executeAnalyticsIntent, executeBuilderQuery, getDefaultBuilderSchema } from './queryEngine.mjs';
 import { getDashboard, getLatestDashboard } from './dashboards.mjs';
 import { runPythonSnippet } from './pythonRuntime.mjs';
 import { generateJsonWithGeminiMedia, generateWithGeminiTools } from './gemini.mjs';
 import { renderDashboardPng } from './dashboardImage.mjs';
+import { config } from '../config.mjs';
 import {
   DASHBOARD_GRID_COLS,
   DASHBOARD_GRID_ROWS,
@@ -39,6 +40,7 @@ const MIN_REVIEW_PASSES = 2;
 const MAX_REVIEW_PASSES = 3;
 const MAX_ADDITIONAL_WIDGETS_FOR_COVERAGE = 2;
 const MAX_COVERAGE_REPAIR_PASSES = 3;
+const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=';
 
 const COMPLEX_TEMPLATE_COMPONENTS = [
   { type: 'MetricCard', title: 'Omzet', metric: 'revenue' },
@@ -77,6 +79,11 @@ const ANALYST_TOOL_DECLARATIONS = [
         headline: { type: 'string' },
         business_goal: { type: 'string' },
         time_scope: { type: 'string' },
+        recommended_candidates: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Candidate IDs that should be prioritized for widget creation.',
+        },
         findings: {
           type: 'array',
           items: {
@@ -390,14 +397,14 @@ function normalizeLimit(limit, fallback = 8, max = 50) {
   return Math.min(parsed, max);
 }
 
-function dashboardFromContext(tenantId, userId, dashboardId = null) {
+async function dashboardFromContext(tenantId, userId, dashboardId = null) {
   if (dashboardId) {
-    const specific = getDashboard(tenantId, userId, dashboardId);
+    const specific = await getDashboard(tenantId, userId, dashboardId);
     if (specific) {
       return specific;
     }
   }
-  const latest = getLatestDashboard(tenantId, userId);
+  const latest = await getLatestDashboard(tenantId, userId);
   if (latest) {
     return latest;
   }
@@ -422,7 +429,7 @@ function normalizeScope(intent = {}) {
   };
 }
 
-const BUILDER_SCHEMA = getBuilderSchema();
+const BUILDER_SCHEMA = getDefaultBuilderSchema();
 const BUILDER_DATASETS = Array.isArray(BUILDER_SCHEMA?.datasets) ? BUILDER_SCHEMA.datasets : [];
 
 function datasetSpec(datasetId = 'transactions') {
@@ -1730,7 +1737,7 @@ async function fetchAdditionalCoverageWidgets({
       agent: 'analyst',
     });
 
-    const execution = executeToolCall({ tenantId, userId, call });
+    const execution = await executeToolCall({ tenantId, userId, call });
     const artifact = (execution.artifacts || []).find((item) => !artifactLooksEmpty(item));
     if (!artifact) {
       emitTimelineEvent(hooks, {
@@ -1998,9 +2005,9 @@ function mergeWithComplexDefaults(components) {
   return [...map.values()].slice(0, MAX_WIDGETS);
 }
 
-function executeToolCall({ tenantId, userId, call }) {
+async function executeToolCall({ tenantId, userId, call }) {
   if (call.tool === 'query_builder') {
-    const result = executeBuilderQuery({
+    const result = await executeBuilderQuery({
       tenantId,
       userId,
       query: call.args,
@@ -2015,7 +2022,7 @@ function executeToolCall({ tenantId, userId, call }) {
     };
   }
 
-  const analytics = executeAnalyticsIntent({
+  const analytics = await executeAnalyticsIntent({
     tenantId,
     userId,
     intent: call.args,
@@ -2222,11 +2229,16 @@ function buildDeterministicAnalysisBrief({ goal, scope, candidates = [] }) {
     recommended_visual: recommendedVisualForArtifact(candidate.artifact),
     priority: inferPriorityForArtifact(candidate.artifact, index),
   }));
+  const recommendedCandidates = findings
+    .map((finding) => safeText(finding.candidate_id || '', '', 64))
+    .filter(Boolean)
+    .slice(0, 4);
 
   return {
     headline: findings[0]?.insight || 'Belum ada temuan dashboard yang cukup kuat.',
     business_goal: safeText(goal || 'Dashboard bisnis', 'Dashboard bisnis', 140),
     time_scope: safeText(scope?.time_period || '30 hari terakhir', '30 hari terakhir', 64),
+    recommended_candidates: recommendedCandidates,
     findings,
   };
 }
@@ -2249,7 +2261,7 @@ async function runAnalystAgent({ tenantId, userId, goal, scope, components, trac
     if (!call) {
       continue;
     }
-    const execution = executeToolCall({ tenantId, userId, call });
+    const execution = await executeToolCall({ tenantId, userId, call });
     const artifact = (execution.artifacts || []).find((item) => !artifactLooksEmpty(item));
     if (!artifact) {
       continue;
@@ -2368,12 +2380,24 @@ async function runAnalystAgent({ tenantId, userId, goal, scope, components, trac
     })
     .filter(Boolean)
     .slice(0, 6);
+  const rawRecommended = Array.isArray(payload?.recommended_candidates) ? payload.recommended_candidates : [];
+  const normalizedRecommended = rawRecommended
+    .map((value) => safeText(value || '', '', 64))
+    .filter(Boolean)
+    .map((candidateId) => (candidateMap.has(candidateId) ? candidateId : null))
+    .filter(Boolean);
+  const fallbackRecommended = normalizedFindings
+    .map((finding) => safeText(finding.candidate_id || '', '', 64))
+    .filter(Boolean)
+    .slice(0, 4);
+  const recommendedCandidates = normalizedRecommended.length > 0 ? normalizedRecommended : fallbackRecommended;
 
   const brief = normalizedFindings.length > 0
     ? {
         headline: safeText(payload?.headline || normalizedFindings[0]?.insight || fallbackBrief.headline, fallbackBrief.headline, 220),
         business_goal: safeText(payload?.business_goal || goal || fallbackBrief.business_goal, fallbackBrief.business_goal, 180),
         time_scope: safeText(payload?.time_scope || scope?.time_period || fallbackBrief.time_scope, fallbackBrief.time_scope, 64),
+        recommended_candidates: recommendedCandidates,
         findings: normalizedFindings,
       }
     : fallbackBrief;
@@ -2409,11 +2433,22 @@ function selectComponentsFromAnalystBrief(components = [], analyst = null) {
       .map((candidate) => [candidate.candidate_id, candidate.component]),
   );
 
-  const selected = findings
+  const recommended = Array.isArray(analyst?.brief?.recommended_candidates)
+    ? analyst.brief.recommended_candidates.map((value) => safeText(value || '', '', 64)).filter(Boolean)
+    : [];
+  const recommendedComponents = recommended
+    .map((candidateId) => componentMap.get(candidateId))
+    .filter(Boolean);
+
+  const selectedFromFindings = findings
     .map((finding) => componentMap.get(finding.candidate_id))
     .filter(Boolean);
 
-  return selected.length > 0 ? dedupeComponents(selected).slice(0, MAX_WIDGETS) : components;
+  const combined = recommendedComponents.length > 0
+    ? [...recommendedComponents, ...selectedFromFindings]
+    : selectedFromFindings;
+
+  return combined.length > 0 ? dedupeComponents(combined).slice(0, MAX_WIDGETS) : components;
 }
 
 function supportingTemplateIdsFromAnalystBrief(analysisBrief = null) {
@@ -2734,7 +2769,7 @@ async function runPlannerAgent({ goal, scope, components, analysisBrief = null, 
   };
 }
 
-function runTemplateComponentsDeterministic({ tenantId, userId, components, scope, analysisBrief = null, trace, hooks = null }) {
+async function runTemplateComponentsDeterministic({ tenantId, userId, components, scope, analysisBrief = null, trace, hooks = null }) {
   const calls = [];
   const artifactGroups = [];
   let adjustedPeriodCount = 0;
@@ -2752,7 +2787,7 @@ function runTemplateComponentsDeterministic({ tenantId, userId, components, scop
       agent: 'worker',
     });
 
-    const execution = executeToolCall({ tenantId, userId, call });
+    const execution = await executeToolCall({ tenantId, userId, call });
     calls.push({
       tool: call.tool,
       source: call.source,
@@ -2846,6 +2881,7 @@ async function runWorkerAgentWithGemini({
       available_components: componentCatalog(components),
       eda_profile: edaProfile,
       execution_history: compactToolHistory(toolHistory),
+      tooling_reminder: 'Wajib gunakan tool call untuk setiap langkah. Jangan mengirim jawaban tanpa tool. Akhiri dengan finalize_dashboard saat widget cukup.',
       required: {
         use_tools: true,
         max_widgets: MAX_WIDGETS,
@@ -3043,7 +3079,7 @@ async function runWorkerAgentWithGemini({
       agent: 'worker',
     });
 
-    const execution = executeToolCall({
+    const execution = await executeToolCall({
       tenantId,
       userId,
       call: normalizedCall,
@@ -3598,11 +3634,18 @@ function normalizeReviewResult(raw) {
 }
 
 async function buildVisualReviewerInput({ widgets = [], goal = '', scope = {}, artifacts = [] }) {
-  const rendered = renderDashboardPng({
-    widgets,
-    stackPages: true,
-    title: goal || 'Dashboard Vistara',
-  });
+  const usePlaceholder = config.env === 'test';
+  const rendered = usePlaceholder
+    ? {
+        buffer: Buffer.from(TINY_PNG_BASE64, 'base64'),
+        width: 1,
+        height: 1,
+      }
+    : renderDashboardPng({
+        widgets,
+        stackPages: true,
+        title: goal || 'Dashboard Vistara',
+      });
   return {
     inlineFile: {
       mimeType: 'image/png',
@@ -3665,6 +3708,7 @@ async function runArgusAgent({
       },
       artifacts: compactArtifacts(artifacts),
       python_result: pythonResult,
+      output_rules: 'Jawab hanya JSON object tanpa markdown. Isi verdict, completeness_pct, summary. Sertakan issues dan directives bila perlu.',
       required_shape: {
         verdict: 'pass | needs_revision | fail',
         completeness_pct: 'number 0-100',
@@ -3781,7 +3825,7 @@ export async function runDashboardAgent({
     steps: [],
   };
 
-  const dashboard = inputDashboard || dashboardFromContext(tenantId, userId, dashboardId);
+  const dashboard = inputDashboard || await dashboardFromContext(tenantId, userId, dashboardId);
   const baseComponents = normalizeTemplateComponents(dashboard);
   const components = isFullDashboardGoal(goal, routingScope) ? mergeWithComplexDefaults(baseComponents) : baseComponents;
   const templateStepId = `template_${Date.now()}`;
@@ -4026,7 +4070,7 @@ export async function runDashboardAgent({
   }) || worker.summary || 'Dashboard siap ditinjau di canvas.';
 
   if (argusNeedsAttention) {
-    baseAnswer = `${baseAnswer}\n\n> ⚠️ **Argus** telah melihat beberapa area yang bisa diperbaiki. Draft terbaik ditampilkan sementara.`;
+    baseAnswer = `${baseAnswer}\n\nPerlu dirapikan sebelum dianggap final.\n\n> ⚠️ **Argus** telah melihat beberapa area yang bisa diperbaiki. Draft terbaik ditampilkan sementara.`;
   }
 
   emitDashboardPatch(hooks, {
@@ -4041,6 +4085,12 @@ export async function runDashboardAgent({
     })),
     page_count: reviewedDraft.pageCount || 1,
   });
+
+  const argusMeta = {
+    ok: argusResult?.ok || false,
+    source: argusResult?.source || 'not_run',
+    requires_attention: argusNeedsAttention,
+  };
 
   return {
     answer: baseAnswer,
@@ -4075,11 +4125,8 @@ export async function runDashboardAgent({
         pages: reviewedDraft.pageCount || worker.pageCount || 0,
       },
       argus: argusResult?.result || null,
-      argus_meta: {
-        ok: argusResult?.ok || false,
-        source: argusResult?.source || 'not_run',
-        requires_attention: argusNeedsAttention,
-      },
+      argus_meta: argusMeta,
+      reviewer_meta: argusMeta,
       python_tool: {
         ok: argusResult?.python?.ok || false,
         reason: argusResult?.python?.reason || 'not_used',

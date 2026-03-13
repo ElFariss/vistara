@@ -837,7 +837,7 @@ export async function runConversationAgent({
 }) {
   const trace = [];
   const runId = generateId();
-  let agentState = ensureConversationAgentState({ tenantId, userId, conversationId });
+  let agentState = await ensureConversationAgentState({ tenantId, userId, conversationId });
   let effectiveMessage = message;
   let resolvedSavedDashboard = savedDashboard;
   let route = null;
@@ -848,7 +848,7 @@ export async function runConversationAgent({
     agent: TEAM.surface,
     title: 'Vira membaca permintaan Anda',
   });
-  updateConversationAgentState({
+  await updateConversationAgentState({
     tenantId,
     userId,
     conversationId,
@@ -865,7 +865,7 @@ export async function runConversationAgent({
   if (datasetReady && !datasetProfile) {
     try {
       datasetProfile = await getDatasetProfile(tenantId);
-      agentState = updateConversationAgentState({
+      agentState = await updateConversationAgentState({
         tenantId,
         userId,
         conversationId,
@@ -880,7 +880,7 @@ export async function runConversationAgent({
   if (pendingChoice) {
     const choice = dashboardChoiceFromMessage(message);
     if (!choice) {
-      const nextState = updateConversationAgentState({
+      const nextState = await updateConversationAgentState({
         tenantId,
         userId,
         conversationId,
@@ -917,7 +917,7 @@ export async function runConversationAgent({
       };
     }
 
-    agentState = updateConversationAgentState({
+    agentState = await updateConversationAgentState({
       tenantId,
       userId,
       conversationId,
@@ -969,7 +969,7 @@ export async function runConversationAgent({
       routeReason: 'Dataset belum tersedia, jadi arahkan user untuk menambahkan data terlebih dulu.',
     });
 
-    const nextState = updateConversationAgentState({
+    const nextState = await updateConversationAgentState({
       tenantId,
       userId,
       conversationId,
@@ -1004,7 +1004,7 @@ export async function runConversationAgent({
   }
 
   if (!resolvedDashboardChoice && shouldAskDashboardChoice({ route, agentState, savedDashboard: resolvedSavedDashboard })) {
-    agentState = updateConversationAgentState({
+    agentState = await updateConversationAgentState({
       tenantId,
       userId,
       conversationId,
@@ -1056,7 +1056,7 @@ export async function runConversationAgent({
       routeReason: route.reason,
     });
 
-    mergeConversationAgentMemory({
+    await mergeConversationAgentMemory({
       tenantId,
       userId,
       conversationId,
@@ -1068,7 +1068,7 @@ export async function runConversationAgent({
         },
       },
     });
-    const nextState = updateConversationAgentState({
+    const nextState = await updateConversationAgentState({
       tenantId,
       userId,
       conversationId,
@@ -1111,7 +1111,7 @@ export async function runConversationAgent({
     });
 
     const inspection = await inspectDatasetQuestion({ tenantId, message });
-    const nextState = updateConversationAgentState({
+    const nextState = await updateConversationAgentState({
       tenantId,
       userId,
       conversationId,
@@ -1163,13 +1163,13 @@ export async function runConversationAgent({
       datasetProfile,
       dashboardContext: buildDashboardContext(agentState, resolvedSavedDashboard),
     });
-    const analytics = executeAnalyticsIntent({
+    const analytics = await executeAnalyticsIntent({
       tenantId,
       userId,
       intent: analysisIntent,
     });
 
-    mergeConversationAgentMemory({
+    await mergeConversationAgentMemory({
       tenantId,
       userId,
       conversationId,
@@ -1185,7 +1185,7 @@ export async function runConversationAgent({
       },
     });
 
-    const nextState = updateConversationAgentState({
+    const nextState = await updateConversationAgentState({
       tenantId,
       userId,
       conversationId,
@@ -1228,7 +1228,7 @@ export async function runConversationAgent({
         created_at: new Date().toISOString(),
         message_context: message,
       };
-      const nextState = updateConversationAgentState({
+      const nextState = await updateConversationAgentState({
         tenantId,
         userId,
         conversationId,
@@ -1267,11 +1267,12 @@ export async function runConversationAgent({
 
     let baseDashboard = runDashboardBaseFromState(agentState, resolvedSavedDashboard);
     if (route.action === 'create_dashboard' && (!baseDashboard || hasMeaningfulDashboardContext(agentState, resolvedSavedDashboard))) {
-      baseDashboard = createDashboard(
+      baseDashboard = await createDashboard(
         tenantId,
         userId,
         dashboardShellName(effectiveMessage),
         emptyDashboardShellConfig(),
+        { conversationId },
       );
       resolvedSavedDashboard = baseDashboard;
     }
@@ -1280,7 +1281,7 @@ export async function runConversationAgent({
       agent: TEAM.creator,
       title: 'Citra mulai menyusun draft dashboard',
     });
-    updateConversationAgentState({
+    await updateConversationAgentState({
       tenantId,
       userId,
       conversationId,
@@ -1308,7 +1309,7 @@ export async function runConversationAgent({
       },
       hooks: {
         onTimelineEvent: hooks?.onTimelineEvent,
-        onDashboardPatch: (patch) => {
+        onDashboardPatch: async (patch) => {
           latestDraft = buildDraftDashboardPayload({
             widgets: patch.widgets,
             artifacts: patch.artifacts,
@@ -1319,7 +1320,7 @@ export async function runConversationAgent({
             savedDashboardId: baseDashboard?.id || null,
             analysisBrief: patch.analysis_brief || null,
           });
-          updateConversationAgentState({
+          await updateConversationAgentState({
             tenantId,
             userId,
             conversationId,
@@ -1352,7 +1353,7 @@ export async function runConversationAgent({
       savedDashboardId: baseDashboard?.id || null,
       analysisBrief: dashboardResult.analysis_brief || null,
     });
-    const nextState = updateConversationAgentState({
+    const nextState = await updateConversationAgentState({
       tenantId,
       userId,
       conversationId,
@@ -1401,7 +1402,7 @@ export async function runConversationAgent({
 }
 
 export async function applyConversationApproval({ tenantId, userId, conversationId, approvalId, decision }) {
-  const agentState = getConversationAgentState({ tenantId, userId, conversationId });
+  const agentState = await getConversationAgentState({ tenantId, userId, conversationId });
   const approval = agentState?.pending_approval;
 
   if (!approval || approval.id !== approvalId) {
@@ -1424,7 +1425,7 @@ export async function applyConversationApproval({ tenantId, userId, conversation
   }
 
   if (normalizedDecision === 'reject') {
-    const nextState = updateConversationAgentState({
+    const nextState = await updateConversationAgentState({
       tenantId,
       userId,
       conversationId,
@@ -1471,7 +1472,7 @@ export async function applyConversationApproval({ tenantId, userId, conversation
   } catch {
     nextProfile = null;
   }
-  const nextState = updateConversationAgentState({
+  const nextState = await updateConversationAgentState({
     tenantId,
     userId,
     conversationId,

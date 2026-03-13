@@ -1,4 +1,22 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: umkm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PGDATABASE:-umkm}
+      POSTGRES_USER: ${PGUSER:-postgres}
+      POSTGRES_PASSWORD: ${PGPASSWORD:-change-me}
+    ports:
+      - "${PGPORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PGUSER:-postgres} -d ${PGDATABASE:-umkm}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   python-agent:
     build: ./tools/python-agent
     container_name: umkm-python-agent
@@ -27,6 +45,7 @@ services:
     build: .
     container_name: umkm-intelligence
     depends_on:
+      - postgres
       - python-agent
     restart: unless-stopped
     env_file:
@@ -37,7 +56,7 @@ services:
       NODE_ENV: production
       PORT: 8080
       DATA_DIR: /app/data
-      DB_PATH: /app/data/umkm.db
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${PGUSER:-postgres}:${PGPASSWORD:-change-me}@postgres:5432/${PGDATABASE:-umkm}}
       JWT_SECRET: ${JWT_SECRET:-replace-me}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_API: ${GEMINI_API:-}
@@ -54,3 +73,6 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+volumes:
+  pgdata:

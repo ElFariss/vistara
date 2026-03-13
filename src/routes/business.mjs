@@ -1,7 +1,7 @@
 import { get, run } from '../db.mjs';
 import { sendError, sendJson } from '../http/response.mjs';
 
-function fetchProfile(tenantId) {
+async function fetchProfile(tenantId) {
   return get(
     `
       SELECT id, name, industry, city, timezone, currency, morning_verdict_time, created_at
@@ -20,7 +20,7 @@ export function registerBusinessRoutes(router) {
       const body = await ctx.getBody();
       const user = ctx.user;
 
-      run(
+      await run(
         `
           UPDATE tenants
           SET name = :name,
@@ -44,7 +44,7 @@ export function registerBusinessRoutes(router) {
 
       return sendJson(ctx.res, 200, {
         ok: true,
-        profile: fetchProfile(user.tenant_id),
+        profile: await fetchProfile(user.tenant_id),
       });
     },
     { auth: true },
@@ -54,7 +54,7 @@ export function registerBusinessRoutes(router) {
     'GET',
     '/api/business/profile',
     async (ctx) => {
-      const profile = fetchProfile(ctx.user.tenant_id);
+      const profile = await fetchProfile(ctx.user.tenant_id);
       if (!profile) {
         return sendError(ctx.res, 404, 'PROFILE_NOT_FOUND', 'Profil bisnis tidak ditemukan.');
       }
@@ -68,12 +68,12 @@ export function registerBusinessRoutes(router) {
     '/api/business/profile',
     async (ctx) => {
       const body = await ctx.getBody();
-      const current = fetchProfile(ctx.user.tenant_id);
+      const current = await fetchProfile(ctx.user.tenant_id);
       if (!current) {
         return sendError(ctx.res, 404, 'PROFILE_NOT_FOUND', 'Profil bisnis tidak ditemukan.');
       }
 
-      run(
+      await run(
         `
           UPDATE tenants
           SET name = :name,
@@ -97,7 +97,7 @@ export function registerBusinessRoutes(router) {
 
       return sendJson(ctx.res, 200, {
         ok: true,
-        profile: fetchProfile(ctx.user.tenant_id),
+        profile: await fetchProfile(ctx.user.tenant_id),
       });
     },
     { auth: true },

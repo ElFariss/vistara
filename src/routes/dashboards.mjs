@@ -22,9 +22,9 @@ export function registerDashboardRoutes(router) {
     'GET',
     '/api/dashboards',
     async (ctx) => {
-      ensureDefaultDashboard(ctx.user.tenant_id, ctx.user.id);
+      await ensureDefaultDashboard(ctx.user.tenant_id, ctx.user.id);
       const conversationId = ctx.query.get('conversation_id') || null;
-      const dashboards = listDashboards(ctx.user.tenant_id, ctx.user.id, { conversationId });
+      const dashboards = await listDashboards(ctx.user.tenant_id, ctx.user.id, { conversationId });
       return sendJson(ctx.res, 200, { ok: true, dashboards });
     },
     { auth: true },
@@ -34,7 +34,7 @@ export function registerDashboardRoutes(router) {
     'GET',
     '/api/dashboards/:id',
     async (ctx) => {
-      const dashboard = getDashboard(ctx.user.tenant_id, ctx.user.id, ctx.params.id);
+      const dashboard = await getDashboard(ctx.user.tenant_id, ctx.user.id, ctx.params.id);
       if (!dashboard) {
         return sendError(ctx.res, 404, 'DASHBOARD_NOT_FOUND', 'Dashboard tidak ditemukan.');
       }
@@ -54,7 +54,7 @@ export function registerDashboardRoutes(router) {
       if (body.config !== undefined && body.config !== null && !isDashboardConfigObject(body.config)) {
         return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'config dashboard harus berupa object.');
       }
-      const dashboard = createDashboard(ctx.user.tenant_id, ctx.user.id, body.name, body.config || null, {
+      const dashboard = await createDashboard(ctx.user.tenant_id, ctx.user.id, body.name, body.config || null, {
         conversationId: body.conversation_id || null,
       });
       return sendJson(ctx.res, 201, { ok: true, dashboard });
@@ -73,7 +73,7 @@ export function registerDashboardRoutes(router) {
       if (body.config !== undefined && body.config !== null && !isDashboardConfigObject(body.config)) {
         return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'config dashboard harus berupa object.');
       }
-      const dashboard = updateDashboard(ctx.user.tenant_id, ctx.user.id, ctx.params.id, {
+      const dashboard = await updateDashboard(ctx.user.tenant_id, ctx.user.id, ctx.params.id, {
         name: body.name,
         config: body.config,
       });
@@ -91,7 +91,7 @@ export function registerDashboardRoutes(router) {
     'DELETE',
     '/api/dashboards/:id',
     async (ctx) => {
-      const deleted = deleteDashboard(ctx.user.tenant_id, ctx.user.id, ctx.params.id);
+      const deleted = await deleteDashboard(ctx.user.tenant_id, ctx.user.id, ctx.params.id);
       if (!deleted) {
         return sendError(ctx.res, 400, 'DASHBOARD_DELETE_FAILED', 'Dashboard tidak bisa dihapus.');
       }

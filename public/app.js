@@ -2905,7 +2905,7 @@ function datasetSupportsVisualization(dataset, visualization) {
 
 function visualizationAvailable(visualization) {
   const datasets = Array.isArray(state.datasetTables) ? state.datasetTables : [];
-  if (!datasets.length) return true;
+  if (!datasets.length) return false;
   return datasets.some((dataset) => datasetSupportsVisualization(dataset, visualization));
 }
 
@@ -2913,17 +2913,13 @@ function renderWidgetTypeGrid() {
   if (!refs.widgetTypeGrid) return;
   refs.widgetTypeGrid.innerHTML = '';
 
-  CHART_CATALOG.forEach((item) => {
-    const compatible = visualizationAvailable(item.id);
+  const availableCharts = CHART_CATALOG.filter((item) => visualizationAvailable(item.id));
+  availableCharts.forEach((item) => {
     const card = document.createElement('button');
     card.type = 'button';
     card.className = 'widget-type-card';
     if (state.widgetBuilderSelection.visualization === item.id) {
       card.classList.add('is-selected');
-    }
-    if (!compatible) {
-      card.classList.add('is-disabled');
-      card.disabled = true;
     }
     card.innerHTML = `
       <div class="widget-type-icon">${item.icon}</div>

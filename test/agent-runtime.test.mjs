@@ -12,14 +12,14 @@ function uid(prefix) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 }
 
-initializeDatabase();
+await initializeDatabase();
 
-function seedTenantUser() {
+async function seedTenantUser() {
   const tenantId = uid('tenant');
   const userId = uid('user');
   const now = new Date().toISOString();
 
-  run(
+  await run(
     `
       INSERT INTO tenants (id, name, industry, city, timezone, currency, created_at)
       VALUES (:id, :name, :industry, :city, :timezone, :currency, :created_at)
@@ -35,7 +35,7 @@ function seedTenantUser() {
     },
   );
 
-  run(
+  await run(
     `
       INSERT INTO users (id, tenant_id, email, password_hash, name, created_at)
       VALUES (:id, :tenant_id, :email, :password_hash, :name, :created_at)
@@ -53,18 +53,18 @@ function seedTenantUser() {
   return { tenantId, userId };
 }
 
-function cleanupTenant(tenantId) {
-  run(`DELETE FROM tenants WHERE id = :id`, { id: tenantId });
+async function cleanupTenant(tenantId) {
+  await run(`DELETE FROM tenants WHERE id = :id`, { id: tenantId });
 }
 
-function seedTransaction({ tenantId, date = '2024-01-15T00:00:00.000Z', revenue = 1_500_000 }) {
+async function seedTransaction({ tenantId, date = '2024-01-15T00:00:00.000Z', revenue = 1_500_000 }) {
   const branchId = uid('branch');
   const productId = uid('product');
   const branchName = `Cabang ${branchId}`;
   const productName = `Produk ${productId}`;
   const now = new Date().toISOString();
 
-  run(
+  await run(
     `
       INSERT INTO branches (id, tenant_id, name, created_at)
       VALUES (:id, :tenant_id, :name, :created_at)
@@ -77,7 +77,7 @@ function seedTransaction({ tenantId, date = '2024-01-15T00:00:00.000Z', revenue 
     },
   );
 
-  run(
+  await run(
     `
       INSERT INTO products (id, tenant_id, name, category, created_at)
       VALUES (:id, :tenant_id, :name, :category, :created_at)
@@ -91,7 +91,7 @@ function seedTransaction({ tenantId, date = '2024-01-15T00:00:00.000Z', revenue 
     },
   );
 
-  run(
+  await run(
     `
       INSERT INTO transactions (
         id, tenant_id, transaction_date, product_id, branch_id, customer_id,
@@ -336,12 +336,12 @@ function createDashboardAgentResponses({
   ];
 }
 
-test('executeAnalyticsIntent anchors relative period to latest dataset date', () => {
-  const { tenantId, userId } = seedTenantUser();
+test('executeAnalyticsIntent anchors relative period to latest dataset date', async () => {
+  const { tenantId, userId } = await seedTenantUser();
   try {
-    seedTransaction({ tenantId, date: '2024-01-18T00:00:00.000Z', revenue: 2_000_000 });
+    await seedTransaction({ tenantId, date: '2024-01-18T00:00:00.000Z', revenue: 2_000_000 });
 
-    const result = executeAnalyticsIntent({
+    const result = await executeAnalyticsIntent({
       tenantId,
       userId,
       intent: {
@@ -357,17 +357,17 @@ test('executeAnalyticsIntent anchors relative period to latest dataset date', ()
     assert.equal(result.content_format, 'markdown');
     assert.match(result.answer, /\*\*.+\*\*/);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('runDashboardAgent returns canvas widgets with findings instead of generic success copy', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   try {
-    seedTransaction({ tenantId, date: '2024-01-10T00:00:00.000Z', revenue: 1_500_000 });
-    seedTransaction({ tenantId, date: '2024-01-11T00:00:00.000Z', revenue: 2_250_000 });
-    seedTransaction({ tenantId, date: '2024-01-12T00:00:00.000Z', revenue: 1_900_000 });
-    seedTransaction({ tenantId, date: '2024-01-13T00:00:00.000Z', revenue: 2_600_000 });
+    await seedTransaction({ tenantId, date: '2024-01-10T00:00:00.000Z', revenue: 1_500_000 });
+    await seedTransaction({ tenantId, date: '2024-01-11T00:00:00.000Z', revenue: 2_250_000 });
+    await seedTransaction({ tenantId, date: '2024-01-12T00:00:00.000Z', revenue: 1_900_000 });
+    await seedTransaction({ tenantId, date: '2024-01-13T00:00:00.000Z', revenue: 2_600_000 });
 
     const response = await withMockGeminiToolResponses(
       createDashboardAgentResponses({
@@ -401,16 +401,16 @@ test('runDashboardAgent returns canvas widgets with findings instead of generic 
     assert.doesNotMatch(response.answer, /\.\.\./);
     assert.doesNotMatch(response.answer, /widget siap|dashboard siap|review selesai/i);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('runDashboardAgent keeps long analysis findings intact without backend ellipsis', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   try {
-    seedTransaction({ tenantId, date: '2024-01-13T00:00:00.000Z', revenue: 1_200_000 });
-    seedTransaction({ tenantId, date: '2024-01-14T00:00:00.000Z', revenue: 1_800_000 });
-    seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_050_000 });
+    await seedTransaction({ tenantId, date: '2024-01-13T00:00:00.000Z', revenue: 1_200_000 });
+    await seedTransaction({ tenantId, date: '2024-01-14T00:00:00.000Z', revenue: 1_800_000 });
+    await seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_050_000 });
 
     const longInsight = 'Trend Omzet ikut ditampilkan untuk memahami fluktuasi harian yang membantu mengidentifikasi pola penjualan, penurunan di akhir rentang, serta momen lonjakan yang relevan untuk keputusan stok dan promosi tanpa harus membuka tabel mentah satu per satu di belakang layar.';
     const longEvidence = 'Tren pendapatan menunjukkan penurunan menjelang akhir periode setelah sempat mencapai puncak yang jelas di pertengahan rentang, sehingga perubahan arah performa bisa dibaca langsung dari visual tanpa perlu menjumlah ulang data transaksi secara manual.';
@@ -446,15 +446,15 @@ test('runDashboardAgent keeps long analysis findings intact without backend elli
     assert.match(response.answer, /stok dan promosi tanpa harus membuka tabel mentah satu per satu/);
     assert.match(response.answer, /promosi perlu diperkuat, kapan stok perlu diamankan/);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('runDashboardAgent preserves valid worker-authored page placements', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   try {
     for (let index = 0; index < 4; index += 1) {
-      seedTransaction({
+      await seedTransaction({
         tenantId,
         date: `2024-01-${10 + index}T00:00:00.000Z`,
         revenue: 1_500_000 + index * 200_000,
@@ -486,14 +486,14 @@ test('runDashboardAgent preserves valid worker-authored page placements', async 
     assert.equal(response.widgets.find((widget) => widget.title === 'Trend Omzet')?.layout?.page, 2);
     assert.equal(response.widgets.find((widget) => widget.title === 'Produk Terlaris')?.layout?.page, 2);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('runDashboardAgent repairs overlapping worker-authored layouts before returning widgets', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   try {
-    seedTransaction({ tenantId, date: '2024-01-18T00:00:00.000Z', revenue: 2_100_000 });
+    await seedTransaction({ tenantId, date: '2024-01-18T00:00:00.000Z', revenue: 2_100_000 });
 
     const placements = [
       { title: 'Omzet', page: 1, x: 0, y: 0, w: 4, h: 2, kind: 'metric' },
@@ -526,12 +526,12 @@ test('runDashboardAgent repairs overlapping worker-authored layouts before retur
       }
     }
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('runDashboardAgent rejects unusable dashboards with DASHBOARD_EMPTY', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   try {
     await assert.rejects(
       () => withMockGeminiToolResponses(
@@ -557,16 +557,16 @@ test('runDashboardAgent rejects unusable dashboards with DASHBOARD_EMPTY', async
       },
     );
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('runDashboardAgent builds findings from chart-only dashboards without generic success copy', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   try {
-    seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
-    seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
-    seedTransaction({ tenantId, date: '2024-01-17T00:00:00.000Z', revenue: 1_950_000 });
+    await seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
+    await seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
+    await seedTransaction({ tenantId, date: '2024-01-17T00:00:00.000Z', revenue: 1_950_000 });
 
     const response = await withMockGeminiToolResponses(
       createDashboardAgentResponses({
@@ -591,15 +591,15 @@ test('runDashboardAgent builds findings from chart-only dashboards without gener
     assert.doesNotMatch(response.answer, /dashboard .* sudah siap/i);
     assert.match(response.answer, /trend|berakhir|puncak/i);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('runDashboardAgent falls back to deterministic planner steps when submit_plan is missing', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   try {
-    seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
-    seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
+    await seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
+    await seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
 
     const response = await withMockGeminiToolResponses(
       createDashboardAgentResponses({
@@ -628,15 +628,15 @@ test('runDashboardAgent falls back to deterministic planner steps when submit_pl
     assert.equal(response.agent.planner.ok, true);
     assert.equal(response.agent.planner.reason, 'missing_submit_plan_call');
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('runDashboardAgent dedupes repeated worker outputs and collapses unused second pages', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   try {
-    seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
-    seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
+    await seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
+    await seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
 
     const response = await withMockGeminiToolResponses(
       [
@@ -754,15 +754,15 @@ test('runDashboardAgent dedupes repeated worker outputs and collapses unused sec
     assert.equal(new Set(response.widgets.map((widget) => widget.title)).size, response.widgets.length);
     assert.equal(response.agent.worker.pages, 1);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('runDashboardAgent stops after repeated duplicate worker calls instead of inflating latency', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   try {
-    seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
-    seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
+    await seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
+    await seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
 
     const response = await withMockGeminiToolResponses(
       [
@@ -877,16 +877,16 @@ test('runDashboardAgent stops after repeated duplicate worker calls instead of i
 
     assert.ok(response.widgets.some((widget) => widget?.title === 'Omzet'));
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('runDashboardAgent expands layout to use at least 96% of the page width', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   try {
-    seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
-    seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
-    seedTransaction({ tenantId, date: '2024-01-17T00:00:00.000Z', revenue: 1_950_000 });
+    await seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
+    await seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
+    await seedTransaction({ tenantId, date: '2024-01-17T00:00:00.000Z', revenue: 1_950_000 });
 
     const response = await withMockGeminiToolResponses(
       createDashboardAgentResponses({
@@ -962,15 +962,15 @@ test('runDashboardAgent expands layout to use at least 96% of the page width', a
     assert.equal(sparseRowCount, 0);
     assert.ok(maxRightGapCols <= 4);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('runDashboardAgent performs at least two reviewer passes before finalizing', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   try {
-    seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
-    seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
+    await seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
+    await seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
 
     await withMockGeminiToolResponses(
       createDashboardAgentResponses({
@@ -992,7 +992,7 @@ test('runDashboardAgent performs at least two reviewer passes before finalizing'
         });
 
         const reviewerPasses = requests.filter((request) => (
-          JSON.stringify(request).includes('Kamu reviewer visual untuk dashboard analytics.')
+          JSON.stringify(request).includes('dashboard UX curator')
         )).length;
 
         assert.equal(response.presentation_mode, 'canvas');
@@ -1000,15 +1000,15 @@ test('runDashboardAgent performs at least two reviewer passes before finalizing'
       },
     );
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('runDashboardAgent returns a needs_review draft instead of throwing when reviewer rejects an otherwise usable dashboard', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   try {
-    seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
-    seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
+    await seedTransaction({ tenantId, date: '2024-01-15T00:00:00.000Z', revenue: 1_500_000 });
+    await seedTransaction({ tenantId, date: '2024-01-16T00:00:00.000Z', revenue: 2_250_000 });
 
     const response = await withMockGeminiToolResponses(
       createDashboardAgentResponses({
@@ -1048,6 +1048,6 @@ test('runDashboardAgent returns a needs_review draft instead of throwing when re
     assert.match(response.answer, /perlu dirapikan sebelum dianggap final/i);
     assert.ok(response.widgets.length > 0);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });

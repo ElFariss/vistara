@@ -12,7 +12,7 @@ export function registerGoalRoutes(router) {
       }
 
       try {
-        const goal = createGoal({
+        const goal = await createGoal({
           tenantId: ctx.user.tenant_id,
           userId: ctx.user.id,
           metric: body.metric || 'revenue',
@@ -38,7 +38,7 @@ export function registerGoalRoutes(router) {
     'GET',
     '/api/goals',
     async (ctx) => {
-      const goals = listGoals(ctx.user.tenant_id, ctx.user.id);
+      const goals = await listGoals(ctx.user.tenant_id, ctx.user.id);
       return sendJson(ctx.res, 200, { ok: true, goals });
     },
     { auth: true },
@@ -48,7 +48,7 @@ export function registerGoalRoutes(router) {
     'GET',
     '/api/goals/:id/progress',
     async (ctx) => {
-      const progress = getGoalProgress(ctx.user.tenant_id, ctx.user.id, ctx.params.id);
+      const progress = await getGoalProgress(ctx.user.tenant_id, ctx.user.id, ctx.params.id);
       if (!progress) {
         return sendError(ctx.res, 404, 'GOAL_NOT_FOUND', 'Goal tidak ditemukan.');
       }

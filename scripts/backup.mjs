@@ -6,13 +6,12 @@ const backupRootDir = path.resolve(process.argv[2] || path.join(process.cwd(), '
 
 const result = await createBackup({
   dataDir: config.dataDir,
-  dbPath: config.dbPath,
   backupRootDir,
 });
 
 console.log(JSON.stringify({
   ok: true,
   backup_dir: result.backupDir,
-  db_files: result.manifest.db_files,
+  db_tables: result.manifest.db_tables,
   uploads_copied: result.manifest.uploads_copied,
 }, null, 2));

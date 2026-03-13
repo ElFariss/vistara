@@ -10,18 +10,18 @@ import { getAnomalies, getDailyVerdict, getTrends } from '../src/services/insigh
 import { ingestUploadedSource } from '../src/services/ingestion.mjs';
 import { registerDataRoutes } from '../src/routes/data.mjs';
 
-initializeDatabase();
+await initializeDatabase();
 
 function uid(prefix) {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 }
 
-function seedTenantUser() {
+async function seedTenantUser() {
   const tenantId = uid('tenant');
   const userId = uid('user');
   const now = new Date().toISOString();
 
-  run(
+  await run(
     `
       INSERT INTO tenants (id, name, industry, city, timezone, currency, created_at)
       VALUES (:id, :name, :industry, :city, :timezone, :currency, :created_at)
@@ -37,7 +37,7 @@ function seedTenantUser() {
     },
   );
 
-  run(
+  await run(
     `
       INSERT INTO users (id, tenant_id, email, password_hash, name, created_at)
       VALUES (:id, :tenant_id, :email, :password_hash, :name, :created_at)
@@ -55,18 +55,18 @@ function seedTenantUser() {
   return { tenantId, userId };
 }
 
-function cleanupTenant(tenantId) {
-  run(`DELETE FROM tenants WHERE id = :id`, { id: tenantId });
+async function cleanupTenant(tenantId) {
+  await run(`DELETE FROM tenants WHERE id = :id`, { id: tenantId });
 }
 
-function seedTransaction({ tenantId, date, revenue, cogs = null }) {
+async function seedTransaction({ tenantId, date, revenue, cogs = null }) {
   const branchId = uid('branch');
   const productId = uid('product');
   const branchName = `Cabang ${branchId.slice(-4)}`;
   const productName = `Produk ${productId.slice(-4)}`;
   const now = new Date().toISOString();
 
-  run(
+  await run(
     `
       INSERT INTO branches (id, tenant_id, name, created_at)
       VALUES (:id, :tenant_id, :name, :created_at)
@@ -79,7 +79,7 @@ function seedTransaction({ tenantId, date, revenue, cogs = null }) {
     },
   );
 
-  run(
+  await run(
     `
       INSERT INTO products (id, tenant_id, name, category, created_at)
       VALUES (:id, :tenant_id, :name, :category, :created_at)
@@ -93,7 +93,7 @@ function seedTransaction({ tenantId, date, revenue, cogs = null }) {
     },
   );
 
-  run(
+  await run(
     `
       INSERT INTO transactions (
         id, tenant_id, transaction_date, product_id, branch_id, customer_id,
@@ -162,9 +162,9 @@ async function invokeRoute(router, method, routePath, { user, body } = {}) {
   };
 }
 
-function insertSourceFileRecord({ tenantId, filePath, mapping, filename = 'phones.csv' }) {
+async function insertSourceFileRecord({ tenantId, filePath, mapping, filename = 'phones.csv' }) {
   const sourceId = uid('source');
-  run(
+  await run(
     `
       INSERT INTO source_files (
         id, tenant_id, filename, file_type, file_path,
@@ -194,8 +194,8 @@ function insertSourceFileRecord({ tenantId, filePath, mapping, filename = 'phone
   return sourceId;
 }
 
-test('insights anchor stale trends, anomalies, and verdict to latest dataset date', () => {
-  const { tenantId } = seedTenantUser();
+test('insights anchor stale trends, anomalies, and verdict to latest dataset date', async () => {
+  const { tenantId } = await seedTenantUser();
 
   try {
     const dates = [
@@ -209,12 +209,12 @@ test('insights anchor stale trends, anomalies, and verdict to latest dataset dat
     ];
 
     for (const [date, revenue] of dates) {
-      seedTransaction({ tenantId, date, revenue });
+      await seedTransaction({ tenantId, date, revenue });
     }
 
-    const trends = getTrends(tenantId);
-    const anomalies = getAnomalies(tenantId);
-    const verdict = getDailyVerdict(tenantId);
+    const trends = await getTrends(tenantId);
+    const anomalies = await getAnomalies(tenantId);
+    const verdict = await getDailyVerdict(tenantId);
 
     assert.equal(trends.period.anchored, true);
     assert.equal(trends.period.anchor_date.slice(0, 10), '2024-01-18');
@@ -225,12 +225,12 @@ test('insights anchor stale trends, anomalies, and verdict to latest dataset dat
     assert.equal(verdict.metrics.revenue_yesterday, 100_000);
     assert.match(verdict.sentence, /2024-01-18/);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('ingestion composes usable product names from merk and type style datasets', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const filePath = path.join(os.tmpdir(), `${uid('dataset')}.csv`);
 
   fs.writeFileSync(filePath, [
@@ -249,7 +249,7 @@ test('ingestion composes usable product names from merk and type style datasets'
       replaceExisting: true,
     });
 
-    const mappingRecord = get(
+    const mappingRecord = await get(
       `
         SELECT column_mapping
         FROM source_files
@@ -261,7 +261,7 @@ test('ingestion composes usable product names from merk and type style datasets'
       },
     );
     const mapping = JSON.parse(mappingRecord.column_mapping || '{}');
-    const productNames = all(
+    const productRows = await all(
       `
         SELECT name
         FROM products
@@ -269,12 +269,13 @@ test('ingestion composes usable product names from merk and type style datasets'
         ORDER BY name
       `,
       { tenant_id: tenantId },
-    ).map((row) => row.name);
+    );
+    const productNames = productRows.map((row) => row.name);
 
     assert.equal(mapping.mapping.product_name, 'type');
     assert.deepEqual(productNames, ['Oppo A18', 'Samsung A15']);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -282,7 +283,7 @@ test('ingestion composes usable product names from merk and type style datasets'
 });
 
 test('ingestion respects explicit product mapping when brand is selected', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const filePath = path.join(os.tmpdir(), `${uid('dataset-brand')}.csv`);
 
   fs.writeFileSync(filePath, [
@@ -292,7 +293,7 @@ test('ingestion respects explicit product mapping when brand is selected', async
   ].join('\n'));
 
   try {
-    insertSourceFileRecord({
+    await insertSourceFileRecord({
       tenantId,
       filePath,
       mapping: {
@@ -303,7 +304,7 @@ test('ingestion respects explicit product mapping when brand is selected', async
       },
     });
 
-    const source = get(
+    const source = await get(
       `
         SELECT id
         FROM source_files
@@ -321,7 +322,7 @@ test('ingestion respects explicit product mapping when brand is selected', async
       sourceId: source.id,
     });
 
-    const productNames = all(
+    const productRows = await all(
       `
         SELECT name
         FROM products
@@ -329,11 +330,12 @@ test('ingestion respects explicit product mapping when brand is selected', async
         ORDER BY name
       `,
       { tenant_id: tenantId },
-    ).map((row) => row.name);
+    );
+    const productNames = productRows.map((row) => row.name);
 
     assert.deepEqual(productNames, ['Oppo', 'Samsung']);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -341,7 +343,7 @@ test('ingestion respects explicit product mapping when brand is selected', async
 });
 
 test('data profile endpoint returns the latest dataset profile for authenticated tenants', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const filePath = path.join(os.tmpdir(), `${uid('profile')}.csv`);
 
   fs.writeFileSync(filePath, [
@@ -380,7 +382,7 @@ test('data profile endpoint returns the latest dataset profile for authenticated
     assert.ok(payload.profile.detected.categorical_columns.includes('type'));
     assert.ok(!payload.profile.detected.date_columns.includes('no'));
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -388,7 +390,7 @@ test('data profile endpoint returns the latest dataset profile for authenticated
 });
 
 test('data profile inspect endpoint answers in Indonesian and keeps SKU-like values categorical', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const filePath = path.join(os.tmpdir(), `${uid('profile-inspect')}.csv`);
 
   fs.writeFileSync(filePath, [
@@ -421,7 +423,7 @@ test('data profile inspect endpoint answers in Indonesian and keeps SKU-like val
     assert.equal(typeColumn.kind, 'string');
     assert.equal(response.payload.artifacts[0].title, 'Kolom Dataset');
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -429,7 +431,7 @@ test('data profile inspect endpoint answers in Indonesian and keeps SKU-like val
 });
 
 test('data repair endpoint repairs latest source and returns restored product dimension details', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const filePath = path.join(os.tmpdir(), `${uid('repair')}.csv`);
 
   fs.writeFileSync(filePath, [
@@ -439,7 +441,7 @@ test('data repair endpoint repairs latest source and returns restored product di
   ].join('\n'));
 
   try {
-    insertSourceFileRecord({
+    await insertSourceFileRecord({
       tenantId,
       filePath,
       mapping: {
@@ -461,7 +463,7 @@ test('data repair endpoint repairs latest source and returns restored product di
     assert.equal(response.payload.repair.repaired, true);
     assert.equal(response.payload.repair.analysis.suggestion.mapping.product_name, 'type');
 
-    const productNames = all(
+    const productRows = await all(
       `
         SELECT name
         FROM products
@@ -469,14 +471,17 @@ test('data repair endpoint repairs latest source and returns restored product di
         ORDER BY name
       `,
       { tenant_id: tenantId },
-    ).map((row) => row.name);
+    );
+    const productNames = productRows.map((row) => row.name);
 
     assert.deepEqual(productNames, ['Oppo A18', 'Samsung A15']);
-    assert.equal(Number(get(`SELECT COUNT(*) AS value FROM transactions WHERE tenant_id = :tenant_id`, {
-      tenant_id: tenantId,
-    }).value || 0), 2);
+    const transactionCount = await get(
+      `SELECT COUNT(*) AS value FROM transactions WHERE tenant_id = :tenant_id`,
+      { tenant_id: tenantId },
+    );
+    assert.equal(Number(transactionCount?.value || 0), 2);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -484,7 +489,7 @@ test('data repair endpoint repairs latest source and returns restored product di
 });
 
 test('data repair endpoint accepts broader product aliases used by the mapper', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const filePath = path.join(os.tmpdir(), `${uid('repair-alias')}.csv`);
 
   fs.writeFileSync(filePath, [
@@ -494,7 +499,7 @@ test('data repair endpoint accepts broader product aliases used by the mapper', 
   ].join('\n'));
 
   try {
-    insertSourceFileRecord({
+    await insertSourceFileRecord({
       tenantId,
       filePath,
       mapping: {
@@ -517,7 +522,7 @@ test('data repair endpoint accepts broader product aliases used by the mapper', 
     assert.equal(response.payload.repair.repaired, true);
     assert.equal(response.payload.repair.analysis.suggestion.mapping.product_name, 'varian');
 
-    const productNames = all(
+    const productRows = await all(
       `
         SELECT name
         FROM products
@@ -525,11 +530,12 @@ test('data repair endpoint accepts broader product aliases used by the mapper', 
         ORDER BY name
       `,
       { tenant_id: tenantId },
-    ).map((row) => row.name);
+    );
+    const productNames = productRows.map((row) => row.name);
 
     assert.deepEqual(productNames, ['Oppo A18', 'Samsung A15']);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -537,7 +543,7 @@ test('data repair endpoint accepts broader product aliases used by the mapper', 
 });
 
 test('data repair endpoint reruns stale brand-only product mappings when richer columns exist', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const filePath = path.join(os.tmpdir(), `${uid('repair-brand-only')}.csv`);
 
   fs.writeFileSync(filePath, [
@@ -547,7 +553,7 @@ test('data repair endpoint reruns stale brand-only product mappings when richer 
   ].join('\n'));
 
   try {
-    insertSourceFileRecord({
+    await insertSourceFileRecord({
       tenantId,
       filePath,
       mapping: {
@@ -558,7 +564,7 @@ test('data repair endpoint reruns stale brand-only product mappings when richer 
       },
     });
 
-    const source = get(
+    const source = await get(
       `
         SELECT id
         FROM source_files
@@ -576,7 +582,7 @@ test('data repair endpoint reruns stale brand-only product mappings when richer 
       sourceId: source.id,
     });
 
-    let productNames = all(
+    let productRows = await all(
       `
         SELECT name
         FROM products
@@ -584,7 +590,8 @@ test('data repair endpoint reruns stale brand-only product mappings when richer 
         ORDER BY name
       `,
       { tenant_id: tenantId },
-    ).map((row) => row.name);
+    );
+    let productNames = productRows.map((row) => row.name);
     assert.deepEqual(productNames, ['Oppo', 'Samsung']);
 
     const router = new Router();
@@ -599,7 +606,7 @@ test('data repair endpoint reruns stale brand-only product mappings when richer 
     assert.equal(response.payload.repair.repaired, true);
     assert.equal(response.payload.repair.analysis.suggestion.mapping.product_name, 'type');
 
-    productNames = all(
+    productRows = await all(
       `
         SELECT name
         FROM products
@@ -607,10 +614,11 @@ test('data repair endpoint reruns stale brand-only product mappings when richer 
         ORDER BY name
       `,
       { tenant_id: tenantId },
-    ).map((row) => row.name);
+    );
+    productNames = productRows.map((row) => row.name);
     assert.deepEqual(productNames, ['Oppo A18', 'Samsung A15']);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -618,7 +626,7 @@ test('data repair endpoint reruns stale brand-only product mappings when richer 
 });
 
 test('data repair endpoint does not treat channel mappings as a healthy product dimension', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const filePath = path.join(os.tmpdir(), `${uid('repair-channel')}.csv`);
 
   fs.writeFileSync(filePath, [
@@ -628,7 +636,7 @@ test('data repair endpoint does not treat channel mappings as a healthy product 
   ].join('\n'));
 
   try {
-    insertSourceFileRecord({
+    await insertSourceFileRecord({
       tenantId,
       filePath,
       mapping: {
@@ -639,7 +647,7 @@ test('data repair endpoint does not treat channel mappings as a healthy product 
       },
     });
 
-    const source = get(
+    const source = await get(
       `
         SELECT id
         FROM source_files
@@ -657,7 +665,7 @@ test('data repair endpoint does not treat channel mappings as a healthy product 
       sourceId: source.id,
     });
 
-    let productNames = all(
+    let productRows = await all(
       `
         SELECT name
         FROM products
@@ -665,7 +673,8 @@ test('data repair endpoint does not treat channel mappings as a healthy product 
         ORDER BY name
       `,
       { tenant_id: tenantId },
-    ).map((row) => row.name);
+    );
+    let productNames = productRows.map((row) => row.name);
     assert.deepEqual(productNames, ['offline', 'online']);
 
     const router = new Router();
@@ -680,7 +689,7 @@ test('data repair endpoint does not treat channel mappings as a healthy product 
     assert.equal(response.payload.repair.repaired, true);
     assert.equal(response.payload.repair.analysis.suggestion.mapping.product_name, 'type');
 
-    productNames = all(
+    productRows = await all(
       `
         SELECT name
         FROM products
@@ -688,10 +697,11 @@ test('data repair endpoint does not treat channel mappings as a healthy product 
         ORDER BY name
       `,
       { tenant_id: tenantId },
-    ).map((row) => row.name);
+    );
+    productNames = productRows.map((row) => row.name);
     assert.deepEqual(productNames, ['Oppo A18', 'Samsung A15']);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -699,7 +709,7 @@ test('data repair endpoint does not treat channel mappings as a healthy product 
 });
 
 test('data repair keeps the current dataset when replacement ingest fails mid-repair', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const filePath = path.join(os.tmpdir(), `${uid('repair-rollback')}.csv`);
 
   fs.writeFileSync(filePath, [
@@ -709,7 +719,7 @@ test('data repair keeps the current dataset when replacement ingest fails mid-re
   ].join('\n'));
 
   try {
-    insertSourceFileRecord({
+    await insertSourceFileRecord({
       tenantId,
       filePath,
       mapping: {
@@ -720,7 +730,7 @@ test('data repair keeps the current dataset when replacement ingest fails mid-re
       },
     });
 
-    const source = get(
+    const source = await get(
       `
         SELECT id
         FROM source_files
@@ -738,7 +748,7 @@ test('data repair keeps the current dataset when replacement ingest fails mid-re
       sourceId: source.id,
     });
 
-    const originalProducts = all(
+    const originalProductRows = await all(
       `
         SELECT name
         FROM products
@@ -746,13 +756,15 @@ test('data repair keeps the current dataset when replacement ingest fails mid-re
         ORDER BY name
       `,
       { tenant_id: tenantId },
-    ).map((row) => row.name);
+    );
+    const originalProducts = originalProductRows.map((row) => row.name);
     assert.deepEqual(originalProducts, ['Oppo', 'Samsung']);
 
-    const originalTransactionCount = Number(get(
+    const originalTransactionCountRow = await get(
       `SELECT COUNT(*) AS value FROM transactions WHERE tenant_id = :tenant_id`,
       { tenant_id: tenantId },
-    )?.value || 0);
+    );
+    const originalTransactionCount = Number(originalTransactionCountRow?.value || 0);
     assert.equal(originalTransactionCount, 2);
 
     const originalReadFileSync = fs.readFileSync;
@@ -787,7 +799,7 @@ test('data repair keeps the current dataset when replacement ingest fails mid-re
       fs.readFileSync = originalReadFileSync;
     }
 
-    const remainingProducts = all(
+    const remainingProductRows = await all(
       `
         SELECT name
         FROM products
@@ -795,21 +807,24 @@ test('data repair keeps the current dataset when replacement ingest fails mid-re
         ORDER BY name
       `,
       { tenant_id: tenantId },
-    ).map((row) => row.name);
-    const remainingTransactionCount = Number(get(
+    );
+    const remainingProducts = remainingProductRows.map((row) => row.name);
+    const remainingTransactionCountRow = await get(
       `SELECT COUNT(*) AS value FROM transactions WHERE tenant_id = :tenant_id`,
       { tenant_id: tenantId },
-    )?.value || 0);
-    const sourceCount = Number(get(
+    );
+    const remainingTransactionCount = Number(remainingTransactionCountRow?.value || 0);
+    const sourceCountRow = await get(
       `SELECT COUNT(*) AS value FROM source_files WHERE tenant_id = :tenant_id`,
       { tenant_id: tenantId },
-    )?.value || 0);
+    );
+    const sourceCount = Number(sourceCountRow?.value || 0);
 
     assert.deepEqual(remainingProducts, originalProducts);
     assert.equal(remainingTransactionCount, originalTransactionCount);
     assert.equal(sourceCount, 1);
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
@@ -817,7 +832,7 @@ test('data repair keeps the current dataset when replacement ingest fails mid-re
 });
 
 test('data repair endpoint returns explicit 404 when no latest source exists', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
 
   try {
     const router = new Router();
@@ -832,16 +847,16 @@ test('data repair endpoint returns explicit 404 when no latest source exists', a
     assert.equal(response.payload.error.code, 'SOURCE_NOT_FOUND');
     assert.equal(response.payload.error.details.reason, 'source_not_found');
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('data profile inspect endpoint returns 500 when dataset storage cannot be read', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const missingPath = path.join(os.tmpdir(), `${uid('missing-profile')}.csv`);
 
   try {
-    insertSourceFileRecord({
+    await insertSourceFileRecord({
       tenantId,
       filePath: missingPath,
       mapping: {
@@ -866,16 +881,16 @@ test('data profile inspect endpoint returns 500 when dataset storage cannot be r
     assert.equal(response.payload.error.message, 'File dataset tidak bisa dibaca dari storage server.');
     assert.ok(!response.payload.error.message.includes(missingPath));
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
 
 test('data profile endpoint sanitizes storage errors instead of leaking file paths', async () => {
-  const { tenantId, userId } = seedTenantUser();
+  const { tenantId, userId } = await seedTenantUser();
   const missingPath = path.join(os.tmpdir(), `${uid('missing-profile-direct')}.csv`);
 
   try {
-    insertSourceFileRecord({
+    await insertSourceFileRecord({
       tenantId,
       filePath: missingPath,
       mapping: {
@@ -899,6 +914,6 @@ test('data profile endpoint sanitizes storage errors instead of leaking file pat
     assert.equal(response.payload.error.message, 'Profil dataset tidak bisa dibaca dari storage server.');
     assert.ok(!response.payload.error.message.includes(missingPath));
   } finally {
-    cleanupTenant(tenantId);
+    await cleanupTenant(tenantId);
   }
 });
