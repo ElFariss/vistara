@@ -581,19 +581,18 @@ function isComplexDashboardRequest(message, intent) {
 }
 
 async function hasDataset(tenantId) {
-  const readySource = await get(
+  const latestSource = await get(
     `
-      SELECT id, row_count
+      SELECT id
       FROM source_files
       WHERE tenant_id = :tenant_id
-        AND status = 'ready'
       ORDER BY upload_date DESC
       LIMIT 1
     `,
     { tenant_id: tenantId },
   );
 
-  if (readySource && Number(readySource.row_count || 0) > 0) {
+  if (latestSource) {
     return true;
   }
 

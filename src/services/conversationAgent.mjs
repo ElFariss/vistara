@@ -862,19 +862,29 @@ export async function runConversationAgent({
   });
 
   let datasetProfile = agentState?.dataset_profile || null;
-  if (datasetReady && !datasetProfile) {
-    try {
-      datasetProfile = await getDatasetProfile(tenantId);
+  const ensureDatasetProfile = async () => {
+    if (datasetProfile) {
+      return datasetProfile;
+    }
+    datasetProfile = await getDatasetProfile(tenantId);
+    if (datasetProfile) {
       agentState = await updateConversationAgentState({
         tenantId,
         userId,
         conversationId,
         datasetProfile,
       });
-    } catch {
-      datasetProfile = null;
     }
-  }
+    if (!datasetProfile) {
+      throw new ConversationAgentError({
+        code: 'DATASET_NOT_READY',
+        statusCode: 409,
+        reason: 'dataset_not_ready',
+        message: 'Dataset belum tersedia atau belum bisa diproses. Coba unggah ulang atau tunggu sebentar.',
+      });
+    }
+    return datasetProfile;
+  };
 
   const pendingChoice = pendingDashboardChoice(agentState);
   if (pendingChoice) {
@@ -1156,6 +1166,7 @@ export async function runConversationAgent({
       status: 'pending',
     });
 
+    datasetProfile = await ensureDatasetProfile();
     const analysisIntent = await buildAnalyticsIntent({
       message: effectiveMessage,
       history,
@@ -1216,6 +1227,7 @@ export async function runConversationAgent({
   }
 
   if (route.action === 'create_dashboard' || route.action === 'edit_dashboard') {
+    datasetProfile = await ensureDatasetProfile();
     const blockingIssue = detectBlockingDatasetIssue(datasetProfile);
     if (blockingIssue && !agentState?.pending_approval) {
       const approval = {
