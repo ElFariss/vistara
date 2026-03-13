@@ -1,0 +1,20 @@
+services:
+  app:
+    command: node --watch src/server.mjs
+    environment:
+      NODE_ENV: development
+      PORT: 8080
+      DATABASE_URL: postgresql://postgres:change-me@postgres:5432/umkm
+      JWT_SECRET: local-dev-secret
+      SERVE_PUBLIC_ASSETS: true
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_API: ${GEMINI_API:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-pro}
+      API_BASE_URL: ${API_BASE_URL:-}
+      PYTHON_AGENT_URL: http://python-agent:8091
+      PYTHON_AGENT_TOKEN: ${PYTHON_AGENT_TOKEN:-replace-python-token}
+      PYTHON_AGENT_TIMEOUT_MS: 3500
+    volumes:
+      - .:/app
+      - ./data:/app/data
+      - ./backups:/app/backups

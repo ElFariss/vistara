@@ -97,7 +97,7 @@ function serveStatic(pathname, res) {
   // Try dist/ first (Vite build output), then public/ (raw assets)
   const distTarget = path.join(distDir, normalized);
   const publicTarget = path.join(publicDir, normalized);
-  const useViteBuild = fs.existsSync(distDir);
+  const useViteBuild = fs.existsSync(distDir) && !config.servePublicAssets;
 
   let target = null;
   if (useViteBuild && distTarget.startsWith(distDir) && fs.existsSync(distTarget) && !fs.statSync(distTarget).isDirectory()) {

@@ -113,6 +113,12 @@ Current automated tests cover:
 docker compose up --build
 ```
 
+Local dev with live code (Postgres + app in one command):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
+```
+
 Services started:
 
 - `app` on `8080`

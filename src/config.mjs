@@ -74,6 +74,7 @@ export const config = {
   dataDir,
   uploadDir,
   databaseUrl: buildDatabaseUrl(),
+  servePublicAssets: toBoolean(process.env.SERVE_PUBLIC_ASSETS, false),
   tokenTtlSeconds: toInt(process.env.TOKEN_TTL_SECONDS, 60 * 60 * 24 * 7),
   jwtSecret: runtimeJwtSecret,
   rateLimitPerMinute: toInt(process.env.RATE_LIMIT_PER_MINUTE, 120),
