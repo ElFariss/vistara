@@ -5,6 +5,7 @@ import { toLowerAlnum, toRupiah } from '../utils/text.mjs';
 import { logAudit } from './audit.mjs';
 import { parseIndonesianNumber, parseFlexibleDate } from '../utils/parse.mjs';
 import { listDatasetTables, getDatasetTable } from './datasetTables.mjs';
+import { ensureSourcesProcessed } from './ingestion.mjs';
 import { CHART_CATALOG, VISUALIZATION_IDS, SINGLE_VALUE_VISUALS, isMetricVisualization, isTableVisualization } from './chartCatalog.mjs';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -909,6 +910,7 @@ function executeTableQuery({ tenantId, userId, query, table }) {
 }
 
 export async function executeBuilderQuery({ tenantId, userId, query }) {
+  await ensureSourcesProcessed({ tenantId, userId });
   const table = query?.dataset ? await getDatasetTable(tenantId, query.dataset) : null;
   if (table) {
     return executeTableQuery({ tenantId, userId, query, table });

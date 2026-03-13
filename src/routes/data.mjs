@@ -5,7 +5,7 @@ import { resolvePublicErrorMessage, sendError, sendJson, sendNoContent } from '.
 import {
   deleteSource,
   getSource,
-  ingestUploadedSource,
+  storeUploadedSource,
   listSources,
   repairLatestSourceIfNeeded,
   updateSourceMapping,
@@ -18,12 +18,64 @@ import { generateId } from '../utils/ids.mjs';
 import { createLogger } from '../utils/logger.mjs';
 
 const logger = createLogger('data-routes');
+const ALLOWED_UPLOAD_EXTENSIONS = new Set([
+  '.csv',
+  '.tsv',
+  '.ssv',
+  '.dsv',
+  '.xlsx',
+  '.xls',
+  '.json',
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.db',
+  '.sqlite',
+  '.sqlite3',
+  '.sql',
+  '.mdb',
+  '.accdb',
+  '.dbf',
+  '.parquet',
+  '.duckdb',
+]);
+const BLOCKED_UPLOAD_EXTENSIONS = new Set([
+  '.zip',
+  '.tar',
+  '.gz',
+  '.tgz',
+  '.7z',
+  '.rar',
+  '.py',
+]);
+const UPLOAD_ALLOWED_LABEL = 'CSV, TSV, SSV, DSV, XLSX, XLS, JSON, PDF, DOC/DOCX, dan file database';
 
 function sanitizeFilename(filename) {
   return path
     .basename(filename)
     .replace(/[^a-zA-Z0-9._-]/g, '_')
     .slice(0, 120);
+}
+
+function normalizeFileExtension(filename = '') {
+  const trimmed = String(filename || '').trim();
+  const dotIndex = trimmed.lastIndexOf('.');
+  if (dotIndex === -1) return '';
+  return trimmed.slice(dotIndex).toLowerCase();
+}
+
+function validateUploadFilename(filename) {
+  const ext = normalizeFileExtension(filename);
+  if (!ext) {
+    return { ok: false, message: `Format file tidak didukung. Gunakan ${UPLOAD_ALLOWED_LABEL}.` };
+  }
+  if (BLOCKED_UPLOAD_EXTENSIONS.has(ext)) {
+    return { ok: false, message: `Format ${ext} tidak didukung. Gunakan ${UPLOAD_ALLOWED_LABEL}.` };
+  }
+  if (!ALLOWED_UPLOAD_EXTENSIONS.has(ext)) {
+    return { ok: false, message: `Format file tidak didukung. Gunakan ${UPLOAD_ALLOWED_LABEL}.` };
+  }
+  return { ok: true, ext };
 }
 
 function getUploadedFile(parsedBody) {
@@ -38,23 +90,6 @@ function getUploadedFile(parsedBody) {
 
   const first = Object.values(files)[0];
   return first || null;
-}
-
-async function ingestFromStoredFile({ tenantId, userId, storedPath, safeName, contentType }) {
-  const ingested = await ingestUploadedSource({
-    tenantId,
-    userId,
-    filePath: storedPath,
-    filename: safeName,
-    contentType,
-    replaceExisting: true,
-  });
-
-  return {
-    source: ingested.source,
-    analysis: ingested.analysis,
-    result: ingested.result,
-  };
 }
 
 function repairErrorMeta(reason) {
@@ -141,6 +176,11 @@ export function registerDataRoutes(router) {
         return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'File wajib diupload melalui field "file".');
       }
 
+      const validation = validateUploadFilename(file.filename || '');
+      if (!validation.ok) {
+        return sendError(ctx.res, 400, 'UPLOAD_UNSUPPORTED_TYPE', validation.message);
+      }
+
       logger.info('upload_parsed', {
         user_id: ctx.user?.id || null,
         filename: file.filename || null,
@@ -160,37 +200,23 @@ export function registerDataRoutes(router) {
       });
 
       try {
-        const ingested = await ingestFromStoredFile({
+        const stored = await storeUploadedSource({
           tenantId: ctx.user.tenant_id,
           userId: ctx.user.id,
-          storedPath,
-          safeName,
+          filePath: storedPath,
+          filename: safeName,
           contentType: file.contentType,
         });
 
-        logger.info('upload_ingested', {
+        logger.info('upload_stored', {
           user_id: ctx.user?.id || null,
-          source_id: ingested.source?.id || null,
-          dataset_type: ingested.result?.datasetType || null,
-          inserted: ingested.result?.inserted || 0,
-          duplicates: ingested.result?.duplicates || 0,
-          skipped: ingested.result?.skipped || 0,
+          source_id: stored.source?.id || null,
         });
 
         return sendJson(ctx.res, 201, {
           ok: true,
-          source: ingested.source,
-          preview: {
-            columns: ingested.analysis.columns,
-            sample_rows: ingested.analysis.sampleRows,
-            mapping: ingested.analysis.suggestion,
-          },
-          ingestion: {
-            dataset_type: ingested.result.datasetType,
-            inserted: ingested.result.inserted,
-            duplicates: ingested.result.duplicates,
-            skipped: ingested.result.skipped,
-          },
+          source: stored.source,
+          status: 'uploaded',
         });
       } catch (error) {
         if (fs.existsSync(storedPath)) {
@@ -232,28 +258,18 @@ export function registerDataRoutes(router) {
       fs.copyFileSync(demoSource, storedPath);
 
       try {
-        const ingested = await ingestFromStoredFile({
+        const stored = await storeUploadedSource({
           tenantId: ctx.user.tenant_id,
           userId: ctx.user.id,
-          storedPath,
-          safeName,
+          filePath: storedPath,
+          filename: safeName,
           contentType: 'text/csv',
         });
 
         return sendJson(ctx.res, 201, {
           ok: true,
-          source: ingested.source,
-          preview: {
-            columns: ingested.analysis.columns,
-            sample_rows: ingested.analysis.sampleRows,
-            mapping: ingested.analysis.suggestion,
-          },
-          ingestion: {
-            dataset_type: ingested.result.datasetType,
-            inserted: ingested.result.inserted,
-            duplicates: ingested.result.duplicates,
-            skipped: ingested.result.skipped,
-          },
+          source: stored.source,
+          status: 'uploaded',
           demo: true,
         });
       } catch (error) {

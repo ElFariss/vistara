@@ -277,7 +277,7 @@
         <div class="faq-grid">
           <article>
             <h4>Apakah data saya aman?</h4>
-            <p>File dipakai untuk analisis workspace Anda dan tidak dibagikan tanpa izin.</p>
+            <p>File dipakai untuk analisis workspace Anda dan tidak dibagikan tanpa izin. Data Anda milik Anda.</p>
           </article>
           <article>
             <h4>Apakah bisa file berantakan?</h4>
@@ -454,7 +454,7 @@
             <h2>Upload Dataset Dulu</h2>
             <p>Workspace ini bekerja dari dataset statis yang kamu upload. Tidak ada stream data real-time.</p>
             <div class="gate-actions">
-              <input id="gateUploadInput" type="file" hidden />
+              <input id="gateUploadInput" type="file" hidden accept=".csv,.tsv,.ssv,.dsv,.xlsx,.xls,.json,.pdf,.doc,.docx,.db,.sqlite,.sqlite3,.sql,.mdb,.accdb,.dbf,.parquet,.duckdb" />
               <button id="gateUploadPickerBtn" type="button" class="ghost attach-btn gate-upload-btn">Pilih Dataset</button>
               <button id="gateUploadBtn" type="button">Upload & Gunakan</button>
               <button id="gateDemoBtn" type="button" class="ghost">Gunakan Demo test.csv</button>
@@ -484,7 +484,7 @@
 
             <form id="chatForm" class="composer">
               <div class="composer-row">
-                <input id="chatFile" type="file" hidden />
+                <input id="chatFile" type="file" hidden accept=".csv,.tsv,.ssv,.dsv,.xlsx,.xls,.json,.pdf,.doc,.docx,.db,.sqlite,.sqlite3,.sql,.mdb,.accdb,.dbf,.parquet,.duckdb" />
                 <button id="chatFileBtn" class="ghost attach-btn attach-btn-compact" type="button" aria-label="Tambah dataset" title="Tambah dataset">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
                   <span class="sr-only">Tambah dataset</span>
@@ -512,6 +512,7 @@
               <div class="pane-head">
                 <strong>Data Fields</strong>
               </div>
+              <div id="sourceList" class="source-list"></div>
               <div id="dataFields" class="data-fields"></div>
             </aside>
 

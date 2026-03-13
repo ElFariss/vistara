@@ -27,6 +27,10 @@ function detectFileType(filename, contentType = '') {
     return 'tsv';
   }
 
+  if (ext === '.ssv' || ext === '.dsv') {
+    return 'csv';
+  }
+
   if (ext === '.json' || mime.includes('json')) {
     return 'json';
   }
@@ -37,6 +41,18 @@ function detectFileType(filename, contentType = '') {
 
   if (ext === '.xls') {
     return 'xls';
+  }
+
+  if (ext === '.pdf') {
+    return 'pdf';
+  }
+
+  if (ext === '.doc' || ext === '.docx') {
+    return 'doc';
+  }
+
+  if (['.db', '.sqlite', '.sqlite3', '.sql', '.mdb', '.accdb', '.dbf', '.parquet', '.duckdb'].includes(ext)) {
+    return 'database';
   }
 
   if (ext === '.txt' || mime.startsWith('text/')) {
@@ -154,7 +170,11 @@ async function parseWithAiFallback(buffer, filename) {
 }
 
 function unsupportedUploadError() {
-  return new Error('Format file tidak didukung. Gunakan CSV, TSV, JSON, XLSX, atau XLS.');
+  return new Error('Format file tidak didukung untuk diproses otomatis. Gunakan CSV, TSV, SSV, DSV, JSON, XLSX, atau XLS.');
+}
+
+function isParseableFileType(fileType) {
+  return ['csv', 'tsv', 'json', 'xlsx', 'xls', 'text'].includes(String(fileType || '').toLowerCase());
 }
 
 function parseExcelFile(filePath, fileType) {
@@ -190,31 +210,22 @@ export async function parseDatasetTables(filePath, fileType, filename) {
     return parseXlsxSheets(filePath);
   }
 
-  try {
-    const parsed = await parseDataset(filePath, fileType, filename);
-    return [
-      {
-        name: datasetNameFromFilename(filename),
-        columns: parsed.columns,
-        rows: parsed.rows,
-      },
-    ];
-  } catch (error) {
-    if (fileType === 'text' || error.message.includes('Gunakan data tabular') || error.message.includes('AI parser tidak menemukan') || error.message.includes('Coba unggah') || error.message.includes('Format file tidak didukung')) {
-      return [
-        {
-          name: datasetNameFromFilename(filename),
-          columns: [],
-          rows: [],
-        },
-      ];
-    }
-    throw error;
-  }
+  const parsed = await parseDataset(filePath, fileType, filename);
+  return [
+    {
+      name: datasetNameFromFilename(filename),
+      columns: parsed.columns,
+      rows: parsed.rows,
+    },
+  ];
 }
 
 export async function parseDataset(filePath, fileType, filename) {
   const buffer = fs.readFileSync(filePath);
+
+  if (!isParseableFileType(fileType)) {
+    throw unsupportedUploadError();
+  }
 
   if (fileType === 'csv' || fileType === 'tsv') {
     return normalizeParsedDataset(parseCsvBuffer(buffer));
@@ -578,6 +589,40 @@ export async function analyzeUploadedFile(filePath, filename, contentType) {
   };
 }
 
+export async function storeUploadedSource({ tenantId, userId, filePath, filename, contentType }) {
+  const fileType = detectFileType(filename, contentType);
+  const sourceId = await storeSourceFileRecord({
+    tenantId,
+    filename,
+    fileType,
+    filePath,
+    rowCount: 0,
+    suggestion: {
+      datasetType: 'raw',
+      mapping: {},
+      confidence: 0,
+      method: 'upload',
+    },
+    sampleRows: [],
+    tables: [],
+    primaryTable: null,
+  });
+
+  logAudit({
+    tenantId,
+    userId,
+    action: 'data_upload',
+    resourceType: 'source_file',
+    resourceId: sourceId,
+    metadata: { filename, file_type: fileType },
+  });
+
+  return {
+    sourceId,
+    source: await getSource(tenantId, sourceId),
+  };
+}
+
 export async function readParsedSourceFile({ filePath, fileType, filename }) {
   return parseDataset(filePath, fileType, filename);
 }
@@ -673,6 +718,54 @@ async function updateSourceSummary(sourceId, { rowCount, startDate, endDate, sta
       date_start: startDate,
       date_end: endDate,
       status,
+    },
+  );
+}
+
+async function updateSourceStatus(sourceId, status) {
+  await run(
+    `
+      UPDATE source_files
+      SET status = :status
+      WHERE id = :id
+    `,
+    { id: sourceId, status },
+  );
+}
+
+async function updateSourceAnalysis(sourceId, analysis) {
+  const current = (await get(`SELECT metadata_json FROM source_files WHERE id = :id`, { id: sourceId })) || {};
+  let metadata = {};
+  try {
+    metadata = current.metadata_json ? JSON.parse(current.metadata_json) : {};
+  } catch {
+    metadata = {};
+  }
+
+  metadata.sample_rows = analysis.sampleRows ?? [];
+  metadata.tables = Array.isArray(analysis.tables) ? analysis.tables : [];
+  metadata.primary_table = analysis.primaryTable ?? null;
+
+  await run(
+    `
+      UPDATE source_files
+      SET file_type = :file_type,
+          row_count = :row_count,
+          column_mapping = :column_mapping,
+          metadata_json = :metadata_json
+      WHERE id = :id
+    `,
+    {
+      id: sourceId,
+      file_type: analysis.fileType,
+      row_count: analysis.rowCount,
+      column_mapping: JSON.stringify({
+        dataset_type: analysis.suggestion?.datasetType || 'raw',
+        mapping: analysis.suggestion?.mapping || {},
+        confidence: analysis.suggestion?.confidence ?? 0,
+        method: analysis.suggestion?.method || 'analysis',
+      }),
+      metadata_json: JSON.stringify(metadata),
     },
   );
 }
@@ -930,6 +1023,50 @@ export async function updateSourceMapping({ tenantId, sourceId, datasetType, map
       status: 'uploaded',
     },
   );
+}
+
+export async function ensureSourcesProcessed({ tenantId, userId = null } = {}) {
+  const pending = await all(
+    `
+      SELECT *
+      FROM source_files
+      WHERE tenant_id = :tenant_id
+        AND status IN ('uploaded', 'failed')
+      ORDER BY upload_date ASC
+    `,
+    { tenant_id: tenantId },
+  );
+
+  if (!pending.length) {
+    return { processed: 0, failed: 0 };
+  }
+
+  let processed = 0;
+  let failed = 0;
+
+  for (const source of pending) {
+    if (!source.file_path || !fs.existsSync(source.file_path)) {
+      await markSourceFailed(source.id, 'File sumber tidak ditemukan di server.');
+      failed += 1;
+      continue;
+    }
+
+    await updateSourceStatus(source.id, 'processing');
+    try {
+      if (!isParseableFileType(source.file_type)) {
+        throw unsupportedUploadError();
+      }
+      const analysis = await analyzeUploadedFile(source.file_path, source.filename, source.file_type);
+      await updateSourceAnalysis(source.id, analysis);
+      await processSourceFile({ tenantId, userId, sourceId: source.id });
+      processed += 1;
+    } catch (error) {
+      await markSourceFailed(source.id, error?.message || 'File tidak bisa diproses.');
+      failed += 1;
+    }
+  }
+
+  return { processed, failed };
 }
 
 export async function processSourceFile({ tenantId, userId, sourceId }) {
@@ -1288,6 +1425,8 @@ export async function deleteSource(tenantId, sourceId) {
       tenant_id: tenantId,
       source_file_id: sourceId,
     });
+
+    await deleteDatasetTablesForSource(sourceId);
 
     await run(`DELETE FROM source_files WHERE tenant_id = :tenant_id AND id = :id`, {
       tenant_id: tenantId,

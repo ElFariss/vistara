@@ -1,6 +1,6 @@
 import { get } from '../db.mjs';
 import { parseFlexibleDate, parseIndonesianNumber } from '../utils/parse.mjs';
-import { readParsedSourceFile } from './ingestion.mjs';
+import { ensureSourcesProcessed, readParsedSourceFile } from './ingestion.mjs';
 
 function parseJsonSafe(input, fallback = {}) {
   try {
@@ -271,6 +271,7 @@ function buildProfilePayload(source, parsed, mappingInfo) {
 }
 
 export async function getDatasetProfile(tenantId) {
+  await ensureSourcesProcessed({ tenantId });
   const source = await latestSourceRecord(tenantId);
   if (!source?.file_path) {
     return null;

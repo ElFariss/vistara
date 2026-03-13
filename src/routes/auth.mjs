@@ -6,7 +6,7 @@ import { generateId } from '../utils/ids.mjs';
 import { issueAuthToken } from '../http/auth.mjs';
 import { resolvePublicErrorMessage, sendError, sendJson } from '../http/response.mjs';
 import { config } from '../config.mjs';
-import { ingestUploadedSource } from '../services/ingestion.mjs';
+import { storeUploadedSource } from '../services/ingestion.mjs';
 
 function validateRegisterBody(body) {
   if (!body.email || !body.password || !body.name) {
@@ -86,13 +86,12 @@ export function registerAuthRoutes(router) {
     fs.copyFileSync(demoDataset, storedPath);
 
     try {
-      await ingestUploadedSource({
+      await storeUploadedSource({
         tenantId,
         userId,
         filePath: storedPath,
         filename: 'test.csv',
         contentType: 'text/csv',
-        replaceExisting: true,
       });
     } catch (error) {
       if (fs.existsSync(storedPath)) {

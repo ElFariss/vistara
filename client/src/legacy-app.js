@@ -41,6 +41,37 @@ const ZOOM_STEP = 0.1;
 const SETTINGS_STORAGE_KEY = 'vistara_settings';
 const PRECHAT_ROTATE_MS = 5000;
 const PRECHAT_FADE_MS = 320;
+const UPLOAD_ALLOWED_EXTENSIONS = new Set([
+  '.csv',
+  '.tsv',
+  '.ssv',
+  '.dsv',
+  '.xlsx',
+  '.xls',
+  '.json',
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.db',
+  '.sqlite',
+  '.sqlite3',
+  '.sql',
+  '.mdb',
+  '.accdb',
+  '.dbf',
+  '.parquet',
+  '.duckdb',
+]);
+const UPLOAD_BLOCKED_EXTENSIONS = new Set([
+  '.zip',
+  '.tar',
+  '.gz',
+  '.tgz',
+  '.7z',
+  '.rar',
+  '.py',
+]);
+const UPLOAD_ALLOWED_LABEL = 'CSV, TSV, SSV, DSV, XLSX, XLS, JSON, PDF, DOC/DOCX, dan file database';
 
 const runtimeConfig = window.__VISTARA_RUNTIME__ || {};
 const API_BASE_URL = String(runtimeConfig.API_BASE_URL || '').trim().replace(/\/+$/, '');
@@ -277,6 +308,7 @@ const refs = {
   canvasPageIndicator: document.getElementById('canvasPageIndicator'),
   canvasDock: document.getElementById('canvasDock'),
   canvasGrid: document.getElementById('canvasGrid'),
+  sourceList: document.getElementById('sourceList'),
   dataFields: document.getElementById('dataFields'),
   dataPane: document.getElementById('dataPane'),
 
@@ -295,6 +327,30 @@ const refs = {
 
 function escapeAttribute(value) {
   return escapeHtml(String(value || '')).replace(/"/g, '&quot;');
+}
+
+function normalizeFileExtension(filename = '') {
+  const trimmed = String(filename || '').trim();
+  const dotIndex = trimmed.lastIndexOf('.');
+  if (dotIndex === -1) return '';
+  return trimmed.slice(dotIndex).toLowerCase();
+}
+
+function validateUploadFile(file) {
+  if (!file) {
+    throw new Error('Pilih file dulu.');
+  }
+  const ext = normalizeFileExtension(file.name);
+  if (!ext) {
+    throw new Error(`Format file tidak didukung. Gunakan ${UPLOAD_ALLOWED_LABEL}.`);
+  }
+  if (UPLOAD_BLOCKED_EXTENSIONS.has(ext)) {
+    throw new Error(`Format ${ext} tidak didukung. Gunakan ${UPLOAD_ALLOWED_LABEL}.`);
+  }
+  if (!UPLOAD_ALLOWED_EXTENSIONS.has(ext)) {
+    throw new Error(`Format file tidak didukung. Gunakan ${UPLOAD_ALLOWED_LABEL}.`);
+  }
+  return true;
 }
 
 function showToast(message, timeout = 3000) {
@@ -3402,17 +3458,20 @@ async function refreshSources() {
     const sources = response.sources || [];
     const ready = sources.filter((item) => item.status === 'ready');
     const totalRows = ready.reduce((acc, item) => acc + Number(item.row_count || 0), 0);
+    const hasSources = sources.length > 0;
 
     state.datasetReady = ready.length > 0 && totalRows > 0;
+    renderSourceList(sources);
     if (refs.sourceStats) {
       refs.sourceStats.textContent = `Data: ${ready.length}/${sources.length} source • ${totalRows.toLocaleString('id-ID')} baris`;
     }
-    setDatasetGateVisible(!state.datasetReady);
+    setDatasetGateVisible(!hasSources);
     syncComposerChrome();
   } catch {
     if (refs.sourceStats) {
       refs.sourceStats.textContent = 'Data: tidak dapat dimuat';
     }
+    renderSourceList([]);
     setDatasetGateVisible(!state.datasetReady);
     syncComposerChrome();
   }
@@ -3972,6 +4031,80 @@ function renderDataFields() {
   }
 }
 
+function formatSourceStatus(status = '') {
+  const key = String(status || '').toLowerCase();
+  if (key === 'ready') return { label: 'Siap', className: 'ready' };
+  if (key === 'processing') return { label: 'Memproses', className: 'processing' };
+  if (key === 'failed') return { label: 'Gagal', className: 'failed' };
+  return { label: 'Menunggu', className: 'pending' };
+}
+
+function renderSourceList(sources = []) {
+  if (!refs.sourceList) return;
+  refs.sourceList.innerHTML = '';
+
+  if (!sources.length) {
+    const empty = document.createElement('div');
+    empty.className = 'source-sub';
+    empty.textContent = 'Belum ada dataset.';
+    refs.sourceList.append(empty);
+    return;
+  }
+
+  for (const source of sources) {
+    const item = document.createElement('div');
+    item.className = 'source-item';
+
+    const meta = document.createElement('div');
+    meta.className = 'source-meta';
+
+    const name = document.createElement('div');
+    name.className = 'source-name';
+    name.textContent = source.filename || 'Dataset';
+    meta.append(name);
+
+    const sub = document.createElement('div');
+    sub.className = 'source-sub';
+    const rowCount = Number(source.row_count || 0);
+    sub.textContent = rowCount > 0
+      ? `${rowCount.toLocaleString('id-ID')} baris`
+      : 'Belum diproses';
+    meta.append(sub);
+
+    const actions = document.createElement('div');
+    actions.className = 'source-actions';
+    const status = formatSourceStatus(source.status);
+    const statusBadge = document.createElement('span');
+    statusBadge.className = `source-status ${status.className}`;
+    statusBadge.textContent = status.label;
+    actions.append(statusBadge);
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'ghost source-delete-btn';
+    delBtn.textContent = 'Hapus';
+    delBtn.addEventListener('click', async () => {
+      if (!source.id) return;
+      const confirmDelete = window.confirm(`Hapus dataset "${source.filename || 'Dataset'}"?`);
+      if (!confirmDelete) return;
+      delBtn.disabled = true;
+      try {
+        await api(`/api/data/sources/${source.id}`, { method: 'DELETE' });
+        await Promise.allSettled([refreshSources(), loadSchema(), refreshDashboards(), refreshVerdict()]);
+        showToast('Dataset dihapus.');
+      } catch (error) {
+        showToast(error?.message || 'Gagal menghapus dataset.');
+      } finally {
+        delBtn.disabled = false;
+      }
+    });
+    actions.append(delBtn);
+
+    item.append(meta, actions);
+    refs.sourceList.append(item);
+  }
+}
+
 async function uploadDataset({ file = null, demo = false, silent = false } = {}) {
   if (!state.token) {
     showPage('auth');
@@ -4002,9 +4135,7 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
         timeoutMs: UPLOAD_API_TIMEOUT_MS,
       });
     } else {
-      if (!file) {
-        throw new Error('Pilih file dulu.');
-      }
+      validateUploadFile(file);
 
       const formData = new FormData();
       formData.set('file', file);
@@ -4019,9 +4150,14 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
     await Promise.allSettled([refreshSources(), refreshVerdict(), refreshDashboards()]);
 
     if (!silent) {
+      const filename = response.source?.filename || 'baru';
+      const inserted = response.ingestion?.inserted;
+      const readyMessage = Number.isFinite(Number(inserted))
+        ? `Dataset ${filename} siap digunakan. ${Number(inserted)} baris diproses.`
+        : `Dataset ${filename} tersimpan. Akan diproses saat Anda meminta analisis atau dashboard.`;
       appendMessage({
         role: 'assistant',
-        content: `Dataset ${response.source?.filename || 'baru'} siap digunakan. ${response.ingestion?.inserted ?? 0} baris diproses.`,
+        content: readyMessage,
         mode: 'chat',
         artifacts: [],
       });
@@ -4034,7 +4170,7 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
       datasetType: response.ingestion?.dataset_type || null,
     });
 
-    showToast(demo ? 'Demo dataset berhasil diimport.' : 'Dataset berhasil diupload.');
+    showToast(demo ? 'Demo dataset berhasil diupload.' : 'Dataset berhasil diupload.');
     document.dispatchEvent(new CustomEvent('vistara:upload-complete', { detail: { success: true, message: 'Upload selesai!' } }));
     document.dispatchEvent(new CustomEvent('vistara:message-sent'));
     return response;
