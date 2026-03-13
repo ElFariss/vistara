@@ -1559,6 +1559,16 @@ label {
   justify-self: start;
 }
 
+[data-theme='dark'] .data-gate {
+  background: rgba(18, 18, 18, 0.92);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+[data-theme='dark'] .gate-upload-name {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
 .chat-thread {
   overflow: auto;
   overscroll-behavior: contain;
@@ -3992,6 +4002,15 @@ label {
   transition: opacity 0.2s ease;
 }
 
+[data-theme='dark'] .upload-drop-overlay {
+  background: rgba(10, 10, 10, 0.7);
+  border-color: color-mix(in srgb, var(--accent) 70%, #ffffff);
+}
+
+[data-theme='dark'] .upload-drop-content {
+  color: var(--accent-hover);
+}
+
 .upload-drop-overlay.hidden {
   display: none;
 }
@@ -4048,6 +4067,11 @@ label {
   border: 1px solid var(--line);
   border-radius: 16px;
   box-shadow: var(--shadow-lg);
+}
+
+[data-theme='dark'] .upload-loading-card {
+  background: #1b1b1b;
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 .upload-loading-spinner {

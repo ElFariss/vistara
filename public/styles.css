@@ -1559,6 +1559,16 @@ label {
   justify-self: start;
 }
 
+[data-theme='dark'] .data-gate {
+  background: rgba(18, 18, 18, 0.92);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+[data-theme='dark'] .gate-upload-name {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
 .chat-thread {
   overflow: auto;
   overscroll-behavior: contain;
