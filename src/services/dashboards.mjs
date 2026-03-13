@@ -225,10 +225,6 @@ export async function deleteDashboard(tenantId, userId, dashboardId) {
     return false;
   }
 
-  if (dashboard.is_default) {
-    return false;
-  }
-
   await run(
     `
       DELETE FROM dashboards
@@ -240,6 +236,34 @@ export async function deleteDashboard(tenantId, userId, dashboardId) {
       user_id: userId,
     },
   );
+
+  if (dashboard.is_default) {
+    const replacement = await get(
+      `
+        SELECT id
+        FROM dashboards
+        WHERE tenant_id = :tenant_id AND user_id = :user_id
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `,
+      { tenant_id: tenantId, user_id: userId },
+    );
+
+    if (replacement?.id) {
+      await run(
+        `
+          UPDATE dashboards
+          SET is_default = CASE WHEN id = :id THEN 1 ELSE 0 END
+          WHERE tenant_id = :tenant_id AND user_id = :user_id
+        `,
+        {
+          id: replacement.id,
+          tenant_id: tenantId,
+          user_id: userId,
+        },
+      );
+    }
+  }
 
   return true;
 }

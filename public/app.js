@@ -135,6 +135,7 @@ const state = {
   isLoadingConversation: false,
   isSendingMessage: false,
   isUploadingDataset: false,
+  dragDepth: 0,
   canvasViewportMovedByUser: false,
   canvasAutoCenteredRunId: null,
   draftSaveDirty: false,
@@ -221,6 +222,9 @@ const refs = {
   canvasViewport: document.getElementById('canvasViewport'),
   canvasWorld: document.getElementById('canvasWorld'),
   canvasLoading: document.getElementById('canvasLoading'),
+  uploadDropOverlay: document.getElementById('uploadDropOverlay'),
+  uploadLoading: document.getElementById('uploadLoading'),
+  uploadLoadingText: document.getElementById('uploadLoadingText'),
 
   dataGate: document.getElementById('dataGate'),
   gateUploadInput: document.getElementById('gateUploadInput'),
@@ -1810,6 +1814,36 @@ function setDatasetGateVisible(visible) {
   refs.dataGate.classList.toggle('hidden', !visible);
 }
 
+function setUploadDropOverlayVisible(visible) {
+  if (!refs.uploadDropOverlay) {
+    return;
+  }
+  refs.uploadDropOverlay.classList.toggle('hidden', !visible);
+  refs.uploadDropOverlay.setAttribute('aria-hidden', String(!visible));
+}
+
+function setUploadLoadingVisible(visible, message = '') {
+  if (!refs.uploadLoading) {
+    return;
+  }
+  refs.uploadLoading.classList.toggle('hidden', !visible);
+  if (refs.uploadLoadingText && message) {
+    refs.uploadLoadingText.textContent = message;
+  }
+}
+
+function shouldHandleFileDrop(event) {
+  if (!event?.dataTransfer) {
+    return false;
+  }
+  const types = Array.from(event.dataTransfer.types || []);
+  return types.includes('Files');
+}
+
+function shouldShowUploadOverlay() {
+  return state.currentPage === 'workspace' && Boolean(state.token);
+}
+
 function appendMessage(message) {
   const nextMessage = {
     id: message.id || generateMessageId(),
@@ -3390,12 +3424,13 @@ async function refreshSources() {
     const sources = response.sources || [];
     const ready = sources.filter((item) => item.status === 'ready');
     const totalRows = ready.reduce((acc, item) => acc + Number(item.row_count || 0), 0);
+    const hasSources = sources.length > 0;
 
     state.datasetReady = ready.length > 0 && totalRows > 0;
     if (refs.sourceStats) {
       refs.sourceStats.textContent = `Data: ${ready.length}/${sources.length} source • ${totalRows.toLocaleString('id-ID')} baris`;
     }
-    setDatasetGateVisible(!state.datasetReady);
+    setDatasetGateVisible(!hasSources);
     syncComposerChrome();
   } catch {
     if (refs.sourceStats) {
@@ -3961,6 +3996,8 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
   }
 
   state.isUploadingDataset = true;
+  setUploadDropOverlayVisible(false);
+  setUploadLoadingVisible(true, demo ? 'Mengupload demo dataset...' : 'Mengupload dataset...');
   syncComposerChrome();
   try {
     let response;
@@ -3985,9 +4022,14 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
     await Promise.allSettled([refreshSources(), refreshVerdict(), refreshDashboards()]);
 
     if (!silent) {
+      const filename = response.source?.filename || 'baru';
+      const inserted = response.ingestion?.inserted;
+      const readyMessage = Number.isFinite(Number(inserted))
+        ? `Dataset ${filename} siap digunakan. ${Number(inserted)} baris diproses.`
+        : `Dataset ${filename} tersimpan. Akan diproses saat Anda meminta analisis atau dashboard.`;
       appendMessage({
         role: 'assistant',
-        content: `Dataset ${response.source?.filename || 'baru'} siap digunakan. ${response.ingestion?.inserted ?? 0} baris diproses.`,
+        content: readyMessage,
         mode: 'chat',
         artifacts: [],
       });
@@ -3997,6 +4039,7 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
     return response;
   } finally {
     state.isUploadingDataset = false;
+    setUploadLoadingVisible(false);
     syncComposerChrome();
   }
 }
@@ -5141,6 +5184,46 @@ window.addEventListener('resize', () => {
 window.addEventListener('scroll', () => {
   syncLandingScrollCue();
 }, { passive: true });
+
+window.addEventListener('dragenter', (event) => {
+  if (!shouldHandleFileDrop(event) || !shouldShowUploadOverlay()) {
+    return;
+  }
+  event.preventDefault();
+  state.dragDepth += 1;
+  setUploadDropOverlayVisible(true);
+});
+
+window.addEventListener('dragover', (event) => {
+  if (!shouldHandleFileDrop(event) || !shouldShowUploadOverlay()) {
+    return;
+  }
+  event.preventDefault();
+});
+
+window.addEventListener('dragleave', (event) => {
+  if (!shouldHandleFileDrop(event) || !shouldShowUploadOverlay()) {
+    return;
+  }
+  event.preventDefault();
+  state.dragDepth = Math.max(0, state.dragDepth - 1);
+  if (state.dragDepth === 0) {
+    setUploadDropOverlayVisible(false);
+  }
+});
+
+window.addEventListener('drop', (event) => {
+  if (!shouldHandleFileDrop(event) || !shouldShowUploadOverlay()) {
+    return;
+  }
+  event.preventDefault();
+  state.dragDepth = 0;
+  setUploadDropOverlayVisible(false);
+  const file = event.dataTransfer?.files?.[0];
+  if (file) {
+    uploadDataset({ file }).catch(() => {});
+  }
+});
 
 if (refs.configDataset) {
   refs.configDataset.addEventListener('change', () => {

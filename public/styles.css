@@ -3978,3 +3978,110 @@ label {
 .widget-builder-footer button {
   min-width: 120px;
 }
+
+/* ─── Upload Drop Overlay ─── */
+.upload-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(249, 115, 22, 0.06);
+  backdrop-filter: blur(6px);
+  border: 2.5px dashed var(--accent);
+  border-radius: 16px;
+  transition: opacity 0.2s ease;
+}
+
+.upload-drop-overlay.hidden {
+  display: none;
+}
+
+.upload-drop-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--accent);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.upload-drop-content svg {
+  opacity: 0.85;
+  stroke: var(--accent);
+  animation: upload-bounce 1.2s ease-in-out infinite;
+}
+
+@keyframes upload-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.upload-drop-content p {
+  margin: 0;
+}
+
+/* ─── Upload Loading Indicator ─── */
+.upload-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 21;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  backdrop-filter: blur(4px);
+  border-radius: 16px;
+}
+
+.upload-loading.hidden {
+  display: none;
+}
+
+.upload-loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 1.6rem 2rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+}
+
+.upload-loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: upload-spin 0.7s linear infinite;
+}
+
+@keyframes upload-spin {
+  to { transform: rotate(360deg); }
+}
+
+.upload-loading-card p {
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--ink-secondary);
+  font-weight: 500;
+}
+
+[data-theme='dark'] .upload-drop-overlay {
+  background: rgba(10, 10, 10, 0.7);
+  border-color: color-mix(in srgb, var(--accent) 70%, #ffffff);
+}
+
+[data-theme='dark'] .upload-drop-content {
+  color: var(--accent-hover);
+}
+
+[data-theme='dark'] .upload-loading-card {
+  background: #1b1b1b;
+  border-color: rgba(255, 255, 255, 0.18);
+}

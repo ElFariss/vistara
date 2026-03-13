@@ -169,6 +169,7 @@ const state = {
   isLoadingConversation: false,
   isSendingMessage: false,
   isUploadingDataset: false,
+  dragDepth: 0,
   canvasViewportMovedByUser: false,
   canvasAutoCenteredRunId: null,
   draftSaveDirty: false,
@@ -256,6 +257,9 @@ const refs = {
   canvasViewport: document.getElementById('canvasViewport'),
   canvasWorld: document.getElementById('canvasWorld'),
   canvasLoading: document.getElementById('canvasLoading'),
+  uploadDropOverlay: document.getElementById('uploadDropOverlay'),
+  uploadLoading: document.getElementById('uploadLoading'),
+  uploadLoadingText: document.getElementById('uploadLoadingText'),
 
   dataGate: document.getElementById('dataGate'),
   gateUploadInput: document.getElementById('gateUploadInput'),
@@ -1923,6 +1927,36 @@ function setEditMode(editing) {
 
 function setDatasetGateVisible(visible) {
   refs.dataGate.classList.toggle('hidden', !visible);
+}
+
+function setUploadDropOverlayVisible(visible) {
+  if (!refs.uploadDropOverlay) {
+    return;
+  }
+  refs.uploadDropOverlay.classList.toggle('hidden', !visible);
+  refs.uploadDropOverlay.setAttribute('aria-hidden', String(!visible));
+}
+
+function setUploadLoadingVisible(visible, message = '') {
+  if (!refs.uploadLoading) {
+    return;
+  }
+  refs.uploadLoading.classList.toggle('hidden', !visible);
+  if (refs.uploadLoadingText && message) {
+    refs.uploadLoadingText.textContent = message;
+  }
+}
+
+function shouldHandleFileDrop(event) {
+  if (!event?.dataTransfer) {
+    return false;
+  }
+  const types = Array.from(event.dataTransfer.types || []);
+  return types.includes('Files');
+}
+
+function shouldShowUploadOverlay() {
+  return state.currentPage === 'workspace' && Boolean(state.token);
 }
 
 function appendMessage(message) {
@@ -4174,6 +4208,8 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
   }
 
   state.isUploadingDataset = true;
+  setUploadDropOverlayVisible(false);
+  setUploadLoadingVisible(true, demo ? 'Mengupload demo dataset...' : 'Mengupload dataset...');
   syncComposerChrome();
   document.dispatchEvent(new CustomEvent('vistara:message-sending'));
   try {
@@ -4230,6 +4266,7 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
     throw uploadError;
   } finally {
     state.isUploadingDataset = false;
+    setUploadLoadingVisible(false);
     syncComposerChrome();
   }
 }
@@ -5438,6 +5475,46 @@ window.addEventListener('resize', () => {
 window.addEventListener('scroll', () => {
   syncLandingScrollCue();
 }, { passive: true });
+
+window.addEventListener('dragenter', (event) => {
+  if (!shouldHandleFileDrop(event) || !shouldShowUploadOverlay()) {
+    return;
+  }
+  event.preventDefault();
+  state.dragDepth += 1;
+  setUploadDropOverlayVisible(true);
+});
+
+window.addEventListener('dragover', (event) => {
+  if (!shouldHandleFileDrop(event) || !shouldShowUploadOverlay()) {
+    return;
+  }
+  event.preventDefault();
+});
+
+window.addEventListener('dragleave', (event) => {
+  if (!shouldHandleFileDrop(event) || !shouldShowUploadOverlay()) {
+    return;
+  }
+  event.preventDefault();
+  state.dragDepth = Math.max(0, state.dragDepth - 1);
+  if (state.dragDepth === 0) {
+    setUploadDropOverlayVisible(false);
+  }
+});
+
+window.addEventListener('drop', (event) => {
+  if (!shouldHandleFileDrop(event) || !shouldShowUploadOverlay()) {
+    return;
+  }
+  event.preventDefault();
+  state.dragDepth = 0;
+  setUploadDropOverlayVisible(false);
+  const file = event.dataTransfer?.files?.[0];
+  if (file) {
+    uploadDataset({ file }).catch(() => {});
+  }
+});
 
 if (refs.configDataset) {
   refs.configDataset.addEventListener('change', () => {
