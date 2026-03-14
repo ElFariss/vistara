@@ -1,8 +1,9 @@
 import { generateId } from '../utils/ids.mjs';
 import { parseIndonesianNumber } from '../utils/parse.mjs';
-import { executeAnalyticsIntent, executeBuilderQuery, getDefaultBuilderSchema } from './queryEngine.mjs';
+import { executeAnalyticsIntent, executeBuilderQuery, getDefaultBuilderSchema, getBuilderSchema } from './queryEngine.mjs';
 import { getDashboard, getLatestDashboard } from './dashboards.mjs';
 import { runPythonSnippet } from './pythonRuntime.mjs';
+import { runPythonAnalysis } from './pythonSandbox.mjs';
 import { generateJsonWithGeminiMedia, generateWithGeminiTools } from './gemini.mjs';
 import { renderDashboardPng } from './dashboardImage.mjs';
 import { config } from '../config.mjs';
@@ -15,6 +16,11 @@ import {
   suggestDashboardLayout,
 } from '../../public/dashboard-layout.js';
 import { Prompts } from './agents/index.mjs';
+import { getDatasetProfile } from './dataProfile.mjs';
+import { getDatasetTable } from './datasetTables.mjs';
+import { createLogger } from '../utils/logger.mjs';
+
+const logger = createLogger('agent-runtime');
 
 const VISTARA_SYSTEM_PROMPT = Prompts.VISTARA_SYSTEM;
 
@@ -71,6 +77,20 @@ const PLANNER_TOOL_DECLARATIONS = [
 
 const ANALYST_TOOL_DECLARATIONS = [
   {
+    name: 'python_data_interpreter',
+    description: 'Runs a Python script to analyze complex generic data shapes using pandas and openpyxl. Use this for datasets that cannot be processed through standard SQL queries.',
+    parameters: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description: 'The python script to execute. The target file is available as target_file variable.'
+        },
+      },
+      required: ['code'],
+    },
+  },
+  {
     name: 'submit_analysis_brief',
     description: 'Submit a structured analyst brief grounded in real query results.',
     parameters: {
@@ -84,6 +104,8 @@ const ANALYST_TOOL_DECLARATIONS = [
           items: { type: 'string' },
           description: 'Candidate IDs that should be prioritized for widget creation.',
         },
+        recommend_dashboard: { type: 'boolean' },
+        dashboard_reason: { type: 'string' },
         findings: {
           type: 'array',
           items: {
@@ -107,6 +129,20 @@ const ANALYST_TOOL_DECLARATIONS = [
 ];
 
 const WORKER_TOOL_DECLARATIONS = [
+  {
+    name: 'python_data_interpreter',
+    description: 'Runs a Python script to analyze complex generic data shapes using pandas and openpyxl. Use for datasets that cannot be processed through standard SQL queries.',
+    parameters: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description: 'The python script to execute. The target file is available as target_file variable.'
+        },
+      },
+      required: ['code'],
+    },
+  },
   {
     name: 'read_dashboard_template',
     description: 'Read available dashboard components before running data queries.',
@@ -196,6 +232,20 @@ const ARGUS_TOOL_DECLARATIONS = [
       type: 'object',
       properties: {
         code: { type: 'string' },
+      },
+      required: ['code'],
+    },
+  },
+  {
+    name: 'python_data_interpreter',
+    description: 'Runs a Python script to analyze complex generic data shapes using pandas and openpyxl, avoiding strict SQL schema failures. Prints final results via stdout using print().',
+    parameters: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description: 'The python script to execute. The target file is available as target_file variable.'
+        },
       },
       required: ['code'],
     },
@@ -414,7 +464,7 @@ async function dashboardFromContext(tenantId, userId, dashboardId = null) {
     config: {
       mode: 'ai',
       pages: 1,
-      components: COMPLEX_TEMPLATE_COMPONENTS.slice(0, 4).map((component) => cloneComponent(component)),
+      components: [],
       updated_by: 'agent',
     },
   };
@@ -487,8 +537,9 @@ function edaSuggestionForComponent(component = {}) {
   return { dataset: 'transactions', measure: 'revenue', group_by: 'none', visualization: 'metric' };
 }
 
-function buildEdaProfile({ components = [], scope = {} }) {
-  const datasets = BUILDER_DATASETS.map((dataset) => {
+async function buildEdaProfile({ tenantId, components = [], scope = {} }) {
+  const schema = await getBuilderSchema(tenantId);
+  const datasets = (schema.datasets || []).map((dataset) => {
     const dimensions = Array.isArray(dataset.dimensions) ? dataset.dimensions : [];
     const measures = Array.isArray(dataset.measures) ? dataset.measures : [];
     return {
@@ -1988,17 +2039,27 @@ function isFullDashboardGoal(goal = '', intent = {}) {
   return /(lengkap|kompleks|full|penuh|overview|ringkasan)/.test(text);
 }
 
-function mergeWithComplexDefaults(components) {
+function mergeWithComplexDefaults(components, routingScope = {}) {
+  // Only add transaction templates if the dataset maps to a transaction schema
+  const isTransactionDataset = !routingScope.dataset_type || routingScope.dataset_type === 'transaction';
+  
+  if (!components || components.length === 0) {
+    if (!isTransactionDataset) return [];
+    return COMPLEX_TEMPLATE_COMPONENTS.slice(0, 4).map(cloneComponent);
+  }
+  
   const map = new Map();
 
   for (const item of components) {
     map.set(componentMetricKey(item), item);
   }
 
-  for (const fallback of COMPLEX_TEMPLATE_COMPONENTS) {
-    const key = componentMetricKey(fallback);
-    if (!map.has(key)) {
-      map.set(key, cloneComponent(fallback));
+  if (isTransactionDataset) {
+    for (const fallback of COMPLEX_TEMPLATE_COMPONENTS) {
+      const key = componentMetricKey(fallback);
+      if (!map.has(key)) {
+        map.set(key, cloneComponent(fallback));
+      }
     }
   }
 
@@ -2239,6 +2300,8 @@ function buildDeterministicAnalysisBrief({ goal, scope, candidates = [] }) {
     business_goal: safeText(goal || 'Dashboard bisnis', 'Dashboard bisnis', 140),
     time_scope: safeText(scope?.time_period || '30 hari terakhir', '30 hari terakhir', 64),
     recommended_candidates: recommendedCandidates,
+    recommend_dashboard: false,
+    dashboard_reason: null,
     findings,
   };
 }
@@ -2255,6 +2318,39 @@ async function runAnalystAgent({ tenantId, userId, goal, scope, components, trac
 
   const candidates = [];
   const dedupedComponents = dedupeComponents(Array.isArray(components) ? components : []).slice(0, MAX_WIDGETS);
+  
+  // Dynamic discovery for generic datasets
+  const datasetProfile = await getDatasetProfile(tenantId);
+  if (datasetProfile?.mapping?.dataset_type === 'generic' || (datasetProfile?.tables?.length > 0 && candidates.length === 0)) {
+    const tables = datasetProfile.tables || [];
+    for (const tableInfo of tables.slice(0, 3)) {
+      try {
+        const table = await getDatasetTable(tenantId, tableInfo.id);
+        if (table && table.rows?.length > 0) {
+          const candidateId = `builder_${tableInfo.id}_discovery`;
+          const artifact = {
+            kind: 'table',
+            title: `Data: ${tableInfo.name}`,
+            columns: table.columns,
+            rows: table.rows.slice(0, 5),
+            total_rows: table.row_count || table.rows.length,
+          };
+          candidates.push({
+            candidate_id: candidateId,
+            finding_id: candidateId,
+            component: { type: 'TopList', title: `Data: ${tableInfo.name}`, dataset: tableInfo.id },
+            call: { tool: 'query_builder', args: { dataset: tableInfo.id, limit: 10 } },
+            query: { dataset: tableInfo.id, limit: 10 },
+            artifact,
+            evidence: `Tabel ${tableInfo.name} memiliki ${artifact.total_rows} baris. Kolom: ${table.columns.join(', ')}.`,
+          });
+        }
+      } catch (err) {
+        logger.error('generic_discovery_failed', { table: tableInfo.id, error: err.message });
+      }
+    }
+  }
+
   for (let index = 0; index < dedupedComponents.length; index += 1) {
     const component = dedupedComponents[index];
     const call = toolCallFromComponent(component, scope);
@@ -2391,6 +2487,8 @@ async function runAnalystAgent({ tenantId, userId, goal, scope, components, trac
     .filter(Boolean)
     .slice(0, 4);
   const recommendedCandidates = normalizedRecommended.length > 0 ? normalizedRecommended : fallbackRecommended;
+  const recommendDashboard = Boolean(payload?.recommend_dashboard);
+  const dashboardReason = normalizeUserFacingText(payload?.dashboard_reason || '', '');
 
   const brief = normalizedFindings.length > 0
     ? {
@@ -2398,6 +2496,8 @@ async function runAnalystAgent({ tenantId, userId, goal, scope, components, trac
         business_goal: safeText(payload?.business_goal || goal || fallbackBrief.business_goal, fallbackBrief.business_goal, 180),
         time_scope: safeText(payload?.time_scope || scope?.time_period || fallbackBrief.time_scope, fallbackBrief.time_scope, 64),
         recommended_candidates: recommendedCandidates,
+        recommend_dashboard: recommendDashboard,
+        dashboard_reason: dashboardReason || null,
         findings: normalizedFindings,
       }
     : fallbackBrief;
@@ -2419,6 +2519,138 @@ async function runAnalystAgent({ tenantId, userId, goal, scope, components, trac
     source: normalizedFindings.length > 0 ? 'gemini_tool_call' : 'fallback',
     brief,
     candidates,
+  };
+}
+
+function selectPrimaryCandidateForAnalysis(analyst = null) {
+  const candidates = Array.isArray(analyst?.candidates) ? analyst.candidates : [];
+  if (candidates.length === 0) {
+    return null;
+  }
+  const findings = Array.isArray(analyst?.brief?.findings) ? analyst.brief.findings : [];
+  const primaryId = findings.find((finding) => finding.priority === 'primary')?.candidate_id || null;
+  if (primaryId) {
+    const primary = candidates.find((candidate) => candidate.candidate_id === primaryId && candidate.artifact);
+    if (primary) {
+      return primary;
+    }
+  }
+  const recommended = Array.isArray(analyst?.brief?.recommended_candidates)
+    ? new Set(analyst.brief.recommended_candidates.map((value) => safeText(value || '', '', 64)).filter(Boolean))
+    : null;
+  if (recommended && recommended.size > 0) {
+    const pick = candidates.find((candidate) => recommended.has(candidate.candidate_id) && candidate.artifact);
+    if (pick) {
+      return pick;
+    }
+  }
+  return candidates.find((candidate) => candidate.artifact) || null;
+}
+
+function buildSingleWidgetAnswer({ analysisBrief = null, artifact = null, scope = {} }) {
+  const briefSummary = buildDashboardSummaryFromBrief({ analysisBrief, scope });
+  if (briefSummary) {
+    return briefSummary.replace(/^Ringkasan dashboard:/i, 'Ringkasan analisis:');
+  }
+  if (artifact) {
+    const evidence = artifactEvidenceSummary(artifact);
+    if (evidence) {
+      return `Apa yang terlihat: ${evidence}.`;
+    }
+  }
+  return 'Belum ada insight yang cukup kuat dari data saat ini.';
+}
+
+export async function runSingleWidgetAnalysis({
+  tenantId,
+  userId,
+  goal,
+  scope,
+  dashboard = null,
+  hooks = null,
+  signal = null,
+}) {
+  const trace = [];
+  const memory = { steps: [] };
+  const normalizedScope = normalizeScope(scope || {});
+  const components = normalizeTemplateComponents(dashboard);
+  const datasetProfile = await getDatasetProfile(tenantId);
+  memory.current_dataset_path = datasetProfile?.source?.file_path || null;
+  const analyst = await runAnalystAgent({
+    tenantId,
+    userId,
+    goal,
+    scope: normalizedScope,
+    components,
+    trace,
+    memory,
+    hooks,
+    signal,
+  });
+
+  const primaryCandidate = selectPrimaryCandidateForAnalysis(analyst);
+  if (!primaryCandidate || !primaryCandidate.artifact) {
+    const fallbackAnswer = buildSingleWidgetAnswer({
+      analysisBrief: analyst.brief,
+      artifact: null,
+      scope: normalizedScope,
+    });
+    return {
+      answer: fallbackAnswer,
+      widgets: [],
+      artifacts: [],
+      analysis_brief: analyst.brief,
+      presentation_mode: 'chat',
+      content_format: 'plain',
+      recommend_dashboard: Boolean(analyst?.brief?.recommend_dashboard),
+      dashboard_reason: analyst?.brief?.dashboard_reason || null,
+      agent: {
+        mode: 'single_analysis_runtime',
+        trace,
+        memory,
+        analyst: {
+          ok: analyst.ok,
+          source: analyst.source,
+          findings: Array.isArray(analyst.brief?.findings) ? analyst.brief.findings.length : 0,
+        },
+      },
+    };
+  }
+
+  const widgetTitle = candidateTitle(primaryCandidate.component, primaryCandidate.artifact);
+  const widget = {
+    id: generateId(),
+    title: widgetTitle || primaryCandidate.artifact.title || 'Insight Utama',
+    artifact: primaryCandidate.artifact,
+    query: primaryCandidate.query || primaryCandidate.call?.args || null,
+    layout: primaryCandidate.component?.layout || null,
+  };
+
+  const answer = buildSingleWidgetAnswer({
+    analysisBrief: analyst.brief,
+    artifact: primaryCandidate.artifact,
+    scope: normalizedScope,
+  });
+
+  return {
+    answer,
+    widgets: [widget],
+    artifacts: [primaryCandidate.artifact],
+    analysis_brief: analyst.brief,
+    presentation_mode: 'chat',
+    content_format: 'plain',
+    recommend_dashboard: Boolean(analyst?.brief?.recommend_dashboard),
+    dashboard_reason: analyst?.brief?.dashboard_reason || null,
+    agent: {
+      mode: 'single_analysis_runtime',
+      trace,
+      memory,
+      analyst: {
+        ok: analyst.ok,
+        source: analyst.source,
+        findings: Array.isArray(analyst.brief?.findings) ? analyst.brief.findings.length : 0,
+      },
+    },
   };
 }
 
@@ -2643,11 +2875,11 @@ function throwIfDashboardAborted(signal = null) {
   }
 }
 
-async function runPlannerAgent({ goal, scope, components, analysisBrief = null, trace, memory, hooks = null, signal = null }) {
+async function runPlannerAgent({ tenantId, goal, scope, components, analysisBrief = null, trace, memory, hooks = null, signal = null }) {
   throwIfDashboardAborted(signal);
   const fallback = defaultPlannerSteps(components);
   const catalog = componentCatalog(components);
-  const edaProfile = buildEdaProfile({ components, scope });
+  const edaProfile = await buildEdaProfile({ tenantId, components, scope });
   const timelineId = `planner_${Date.now()}`;
   const edaStepId = `planner_eda_${Date.now()}`;
 
@@ -2855,7 +3087,7 @@ async function runWorkerAgentWithGemini({
   const toolHistory = [];
   const callRecords = [];
   const artifactGroups = [];
-  const edaProfile = buildEdaProfile({ components, scope });
+  const edaProfile = await buildEdaProfile({ tenantId, components, scope });
   const baseWidgetBudget = Math.min(MAX_WIDGETS, Array.isArray(components) ? components.length : MAX_WIDGETS);
   const plannedWidgetBudget = Math.max(MIN_WIDGETS, baseWidgetBudget);
   const maxUniqueToolCalls = Math.max(2, Math.min(MAX_WIDGETS, plannedWidgetBudget + 1));
@@ -3030,6 +3262,93 @@ async function runWorkerAgentWithGemini({
         title: `Template terbaca (${templateResult.components.length} komponen)`,
         agent: 'worker',
       });
+      continue;
+    }
+
+    if (call.name === 'python_data_interpreter') {
+      const stepId = `worker_python_${stepIndex + 1}_${Date.now()}`;
+      emitTimelineEvent(hooks, {
+        id: stepId,
+        status: 'pending',
+        title: 'Menjalankan analisis Python untuk dataset generik',
+        agent: 'worker',
+      });
+
+      try {
+        // Get the current dataset path from memory
+        const datasetPath = memory.current_dataset_path;
+        if (!datasetPath) {
+          throw new Error('No dataset available for Python analysis');
+        }
+
+        const pythonResult = await runPythonAnalysis(call.args.code, datasetPath);
+
+        if (pythonResult.success) {
+          // Create a markdown widget with the Python analysis result
+          const widget = {
+            id: generateId(),
+            type: 'markdown',
+            config: {
+              content: `## Analisis Data Python\n\n\`\`\`\n${pythonResult.result}\n\`\`\``
+            },
+            size: 'full',
+            title: 'Analisis Dataset'
+          };
+
+          widgets.push(widget);
+          artifacts.push({
+            kind: 'table',
+            title: 'Analisis Python',
+            columns: ['Output'],
+            rows: [[pythonResult.result]],
+          });
+          nonEmptyCount += 1;
+          producedWidgets += 1;
+
+          pushTrace(trace, {
+            step: 'tool:python_data_interpreter',
+            success: true,
+            iteration: stepIndex + 1,
+          });
+
+          emitTimelineEvent(hooks, {
+            id: stepId,
+            status: 'done',
+            title: 'Analisis Python berhasil',
+            agent: 'worker',
+          });
+        } else {
+          pushTrace(trace, {
+            step: 'tool:python_data_interpreter',
+            success: false,
+            error: pythonResult.result,
+          });
+
+          emitTimelineEvent(hooks, {
+            id: stepId,
+            status: 'error',
+            title: 'Analisis Python gagal',
+            agent: 'worker',
+            meta: { error: pythonResult.result },
+          });
+        }
+      } catch (error) {
+        logger.error('Python data interpreter failed', { error: error.message });
+
+        pushTrace(trace, {
+          step: 'tool:python_data_interpreter',
+          success: false,
+          error: error.message,
+        });
+
+        emitTimelineEvent(hooks, {
+          id: stepId,
+          status: 'error',
+          title: 'Analisis Python error',
+          agent: 'worker',
+          meta: { error: error.message },
+        });
+      }
       continue;
     }
 
@@ -3827,7 +4146,7 @@ export async function runDashboardAgent({
 
   const dashboard = inputDashboard || await dashboardFromContext(tenantId, userId, dashboardId);
   const baseComponents = normalizeTemplateComponents(dashboard);
-  const components = isFullDashboardGoal(goal, routingScope) ? mergeWithComplexDefaults(baseComponents) : baseComponents;
+  const components = isFullDashboardGoal(goal, routingScope) ? mergeWithComplexDefaults(baseComponents, routingScope) : baseComponents;
   const templateStepId = `template_${Date.now()}`;
 
   emitTimelineEvent(hooks, {
@@ -3853,6 +4172,9 @@ export async function runDashboardAgent({
     dashboard_id: dashboard.id,
     component_count: components.length,
   });
+
+  const datasetProfile = await getDatasetProfile(tenantId);
+  memory.current_dataset_path = datasetProfile?.source?.file_path || null;
 
   const analyst = await runAnalystAgent({
     tenantId,

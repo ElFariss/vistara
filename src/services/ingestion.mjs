@@ -14,6 +14,7 @@ import { generateJsonWithGemini } from './gemini.mjs';
 import { logAudit } from './audit.mjs';
 import { config } from '../config.mjs';
 import { Prompts } from './agents/index.mjs';
+import { profileRows } from './dataProfile.mjs';
 
 function detectFileType(filename, contentType = '') {
   const ext = path.extname(filename || '').toLowerCase();
@@ -199,10 +200,80 @@ function datasetNameFromFilename(filename = '') {
   return base || 'Dataset';
 }
 
+function scoreTable(table = {}) {
+  const columns = Array.isArray(table?.columns) ? table.columns : [];
+  const rows = Array.isArray(table?.rows) ? table.rows : [];
+  const profile = profileRows({ columns, rows });
+  const numericCount = Array.isArray(profile.detected?.numeric_columns) ? profile.detected.numeric_columns.length : 0;
+  const dateCount = Array.isArray(profile.detected?.date_columns) ? profile.detected.date_columns.length : 0;
+  const rowCount = rows.length;
+  const score = (numericCount * 1000) + (dateCount * 100) + rowCount;
+  return {
+    score,
+    numericCount,
+    dateCount,
+    rowCount,
+    profile,
+  };
+}
+
 function pickPrimaryTable(tables = []) {
-  return tables.reduce((best, current) => (
-    (current?.rows?.length || 0) > (best?.rows?.length || 0) ? current : best
-  ), tables[0] || { columns: [], rows: [] });
+  if (!tables.length) {
+    return { columns: [], rows: [] };
+  }
+
+  let best = tables[0];
+  let bestScore = -1;
+
+  for (const table of tables) {
+    const { score } = scoreTable(table);
+    if (score > bestScore) {
+      bestScore = score;
+      best = table;
+    }
+  }
+
+  return best || tables[0] || { columns: [], rows: [] };
+}
+
+function requiredColumnsForMapping(datasetType, mapping = {}) {
+  const requiredFields = requiredFieldsForDataset(datasetType);
+  const columns = [];
+  for (const field of requiredFields) {
+    const mapped = mapping?.[field];
+    if (typeof mapped === 'string' && mapped && mapped !== '__derived__') {
+      columns.push(mapped);
+    }
+  }
+  return columns;
+}
+
+function splitCompatibleTables(tables = [], requiredColumns = []) {
+  if (!requiredColumns.length) {
+    return {
+      included: tables,
+      skipped: [],
+    };
+  }
+
+  const included = [];
+  const skipped = [];
+
+  for (const table of tables) {
+    const columns = Array.isArray(table?.columns) ? table.columns : [];
+    const missingColumns = requiredColumns.filter((column) => !columns.includes(column));
+    if (missingColumns.length === 0) {
+      included.push(table);
+      continue;
+    }
+    skipped.push({
+      name: table?.name || 'Sheet',
+      row_count: Array.isArray(table?.rows) ? table.rows.length : 0,
+      missing_columns: missingColumns,
+    });
+  }
+
+  return { included, skipped };
 }
 
 export async function parseDatasetTables(filePath, fileType, filename) {
@@ -567,9 +638,23 @@ export async function analyzeUploadedFile(filePath, filename, contentType) {
     columns: Array.isArray(table?.columns) ? table.columns : [],
     rows: Array.isArray(table?.rows) ? table.rows : [],
   }));
-  const primary = normalizedTables.reduce((best, current) => (
-    current.rows.length > (best?.rows?.length || 0) ? current : best
-  ), normalizedTables[0] || { columns: [], rows: [] });
+
+  let primary = normalizedTables[0] || { columns: [], rows: [] };
+  let bestScore = -1;
+  const tableSummaries = normalizedTables.map((table, index) => {
+    const stats = scoreTable(table);
+    if (stats.score > bestScore) {
+      bestScore = stats.score;
+      primary = table;
+    }
+    return {
+      name: table?.name || `Sheet ${index + 1}`,
+      columns: table?.columns || [],
+      rowCount: stats.rowCount,
+      numeric_count: stats.numericCount,
+      date_count: stats.dateCount,
+    };
+  });
   const sampleRows = Array.isArray(primary?.rows) ? primary.rows.slice(0, 20) : [];
   const suggestion = await suggestColumnMapping(primary?.columns || [], sampleRows);
   const totalRows = normalizedTables.reduce((sum, table) => sum + (table.rows?.length || 0), 0);
@@ -580,11 +665,7 @@ export async function analyzeUploadedFile(filePath, filename, contentType) {
     sampleRows,
     rowCount: totalRows,
     suggestion,
-    tables: normalizedTables.map((table) => ({
-      name: table.name,
-      columns: table.columns,
-      rowCount: table.rows.length,
-    })),
+    tables: tableSummaries,
     primaryTable: primary?.name || null,
   };
 }
@@ -745,6 +826,12 @@ async function updateSourceAnalysis(sourceId, analysis) {
   metadata.sample_rows = analysis.sampleRows ?? [];
   metadata.tables = Array.isArray(analysis.tables) ? analysis.tables : [];
   metadata.primary_table = analysis.primaryTable ?? null;
+  if (analysis.includedTables) {
+    metadata.included_tables = analysis.includedTables;
+  }
+  if (analysis.skippedTables) {
+    metadata.skipped_tables = analysis.skippedTables;
+  }
 
   await run(
     `
@@ -765,6 +852,30 @@ async function updateSourceAnalysis(sourceId, analysis) {
         confidence: analysis.suggestion?.confidence ?? 0,
         method: analysis.suggestion?.method || 'analysis',
       }),
+      metadata_json: JSON.stringify(metadata),
+    },
+  );
+}
+
+async function updateSourceMetadata(sourceId, patch = {}) {
+  const current = (await get(`SELECT metadata_json FROM source_files WHERE id = :id`, { id: sourceId })) || {};
+  let metadata = {};
+  try {
+    metadata = current.metadata_json ? JSON.parse(current.metadata_json) : {};
+  } catch {
+    metadata = {};
+  }
+
+  metadata = { ...metadata, ...patch };
+
+  await run(
+    `
+      UPDATE source_files
+      SET metadata_json = :metadata_json
+      WHERE id = :id
+    `,
+    {
+      id: sourceId,
       metadata_json: JSON.stringify(metadata),
     },
   );
@@ -1085,16 +1196,28 @@ export async function processSourceFile({ tenantId, userId, sourceId }) {
   try {
     const tables = await parseDatasetTables(source.file_path, source.file_type, source.filename);
     const primary = pickPrimaryTable(tables);
+    const requiredColumns = requiredColumnsForMapping(mappingInfo.datasetType, mappingInfo.mapping);
+    const { included: includedTables, skipped: skippedTables } = splitCompatibleTables(tables, requiredColumns);
+    if (includedTables.length === 0) {
+      const requiredLabel = requiredColumns.length ? requiredColumns.join(', ') : 'kolom wajib';
+      throw new Error(`Tidak ada sheet yang cocok dengan mapping kolom. Kolom wajib: ${requiredLabel}.`);
+    }
+    const combinedRows = includedTables.flatMap((table) => table.rows || []);
 
     const summary = await withTransaction(async () => {
       await deleteDatasetTablesForSource(sourceId);
       await storeDatasetTables({ tenantId, sourceId, tables, minRows: 6 });
+      await updateSourceMetadata(sourceId, {
+        primary_table: primary?.name || null,
+        included_tables: includedTables.map((table) => table.name),
+        skipped_tables: skippedTables,
+      });
       if (mappingInfo.datasetType === 'expense') {
         return insertExpenses({
           tenantId,
           userId,
           sourceId,
-          rows: primary.rows,
+          rows: combinedRows,
           mapping: mappingInfo.mapping,
         });
       }
@@ -1103,7 +1226,7 @@ export async function processSourceFile({ tenantId, userId, sourceId }) {
         tenantId,
         userId,
         sourceId,
-        rows: primary.rows,
+        rows: combinedRows,
         mapping: mappingInfo.mapping,
       });
     });
@@ -1140,6 +1263,13 @@ export async function ingestUploadedSource({
   if (replaceExisting) {
     const tables = await parseDatasetTables(filePath, analysis.fileType, filename);
     const primary = pickPrimaryTable(tables);
+    const requiredColumns = requiredColumnsForMapping(analysis.suggestion?.datasetType, analysis.suggestion?.mapping || {});
+    const { included: includedTables, skipped: skippedTables } = splitCompatibleTables(tables, requiredColumns);
+    if (includedTables.length === 0) {
+      const requiredLabel = requiredColumns.length ? requiredColumns.join(', ') : 'kolom wajib';
+      throw new Error(`Tidak ada sheet yang cocok dengan mapping kolom. Kolom wajib: ${requiredLabel}.`);
+    }
+    const combinedRows = includedTables.flatMap((table) => table.rows || []);
     const previousSources = await all(`SELECT file_path FROM source_files WHERE tenant_id = :tenant_id`, {
       tenant_id: tenantId,
     });
@@ -1161,11 +1291,19 @@ export async function ingestUploadedSource({
       });
 
       await storeDatasetTables({ tenantId, sourceId, tables, minRows: 6 });
+      await updateSourceMetadata(sourceId, {
+        primary_table: primary?.name || null,
+        included_tables: includedTables.map((table) => table.name),
+        skipped_tables: skippedTables,
+      });
       result = await processParsedRows({
         tenantId,
         userId,
         sourceId,
-        parsed: primary,
+        parsed: {
+          columns: primary?.columns || [],
+          rows: combinedRows,
+        },
         datasetType: analysis.suggestion?.datasetType,
         mapping: analysis.suggestion?.mapping,
       });
@@ -1208,7 +1346,7 @@ export async function ingestUploadedSource({
 async function processParsedRows({ tenantId, userId, sourceId, parsed, datasetType, mapping }) {
   validateMapping(datasetType, mapping);
 
-  if (datasetType === 'raw') {
+  if (datasetType === 'raw' || datasetType === 'generic') {
     await updateSourceSummary(sourceId, {
       rowCount: 0,
       startDate: null,

@@ -1,10 +1,11 @@
+import fs from 'fs/promises';
+import { get } from '../db.mjs';
 import { config } from '../config.mjs';
 import { generateId } from '../utils/ids.mjs';
-import { generateWithGeminiTools } from './gemini.mjs';
-import { executeAnalyticsIntent } from './queryEngine.mjs';
+import { generateWithGeminiTools, generateTextWithGemini } from './gemini.mjs';
 import { inspectDatasetQuestion, getDatasetProfile } from './dataProfile.mjs';
 import { repairLatestSourceIfNeeded } from './ingestion.mjs';
-import { DashboardAgentError, runDashboardAgent } from './agentRuntime.mjs';
+import { DashboardAgentError, runDashboardAgent, runSingleWidgetAnalysis } from './agentRuntime.mjs';
 import { createDashboard } from './dashboards.mjs';
 import {
   ensureConversationAgentState,
@@ -341,13 +342,35 @@ function detectBlockingDatasetIssue(profile = null) {
     return null;
   }
 
-  const numericColumns = Array.isArray(profile.detected?.numeric_columns) && profile.detected.numeric_columns.length > 0
-    ? profile.detected.numeric_columns
-    : Array.isArray(profile.columns)
-      ? profile.columns.filter((column) => column?.kind === 'number').map((column) => column.name).filter(Boolean)
-      : [];
+  if (profile?.source?.status === 'failed') {
+    const errorMsg = profile.source.error || 'Format atau struktur data tidak sesuai dengan pola yang didukung.';
+    return {
+      type: 'repair_latest_source',
+      issue: 'mapping_failed',
+      title: 'Struktur Data Gagal Dipetakan',
+      prompt: `Saya mengalami kendala saat membaca data: ${errorMsg}. Apakah Anda ingin saya mencoba memperbaikinya secara otomatis, atau menganalisisnya sebagai data mentah (tanya spesifik apa yang ingin dicari)?`,
+    };
+  }
 
-  if (numericColumns.length === 0) {
+  if (profile?.mapping?.dataset_type === 'raw' || profile?.mapping?.dataset_type === 'generic') {
+    return null; // Raw datasets are handled directly via text, so they don't block
+  }
+
+  let hasNumeric = false;
+  const tables = Array.isArray(profile.tables) ? profile.tables : [];
+  if (tables.length > 0) {
+    const includedTables = tables.filter((table) => table.included !== false);
+    hasNumeric = includedTables.some((table) => (table.numeric_columns || []).length > 0);
+  } else {
+    const numericColumns = Array.isArray(profile.detected?.numeric_columns) && profile.detected.numeric_columns.length > 0
+      ? profile.detected.numeric_columns
+      : Array.isArray(profile.columns)
+        ? profile.columns.filter((column) => column?.kind === 'number').map((column) => column.name).filter(Boolean)
+        : [];
+    hasNumeric = numericColumns.length > 0;
+  }
+
+  if (!hasNumeric) {
     return {
       type: 'repair_latest_source',
       issue: 'measure_missing',
@@ -368,6 +391,12 @@ function emitAgentStart(hooks, payload = {}) {
 function emitAgentStep(hooks, payload = {}) {
   if (hooks && typeof hooks.onAgentStep === 'function') {
     hooks.onAgentStep(payload);
+  }
+}
+
+function emitAgentDialogue(hooks, payload = {}) {
+  if (hooks && typeof hooks.onAgentDialogue === 'function') {
+    hooks.onAgentDialogue(payload);
   }
 }
 
@@ -823,6 +852,49 @@ function runDashboardBaseFromState(agentState, savedDashboard) {
   return savedDashboard || null;
 }
 
+async function analyzeRawDataset({ tenantId, message, profile, history, userDisplayName }) {
+  const sourceId = profile?.source?.id;
+  if (!sourceId) return 'Maaf, data saat ini tidak ditemukan untuk dianalisis.';
+  
+  let content = '';
+  
+  if (Array.isArray(profile.tables) && profile.tables.length > 0) {
+    const tableSnippets = profile.tables.map(table => {
+      const rows = Array.isArray(table.sample_rows) ? table.sample_rows : [];
+      return `Sheet/Tabel: ${table.name}\nJumlah Baris: ${table.row_count}\nContoh Data:\n${JSON.stringify(rows, null, 2)}`;
+    });
+    content = tableSnippets.join('\n\n');
+  } else if (Array.isArray(profile.sample_rows) && profile.sample_rows.length > 0) {
+    content = `Contoh Data:\n${JSON.stringify(profile.sample_rows, null, 2)}`;
+  } else {
+    // Fallback to reading file if no tables or sample_rows are available
+    const source = await get('SELECT file_path FROM source_files WHERE id = ? AND tenant_id = ?', [sourceId, tenantId]);
+    if (!source?.file_path) return 'File data mentah tidak ditemukan.';
+    try {
+      content = await fs.readFile(source.file_path, 'utf-8');
+    } catch (error) {
+      return 'Gagal membaca isi data mentah Anda.';
+    }
+  }
+
+  // Truncate to avoid blowing token limit
+  const maxChars = 24000;
+  const snippet = content.slice(0, maxChars) + (content.length > maxChars ? '\n...[terpotong]' : '');
+
+  const result = await generateTextWithGemini({
+    systemPrompt: `Kamu adalah ${TEAM.analyst}, data analyst agent Vistara.
+    Tugasmu adalah menganalisis data mentah/tidak terstruktur (raw dataset) yang diunggah user dan menjawab pertanyaan analitiknya.
+    Dataset ini mungkin berisi beberapa sheet atau tabel. Kamu harus cerdas dalam memilih data dari sheet mana yang relevan dengan pertanyaan user.
+    ${userDisplayName ? `Nama user: ${userDisplayName}.` : ''}`,
+    userPrompt: `Riwayat percakapan:\n${buildHistoryContext(history)}\n\nPertanyaan user: ${message}\n\nIsi sampel data (${profile.source?.filename || 'File'}):\n\`\`\`\n${snippet}\n\`\`\`\n\nTolong jawab pertanyaan user berdasarkan cuplikan data di atas dengan bahasa Indonesia yang jelas, profesional, dan menolong. Jika pertanyaan butuh gabungan data dari beberapa sheet, lakukan korelasi atau gabungkan insight dari sheet-sheet yang relevan.`,
+    temperature: 0.3,
+    maxOutputTokens: 1000,
+  });
+
+  return result.text || 'Saya telah membaca data tersebut, tetapi kesulitan menyimpulkan analisis yang pasti.';
+}
+
+
 export async function runConversationAgent({
   tenantId,
   userId,
@@ -842,6 +914,29 @@ export async function runConversationAgent({
   let resolvedSavedDashboard = savedDashboard;
   let route = null;
   let resolvedDashboardChoice = null;
+  const agentDialogue = [];
+
+  const recordDialogue = (from, to, content, context = null) => {
+    if (!from || !to || !content) {
+      return;
+    }
+    const entry = {
+      id: generateId(),
+      run_id: runId,
+      ts: new Date().toISOString(),
+      from,
+      to,
+      message: String(content || '').trim(),
+      context,
+    };
+    agentDialogue.push(entry);
+    emitAgentDialogue(hooks, entry);
+  };
+
+  const wrapResponse = (payload) => ({
+    ...payload,
+    agent_dialogue: agentDialogue.length > 0 ? agentDialogue : [],
+  });
 
   emitAgentStart(hooks, {
     run_id: runId,
@@ -902,7 +997,7 @@ export async function runConversationAgent({
         },
       });
 
-      return {
+      return wrapResponse({
         answer: dashboardChoicePrompt(),
         content_format: 'markdown',
         widgets: [],
@@ -924,7 +1019,7 @@ export async function runConversationAgent({
             reason: 'pending_dashboard_choice',
           },
         },
-      };
+      });
     }
 
     agentState = await updateConversationAgentState({
@@ -991,7 +1086,7 @@ export async function runConversationAgent({
       },
     });
 
-    return {
+    return wrapResponse({
       answer,
       content_format: 'plain',
       widgets: [],
@@ -1010,7 +1105,7 @@ export async function runConversationAgent({
         trace,
         route,
       },
-    };
+    });
   }
 
   if (!resolvedDashboardChoice && shouldAskDashboardChoice({ route, agentState, savedDashboard: resolvedSavedDashboard })) {
@@ -1034,7 +1129,7 @@ export async function runConversationAgent({
       },
     });
 
-    return {
+    return wrapResponse({
       answer: dashboardChoicePrompt(),
       content_format: 'markdown',
       widgets: [],
@@ -1053,7 +1148,7 @@ export async function runConversationAgent({
         trace,
         route,
       },
-    };
+    });
   }
 
   if (route.action === 'conversational' || route.action === 'ask_clarification') {
@@ -1090,7 +1185,7 @@ export async function runConversationAgent({
       },
     });
 
-    return {
+    return wrapResponse({
       answer,
       content_format: 'plain',
       widgets: [],
@@ -1109,7 +1204,7 @@ export async function runConversationAgent({
         trace,
         route,
       },
-    };
+    });
   }
 
   if (route.action === 'inspect_dataset') {
@@ -1120,6 +1215,7 @@ export async function runConversationAgent({
       status: 'pending',
     });
 
+    recordDialogue(TEAM.orchestrator, TEAM.analyst, 'Tolong cek struktur dataset dan ringkas temuan kualitasnya.');
     const inspection = await inspectDatasetQuestion({ tenantId, message });
     const nextState = await updateConversationAgentState({
       tenantId,
@@ -1135,7 +1231,8 @@ export async function runConversationAgent({
     });
 
     pushTrace(trace, { step: 'dataset_inspection', columns: inspection.profile?.summary?.columns || 0 });
-    return {
+    recordDialogue(TEAM.analyst, TEAM.orchestrator, inspection.answer || 'Ringkasan inspeksi dataset siap.');
+    return wrapResponse({
       answer: inspection.answer,
       content_format: 'plain',
       widgets: [],
@@ -1155,7 +1252,7 @@ export async function runConversationAgent({
         trace,
         route,
       },
-    };
+    });
   }
 
   if (route.action === 'analyze') {
@@ -1166,67 +1263,6 @@ export async function runConversationAgent({
       status: 'pending',
     });
 
-    datasetProfile = await ensureDatasetProfile();
-    const analysisIntent = await buildAnalyticsIntent({
-      message: effectiveMessage,
-      history,
-      route,
-      datasetProfile,
-      dashboardContext: buildDashboardContext(agentState, resolvedSavedDashboard),
-    });
-    const analytics = await executeAnalyticsIntent({
-      tenantId,
-      userId,
-      intent: analysisIntent,
-    });
-
-    await mergeConversationAgentMemory({
-      tenantId,
-      userId,
-      conversationId,
-      patch: {
-        [TEAM.analyst]: {
-          last_intent: analysisIntent,
-          last_result: {
-            template_id: analytics.template_id,
-            period: analytics.period,
-          },
-          last_updated_at: new Date().toISOString(),
-        },
-      },
-    });
-
-    const nextState = await updateConversationAgentState({
-      tenantId,
-      userId,
-      conversationId,
-      activeRun: {
-        run_id: runId,
-        status: 'done',
-        stage: 'analysis',
-        completed_at: new Date().toISOString(),
-      },
-    });
-
-    pushTrace(trace, { step: 'analysis', template_id: analytics.template_id, intent: analysisIntent.intent });
-    return {
-      ...analytics,
-      content_format: 'markdown',
-      presentation_mode: 'chat',
-      intent: analysisIntent,
-      draft_dashboard: nextState?.draft_dashboard || null,
-      pending_approval: nextState?.pending_approval || null,
-      agent: {
-        mode: 'agentic_team_runtime',
-        run_id: runId,
-        team: TEAM,
-        trace,
-        route,
-      },
-    };
-  }
-
-  if (route.action === 'create_dashboard' || route.action === 'edit_dashboard') {
     datasetProfile = await ensureDatasetProfile();
     const blockingIssue = detectBlockingDatasetIssue(datasetProfile);
     if (blockingIssue && !agentState?.pending_approval) {
@@ -1253,11 +1289,13 @@ export async function runConversationAgent({
         },
       });
 
+      recordDialogue(TEAM.orchestrator, TEAM.engineer, `Butuh perbaikan data: ${blockingIssue.title}.`);
+      recordDialogue(TEAM.engineer, TEAM.orchestrator, approval.prompt);
       emitApprovalRequired(hooks, {
         run_id: runId,
         approval,
       });
-      return {
+      return wrapResponse({
         answer: approval.prompt,
         widgets: [],
         artifacts: [],
@@ -1274,7 +1312,241 @@ export async function runConversationAgent({
           trace,
           route,
         },
+      });
+    }
+
+    if (datasetProfile?.mapping?.dataset_type === 'raw') {
+      recordDialogue(TEAM.orchestrator, TEAM.analyst, 'Dataset bersifat mentah (raw). Melakukan analisis tekstual langsung dari isi file.');
+      const answer = await analyzeRawDataset({
+        tenantId,
+        message: effectiveMessage,
+        profile: datasetProfile,
+        history,
+        userDisplayName,
+      });
+
+      const nextState = await updateConversationAgentState({
+        tenantId,
+        userId,
+        conversationId,
+        activeRun: {
+          run_id: runId,
+          status: 'done',
+          stage: 'analysis',
+          completed_at: new Date().toISOString(),
+        },
+      });
+
+      pushTrace(trace, {
+        step: 'analysis_raw',
+        status: 'done',
+      });
+      return wrapResponse({
+        answer,
+        widgets: [],
+        artifacts: [],
+        presentation_mode: 'chat',
+        content_format: 'plain',
+        intent: {
+          intent: 'raw_analysis',
+          nlu_source: 'raka_gemini',
+        },
+        draft_dashboard: nextState?.draft_dashboard || null,
+        pending_approval: nextState?.pending_approval || null,
+        agent: {
+          mode: 'agentic_team_runtime',
+          run_id: runId,
+          team: TEAM,
+          trace,
+          route,
+        },
+      });
+    }
+
+    recordDialogue(TEAM.orchestrator, TEAM.analyst, 'Pilih satu widget analisis paling relevan dari data aktif.');
+    const analysis = await runSingleWidgetAnalysis({
+      tenantId,
+      userId,
+      goal: effectiveMessage,
+      scope: {
+        time_period: route.time_period || '30 hari terakhir',
+        branch: route.branch || null,
+        channel: route.channel || null,
+        limit: route.limit || 8,
+      },
+      dashboard: resolvedSavedDashboard,
+      hooks,
+    });
+    recordDialogue(TEAM.analyst, TEAM.orchestrator, analysis.answer || 'Insight utama siap ditampilkan.');
+
+    await mergeConversationAgentMemory({
+      tenantId,
+      userId,
+      conversationId,
+      patch: {
+        [TEAM.analyst]: {
+          last_intent: 'single_widget_analysis',
+          last_result: {
+            widget_count: Array.isArray(analysis.widgets) ? analysis.widgets.length : 0,
+            time_scope: analysis.analysis_brief?.time_scope || null,
+          },
+          last_updated_at: new Date().toISOString(),
+        },
+      },
+    });
+
+    if (!analysis.recommend_dashboard) {
+      const nextState = await updateConversationAgentState({
+        tenantId,
+        userId,
+        conversationId,
+        activeRun: {
+          run_id: runId,
+          status: 'done',
+          stage: 'analysis',
+          completed_at: new Date().toISOString(),
+        },
+      });
+
+      pushTrace(trace, {
+        step: 'analysis',
+        widget_count: Array.isArray(analysis.widgets) ? analysis.widgets.length : 0,
+      });
+      return wrapResponse({
+        ...analysis,
+        intent: {
+          intent: 'analysis_widget',
+          nlu_source: 'raka_agent',
+        },
+        draft_dashboard: nextState?.draft_dashboard || null,
+        pending_approval: nextState?.pending_approval || null,
+        agent: {
+          mode: 'agentic_team_runtime',
+          run_id: runId,
+          team: TEAM,
+          trace,
+          route,
+        },
+      });
+    }
+
+    recordDialogue(
+      TEAM.analyst,
+      TEAM.orchestrator,
+      analysis.dashboard_reason
+        ? `Saran lanjut: ${analysis.dashboard_reason}`
+        : 'Saran lanjut: buat dashboard agar insight lebih lengkap.',
+    );
+    route = {
+      ...route,
+      action: 'create_dashboard',
+      reason: 'raka_recommend_dashboard',
+    };
+  }
+
+  if (route.action === 'create_dashboard' || route.action === 'edit_dashboard') {
+    datasetProfile = await ensureDatasetProfile();
+
+    if (datasetProfile?.mapping?.dataset_type === 'raw') {
+      recordDialogue(TEAM.orchestrator, TEAM.surface, 'Data bersifat mentah (raw), beritahu user tidak bisa bikin dashboard.');
+      const answer = await analyzeRawDataset({
+        tenantId,
+        message: effectiveMessage,
+        profile: datasetProfile,
+        history,
+        userDisplayName,
+      });
+
+      const nextState = await updateConversationAgentState({
+        tenantId,
+        userId,
+        conversationId,
+        activeRun: {
+          run_id: runId,
+          status: 'done',
+          stage: 'analysis',
+          completed_at: new Date().toISOString(),
+        },
+      });
+
+      pushTrace(trace, {
+        step: 'analysis_raw_fallback',
+        status: 'done',
+      });
+
+      const finalAnswer = `Maaf, data yang Anda unggah saat ini berformat teks atau mentah (raw), sehingga Vistara belum bisa membuatkan dashboard grafik/visualisasi terstruktur untuk data ini.\n\nNamun, dari analisis isi file tersebut:\n\n${answer}`;
+
+      return wrapResponse({
+        answer: finalAnswer,
+        widgets: [],
+        artifacts: [],
+        presentation_mode: 'chat',
+        content_format: 'markdown',
+        intent: {
+          intent: 'raw_analysis',
+          nlu_source: 'raka_gemini',
+        },
+        draft_dashboard: nextState?.draft_dashboard || null,
+        pending_approval: nextState?.pending_approval || null,
+        agent: {
+          mode: 'agentic_team_runtime',
+          run_id: runId,
+          team: TEAM,
+          trace,
+          route,
+        },
+      });
+    }
+
+    const blockingIssue = detectBlockingDatasetIssue(datasetProfile);
+    if (blockingIssue && !agentState?.pending_approval) {
+      const approval = {
+        id: generateId(),
+        type: blockingIssue.type,
+        issue: blockingIssue.issue,
+        title: blockingIssue.title,
+        prompt: blockingIssue.prompt,
+        requested_by: TEAM.engineer,
+        created_at: new Date().toISOString(),
+        message_context: message,
       };
+      const nextState = await updateConversationAgentState({
+        tenantId,
+        userId,
+        conversationId,
+        pendingApproval: approval,
+        activeRun: {
+          run_id: runId,
+          status: 'waiting_approval',
+          stage: 'data_repair',
+          completed_at: new Date().toISOString(),
+        },
+      });
+
+      recordDialogue(TEAM.orchestrator, TEAM.engineer, `Butuh perbaikan data: ${blockingIssue.title}.`);
+      recordDialogue(TEAM.engineer, TEAM.orchestrator, approval.prompt);
+      emitApprovalRequired(hooks, {
+        run_id: runId,
+        approval,
+      });
+      return wrapResponse({
+        answer: approval.prompt,
+        widgets: [],
+        artifacts: [],
+        presentation_mode: 'chat',
+        pending_approval: nextState?.pending_approval || approval,
+        intent: {
+          intent: 'approval_required',
+          nlu_source: 'atlas_gemini',
+        },
+        agent: {
+          mode: 'agentic_team_runtime',
+          run_id: runId,
+          team: TEAM,
+          trace,
+          route,
+        },
+      });
     }
 
     let baseDashboard = runDashboardBaseFromState(agentState, resolvedSavedDashboard);
@@ -1288,6 +1560,7 @@ export async function runConversationAgent({
       );
       resolvedSavedDashboard = baseDashboard;
     }
+    recordDialogue(TEAM.orchestrator, TEAM.creator, `Susun dashboard untuk: ${effectiveMessage}`);
     emitAgentStart(hooks, {
       run_id: runId,
       agent: TEAM.creator,
@@ -1384,7 +1657,12 @@ export async function runConversationAgent({
       widgets: dashboardResult.widgets.length,
       pages: latestDraft.pages,
     });
-    return {
+    recordDialogue(
+      TEAM.creator,
+      TEAM.orchestrator,
+      `Draft dashboard siap (${dashboardResult.widgets.length} widget).`,
+    );
+    return wrapResponse({
       ...dashboardResult,
       content_format: 'markdown',
       dashboard: baseDashboard,
@@ -1402,7 +1680,7 @@ export async function runConversationAgent({
         route,
         trace: [...trace, ...((dashboardResult.agent && Array.isArray(dashboardResult.agent.trace)) ? dashboardResult.agent.trace : [])],
       },
-    };
+    });
   }
 
   throw new ConversationAgentError({

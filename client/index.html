@@ -40,7 +40,6 @@
         </button>
         <button id="headerCtaBtn" class="cta-nav" type="button">Mulai</button>
         <button id="headerLoginBtn" class="ghost">Masuk</button>
-        <button id="logoutBtn" class="ghost" hidden>Logout</button>
       </div>
     </header>
 
@@ -402,6 +401,9 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"></path></svg>
           <span class="sr-only">Buka riwayat</span>
         </button>
+        
+        <div id="sessionRailBackdrop" class="session-rail-backdrop hidden"></div>
+        
         <aside id="sessionRail" class="workspace-pane session-rail collapsed" aria-label="Riwayat percakapan" aria-hidden="true" inert>
           <div class="session-rail-head">
             <button id="sessionRailToggleBtn" type="button" class="ghost session-rail-toggle" aria-controls="sessionRail" aria-expanded="false" title="Toggle riwayat">
@@ -419,6 +421,12 @@
             <div id="sessionList" class="session-list" aria-live="polite"></div>
           </div>
         </aside>
+
+        <!-- Mobile View Switcher -->
+        <div class="mobile-view-tabs hidden">
+          <button id="mobileChatTab" class="mobile-view-tab active" type="button">Chat</button>
+          <button id="mobileCanvasTab" class="mobile-view-tab" type="button">Dashboard</button>
+        </div>
 
         <section id="chatPane" class="workspace-pane chat-pane">
           <div id="chatPaneHead" class="chat-pane-head" hidden>
@@ -454,9 +462,8 @@
             <h2>Upload Dataset Dulu</h2>
             <p>Workspace ini bekerja dari dataset statis yang kamu upload. Tidak ada stream data real-time.</p>
             <div class="gate-actions">
-              <input id="gateUploadInput" type="file" hidden accept=".csv,.tsv,.ssv,.dsv,.xlsx,.xls,.json,.pdf,.doc,.docx,.db,.sqlite,.sqlite3,.sql,.mdb,.accdb,.dbf,.parquet,.duckdb" />
+              <input id="gateUploadInput" type="file" hidden />
               <button id="gateUploadPickerBtn" type="button" class="ghost attach-btn gate-upload-btn">Pilih Dataset</button>
-              <button id="gateUploadBtn" type="button">Upload & Gunakan</button>
               <button id="gateDemoBtn" type="button" class="ghost">Gunakan Demo test.csv</button>
             </div>
             <span id="gateUploadName" class="gate-upload-name hidden" aria-live="polite"></span>
@@ -484,7 +491,7 @@
 
             <form id="chatForm" class="composer">
               <div class="composer-row">
-                <input id="chatFile" type="file" hidden accept=".csv,.tsv,.ssv,.dsv,.xlsx,.xls,.json,.pdf,.doc,.docx,.db,.sqlite,.sqlite3,.sql,.mdb,.accdb,.dbf,.parquet,.duckdb" />
+                <input id="chatFile" type="file" hidden />
                 <button id="chatFileBtn" class="ghost attach-btn attach-btn-compact" type="button" aria-label="Tambah dataset" title="Tambah dataset">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
                   <span class="sr-only">Tambah dataset</span>
@@ -754,10 +761,23 @@
       </div>
 
       <div class="settings-actions">
+        <button id="logoutBtn" type="button" class="ghost settings-logout-btn" hidden>Logout</button>
         <button id="settingsResetBtn" type="button" class="ghost settings-reset-btn">Kembalikan Saran Awal</button>
         <button type="submit">Simpan Pengaturan</button>
       </div>
     </form>
+  </aside>
+
+  <div id="agentDialogueBackdrop" class="agent-dialogue-backdrop hidden" aria-hidden="true"></div>
+  <aside id="agentDialoguePanel" class="agent-dialogue-panel hidden" role="dialog" aria-modal="true" aria-labelledby="agentDialogueTitle" aria-label="Diskusi Agen" tabindex="-1">
+    <div class="agent-dialogue-head">
+      <div>
+        <p class="agent-dialogue-kicker">Diskusi Agen</p>
+        <h3 id="agentDialogueTitle">Percakapan internal</h3>
+      </div>
+      <button id="agentDialogueCloseBtn" type="button" class="ghost" aria-label="Tutup Diskusi Agen">Tutup</button>
+    </div>
+    <div id="agentDialogueList" class="agent-dialogue-list"></div>
   </aside>
 
   <script src="/vendor/gridstack-all.js"></script>

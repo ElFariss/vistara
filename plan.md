@@ -1526,3 +1526,199 @@ Every growing UMKM in Indonesia should be able to ask "Gimana bisnis gue hari in
 
 We're not building another BI tool.
 We're building **the first business advisor that never sleeps, never forgets, and always speaks Bahasa Indonesia.**
+
+---
+
+## 21. Python Data Sandbox for Generic Datasets
+
+### 21.1 Motivation (The "Why")
+
+**The Problem:**
+Currently, our AI mapping relies strictly on ingesting uploaded Excel or CSV data into pre-defined relational SQL structures (`transactions` or `expenses`), dropping the original file structure and standardizing everything. 
+When users upload complex, unstructured, or multi-sheet "generic" data (e.g., `shittier_car_mechanic_stress_test_30k_3sheets.xlsx`), the SQL insertion often assumes default schema behaviors, or drops necessary metadata context. Subsequently, the Analyst and Dashboard Agents attempt to query this data via the `query_builder` (which expects normalized structures) and fail. This failure cascade results in empty widget responses and HTTP 503 `DashboardAgentError` codes that crash the chat.
+
+**The Solution:**
+Instead of forcing every dataset into a strict SQL schema, we will empower the AI with an "agentic code execution" pathway. By providing the AI access to a secured Python runtime environment, the AI can write and execute arbitrary Python scripts using data analysis libraries (like `pandas` and `openpyxl`) to manipulate, parse, and answer questions directly from the raw mounted files.
+
+### 21.2 Architecture (The "How")
+
+The solution involves three independent layers to maintain security and reliability:
+
+1. **Dockerized Python Sandbox (`tools/data-agent/Dockerfile`)**
+   - A completely isolated Alpine Linux-based Docker image running Python 3.11.
+   - Pre-installed with data crucial libraries: `pandas` for dataframe manipulation and `openpyxl` for multi-sheet Excel reading.
+   - Bound by resource limits (CPU, memory, no-network) to prevent malicious or accidental system abuse by AI-generated scripts.
+
+2. **Node.js Subprocess Bridge (`src/services/pythonSandbox.mjs`)**
+   - A backend service that acts as the intermediary between the AI Agent and the Docker Sandbox.
+   - **Mechanism:**
+     - The AI outputs a Python script.
+     - The backend writes it to a temporary `.py` file.
+     - Uses `subprocess.run` (via Node's `child_process.execFile` or `spawn`) to invoke the Docker container dynamically.
+     - Uses volume mapping (`-v`) to mount the generated Python script and the target user-uploaded Excel/CSV files into the read-only `/data` Mount inside the container.
+   - **Extraction:** Captures standard output (`stdout`) and passes the insights back to the LLM's context window.
+
+3. **Tool Exposure in Agent Runtime (`src/services/agentRuntime.mjs`)**
+   - Define a structured Gemini tool called `python_data_interpreter(code, filename)`.
+   - Update the system instructions for the **Analyst Agent** (Raka) and **Data Engineer Agent** (Tala) so they know they are authorized to write Python code to retrieve answers, rather than being strictly restricted to SQL.
+   - Instead of breaking on `worker_failed` when widgets are empty, the **Dashboard Agent** will gracefully intercept failures and emit a fallback text widget notifying the user that standard metrics cannot be graphed visually, but the raw analysis is complete.
+
+### 21.3 Step-by-Step Implementation Guide
+
+#### Phase A: Build the Secure Docker Image
+
+**File: `tools/python-data-agent/Dockerfile`**
+```dockerfile
+# Use a lightweight official Python image
+FROM python:3.11-slim
+
+# Set non-root user permissions
+RUN useradd --create-home --shell /bin/bash sandboxuser
+USER sandboxuser
+WORKDIR /home/sandboxuser
+
+# Install required data parsing libraries
+RUN pip install --no-cache-dir pandas openpyxl xlrd
+
+# Entrypoint default command
+CMD ["python3"]
+```
+
+*Answer for it:* By isolating execution in Docker, even if the LLM hallucinates an `os.system('rm -rf /')` command, it will only destroy the ephemeral Docker container and will not affect the host Node.js application, Postgres database, or Vercel deployment.
+
+#### Phase B: Create the Sandbox Service
+
+**File: `src/services/pythonSandbox.mjs`**
+```javascript
+import { spawn } from 'node:child_process';
+import { v4 as uuidv4 } from 'uuid';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+
+/**
+ * Runs agent-generated Python code against uploaded data.
+ */
+export async function runPythonAnalysis(code, targetFilePath) {
+  // Generate a random temporary filename
+  const scriptId = uuidv4();
+  const scriptPath = path.join(os.tmpdir(), `agent_${scriptId}.py`);
+  
+  try {
+    // Write agent's code to disk
+    await fs.writeFile(scriptPath, code);
+    
+    // Resolve absolute paths for Docker boundaries
+    const absScriptPath = path.resolve(scriptPath);
+    const absDataPath = path.resolve(targetFilePath);
+    const filename = path.basename(targetFilePath);
+
+    // Build the docker command
+    // Mount the script to /app/script.py
+    // Mount the data directory read-only to /data
+    const dataDir = path.dirname(absDataPath);
+    
+    return new Promise((resolve, reject) => {
+      const docker = spawn('docker', [
+        'run', '--rm', 
+        '--network', 'none', // Block internet access
+        '--memory', '256m', // Restrict memory
+        '-v', `${absScriptPath}:/app/script.py:ro`,
+        '-v', `${dataDir}:/data:ro`,
+        'vistara-data-python', // The image name
+        'python', '/app/script.py', `/data/${filename}`
+      ]);
+
+      let stdout = '';
+      let stderr = '';
+
+      docker.stdout.on('data', (data) => { stdout += data.toString(); });
+      docker.stderr.on('data', (data) => { stderr += data.toString(); });
+
+      docker.on('close', (code) => {
+        if (code === 0) {
+          resolve({ success: true, result: stdout });
+        } else {
+          resolve({ success: false, result: stderr });
+        }
+      });
+      
+      // Enforce physical timeout (e.g. 15 seconds max)
+      setTimeout(() => {
+        docker.kill();
+        resolve({ success: false, result: 'Execution Timed Out' });
+      }, 15000);
+    });
+  } finally {
+    // Cleanup temporary file
+    await fs.unlink(scriptPath).catch(() => {});
+  }
+}
+```
+
+*Answer for it:* We use Node's `child_process.spawn` instead of blocking `execSync` because data analysis running in Python could take several seconds. Using Promises ensures the Node.js event loop remains untethered and other users' interactions do not lag while `pandas` chews through 30k rows.
+
+#### Phase C: Attach Sandbox to Agent Runtime
+
+**File: `src/services/agentRuntime.mjs`**
+We will add `python_data_interpreter` to the Gemini Tool set passed during `/api/chat/stream`.
+
+```javascript
+import { runPythonAnalysis } from './pythonSandbox.mjs';
+
+const tool_python_interpreter = {
+  name: "python_data_interpreter",
+  description: "Runs a Python script to analyze complex generic data shapes using pandas and openpyxl, avoiding strict SQL schema failures. Prints final results via stdout using `print()`.",
+  parameters: {
+    type: "object",
+    properties: {
+      code: {
+        type: "string",
+        description: "The python script to execute. The target file is passed as sys.argv[1]."
+      }
+    },
+    required: ["code"]
+  }
+};
+```
+When handling function calls in the LLM loop:
+```javascript
+if (functionCall.name === 'python_data_interpreter') {
+  // Extract path from the currently active session dataset
+  const datasetPath = memory.current_dataset_path; 
+  const execution = await runPythonAnalysis(functionCall.args.code, datasetPath);
+  
+  // Return the interpreted insights back to Gemini
+  return {
+    functionResponse: {
+      name: functionCall.name,
+      response: { 
+        status: execution.success ? "success" : "failed",
+        stdout: execution.result 
+      }
+    }
+  };
+}
+```
+
+*Answer for it:* By mapping the tool, if the user asks "analyze the car mechanics out of the 3 sheets", the Agent will generate a `pandas.read_excel(sys.argv[1], sheet_name=None)` script, parse the multi-dimensional context, and return a numeric answer.
+
+#### Phase D: Fix DashboardAgentError (Graceful Degradation)
+
+**File: `src/services/agentRuntime.mjs` (Around Line 4085)**
+
+If `worker.widgets` has an empty length, throw gracefully or convert it to a Text summary.
+```javascript
+  if (!worker.widgets.length || !worker.artifacts.length || worker.nonEmptyCount === 0) {
+    console.warn("Dashboard generated empty payload for unusual shape dataset. Degrading gracefully to markdown insight widget.");
+    
+    // Fallback widget instead of throwing 503 HTTP
+    worker.widgets = [{
+       id: "fallback_text_01",
+       type: "markdown",
+       config: { content: "Data Analysis complete. The dataset format is non-standard so standard metrics cannot be displayed, but refer to the agent's chat context above." }
+    }];
+  }
+```
+
+*Answer for it:* This ensures the application never 503s on weird unstructured user-uploaded data, ensuring a smooth, uninterrupted end-to-end chat experience.

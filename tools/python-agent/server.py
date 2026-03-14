@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HOST = os.getenv("PY_AGENT_HOST", "127.0.0.1")
 PORT = int(os.getenv("PY_AGENT_PORT", "8091"))
 TOKEN = os.getenv("PY_AGENT_TOKEN", "")
-TIMEOUT_SEC = float(os.getenv("PY_AGENT_TIMEOUT_SEC", "2.5"))
+TIMEOUT_SEC = float(os.getenv("PY_AGENT_TIMEOUT_SEC", "15.0"))
 MAX_CODE_CHARS = int(os.getenv("PY_AGENT_MAX_CODE_CHARS", "8000"))
 MAX_BODY_BYTES = int(os.getenv("PY_AGENT_MAX_BODY_BYTES", "262144"))
 
@@ -19,6 +19,9 @@ import math
 import resource
 import sys
 import traceback
+import pandas as pd
+import numpy as np
+from openpyxl import load_workbook
 
 SAFE_BUILTINS = {
     "abs": abs,
@@ -33,6 +36,7 @@ SAFE_BUILTINS = {
     "list": list,
     "max": max,
     "min": min,
+    "print": print,
     "range": range,
     "reversed": reversed,
     "round": round,
@@ -41,10 +45,11 @@ SAFE_BUILTINS = {
     "str": str,
     "sum": sum,
     "tuple": tuple,
+    "type": type,
     "zip": zip,
 }
 
-BLOCKED_CALLS = {"open", "exec", "eval", "compile", "input", "__import__", "globals", "locals", "dir"}
+BLOCKED_CALLS = {"exec", "eval", "compile", "input", "__import__", "globals", "locals", "dir", "getattr", "setattr", "delattr", "hasattr"}
 BLOCKED_NODES = (
     ast.Import,
     ast.ImportFrom,
@@ -68,8 +73,8 @@ def fail(message, reason="execution_failed"):
 
 def main():
     try:
-        resource.setrlimit(resource.RLIMIT_CPU, (2, 2))
-        mem = 256 * 1024 * 1024
+        resource.setrlimit(resource.RLIMIT_CPU, (15, 15))
+        mem = 512 * 1024 * 1024  # 512MB for pandas operations
         resource.setrlimit(resource.RLIMIT_AS, (mem, mem))
     except Exception:
         pass
@@ -105,10 +110,19 @@ def main():
         if isinstance(node, ast.Attribute) and str(getattr(node, "attr", "")).startswith("__"):
             fail("dunder_attribute_blocked", "forbidden")
 
+    # Get target file path if provided
+    target_file = None
+    if len(sys.argv) > 1:
+        target_file = sys.argv[1]
+
     scope = {
         "__builtins__": SAFE_BUILTINS,
         "math": math,
+        "pd": pd,
+        "np": np,
+        "load_workbook": load_workbook,
         "context": context,
+        "target_file": target_file,
     }
 
     try:

@@ -113,7 +113,7 @@ export async function readBody(
         'PAYLOAD_TOO_LARGE',
         `Payload melebihi batas ${maxBytes} bytes.`,
         413,
-        'Ukuran request melebihi batas maksimum.',
+        `Ukuran file melebihi batas maksimum (${Math.round(maxBytes / 1024 / 1024)}MB).`,
       ));
       req.resume();
     }
@@ -128,7 +128,7 @@ export async function readBody(
           'PAYLOAD_TOO_LARGE',
           `Payload melebihi batas ${maxBytes} bytes.`,
           413,
-          'Ukuran request melebihi batas maksimum.',
+          `Ukuran file melebihi batas maksimum (${Math.round(maxBytes / 1024 / 1024)}MB).`,
         ));
         req.destroy();
         return;

@@ -1,6 +1,8 @@
 import { get } from '../db.mjs';
 import { parseFlexibleDate, parseIndonesianNumber } from '../utils/parse.mjs';
 import { ensureSourcesProcessed, readParsedSourceFile } from './ingestion.mjs';
+import { listDatasetTablesForSource, getDatasetTable } from './datasetTables.mjs';
+import { requiredFieldsForDataset } from './columnMapper.mjs';
 
 function parseJsonSafe(input, fallback = {}) {
   try {
@@ -236,20 +238,22 @@ export function profileRows({ columns = [], rows = [] } = {}) {
   };
 }
 
-function buildProfilePayload(source, parsed, mappingInfo) {
+function buildProfilePayload(source, parsed, mappingInfo, options = {}) {
   const rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
   const columns = Array.isArray(parsed?.columns) ? parsed.columns : [];
   const columnsProfile = buildColumnsProfile(rows, columns);
   const duplicates = countDuplicates(rows);
 
-  return {
+  const payload = {
     source: {
       id: source.id,
       filename: source.filename,
+      file_path: source.file_path,
       file_type: source.file_type,
       upload_date: source.upload_date,
       row_count: rows.length,
       status: source.status,
+      error: parseJsonSafe(source.metadata_json)?.error || null,
     },
     summary: {
       rows: rows.length,
@@ -268,6 +272,69 @@ function buildProfilePayload(source, parsed, mappingInfo) {
     mapping: mappingInfo,
     sample_rows: rows.slice(0, 12),
   };
+
+  if (Number.isFinite(options.totalRows)) {
+    payload.summary.rows = options.totalRows;
+  }
+  if (options.primaryTable) {
+    payload.primary_table = options.primaryTable;
+  }
+  if (Array.isArray(options.tables)) {
+    payload.tables = options.tables;
+  }
+
+  return payload;
+}
+
+function tableScoreFromProfile(table = {}) {
+  const profile = table.profile || {};
+  const numericCount = Array.isArray(profile.detected?.numeric_columns) ? profile.detected.numeric_columns.length : 0;
+  const dateCount = Array.isArray(profile.detected?.date_columns) ? profile.detected.date_columns.length : 0;
+  const rowCount = Number(table.row_count || 0);
+  const score = (numericCount * 1000) + (dateCount * 100) + rowCount;
+  return {
+    score,
+    numericCount,
+    dateCount,
+    rowCount,
+  };
+}
+
+function requiredColumnsForMapping(datasetType, mapping = {}) {
+  const requiredFields = requiredFieldsForDataset(datasetType);
+  const columns = [];
+  for (const field of requiredFields) {
+    const mapped = mapping?.[field];
+    if (typeof mapped === 'string' && mapped && mapped !== '__derived__') {
+      columns.push(mapped);
+    }
+  }
+  return columns;
+}
+
+function summarizeTables(tables = [], mappingInfo = {}) {
+  const datasetType = mappingInfo?.dataset_type || 'transaction';
+  const mapping = mappingInfo?.mapping || {};
+  const requiredColumns = requiredColumnsForMapping(datasetType, mapping);
+
+  return tables.map((table) => {
+    const stats = tableScoreFromProfile(table);
+    const columns = Array.isArray(table.columns) ? table.columns : [];
+    const missingColumns = requiredColumns.filter((column) => !columns.includes(column));
+    const included = requiredColumns.length === 0 || missingColumns.length === 0;
+    return {
+      id: table.id,
+      name: table.name,
+      row_count: stats.rowCount,
+      numeric_count: stats.numericCount,
+      date_count: stats.dateCount,
+      numeric_columns: Array.isArray(table.profile?.detected?.numeric_columns) ? table.profile.detected.numeric_columns : [],
+      date_columns: Array.isArray(table.profile?.detected?.date_columns) ? table.profile.detected.date_columns : [],
+      sample_rows: table.sample_rows || [],
+      included,
+      missing_columns: missingColumns,
+    };
+  });
 }
 
 export async function getDatasetProfile(tenantId) {
@@ -277,12 +344,46 @@ export async function getDatasetProfile(tenantId) {
     return null;
   }
 
+  const mappingInfo = parseJsonSafe(source.column_mapping, {});
+  const tables = await listDatasetTablesForSource(tenantId, source.id);
+  if (tables.length > 0) {
+    const summaries = summarizeTables(tables, mappingInfo);
+    let primary = summaries[0] || null;
+    let bestScore = -1;
+    for (const table of summaries) {
+      const score = (table.numeric_count * 1000) + (table.date_count * 100) + table.row_count;
+      if (score > bestScore) {
+        bestScore = score;
+        primary = table;
+      }
+    }
+
+    const primaryTable = primary
+      ? await getDatasetTable(tenantId, primary.id)
+      : null;
+    if (primaryTable) {
+      const includedTables = summaries.filter((table) => table.included !== false);
+      const totalRows = includedTables.length
+        ? includedTables.reduce((sum, table) => sum + (table.row_count || 0), 0)
+        : summaries.reduce((sum, table) => sum + (table.row_count || 0), 0);
+      return buildProfilePayload(
+        source,
+        { columns: primaryTable.columns, rows: primaryTable.rows },
+        mappingInfo,
+        {
+          totalRows,
+          primaryTable: primary?.name || null,
+          tables: summaries,
+        },
+      );
+    }
+  }
+
   const parsed = await readParsedSourceFile({
     filePath: source.file_path,
     fileType: source.file_type,
     filename: source.filename,
   });
-  const mappingInfo = parseJsonSafe(source.column_mapping, {});
   return buildProfilePayload(source, parsed, mappingInfo);
 }
 
@@ -372,8 +473,15 @@ export async function inspectDatasetQuestion({ tenantId, message = '' }) {
     };
   }
 
+  const tables = Array.isArray(profile.tables) ? profile.tables : [];
+  const includedTables = tables.filter((table) => table.included !== false);
+  const sheetNote = tables.length > 1
+    ? ` (${includedTables.length || 0} dari ${tables.length} sheet dipakai)`
+    : '';
+  const primaryNote = profile.primary_table ? ` Sheet utama: ${profile.primary_table}.` : '';
+
   return {
-    answer: `Dataset aktif berisi ${profile.summary.rows.toLocaleString('id-ID')} baris, ${profile.summary.columns} kolom, ${profile.detected.numeric_columns.length} kolom numerik, dan ${profile.detected.date_columns.length} kolom tanggal.`,
+    answer: `Dataset aktif berisi ${profile.summary.rows.toLocaleString('id-ID')} baris${sheetNote}, ${profile.summary.columns} kolom, ${profile.detected.numeric_columns.length} kolom numerik, dan ${profile.detected.date_columns.length} kolom tanggal.${primaryNote}`,
     artifacts: [
       {
         kind: 'metric',

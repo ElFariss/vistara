@@ -10,8 +10,8 @@ test('resolveCanvasViewportTarget keeps compact content near the top of the view
     focusRect: { left: 320, top: 260, width: 420, height: 260 },
   });
 
-  assert.equal(result.scrollLeft, 296);
-  assert.equal(result.scrollTop, 236);
+  assert.equal(result.scrollLeft, 140);
+  assert.equal(result.scrollTop, 130);
 });
 
 test('resolveCanvasViewportTarget centers oversized content around the active widget bounds', () => {
@@ -22,5 +22,5 @@ test('resolveCanvasViewportTarget centers oversized content around the active wi
   });
 
   assert.equal(result.scrollLeft, 447);
-  assert.equal(result.scrollTop, 128);
+  assert.equal(result.scrollTop, 63);
 });

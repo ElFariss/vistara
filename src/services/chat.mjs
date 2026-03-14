@@ -9,6 +9,7 @@ import { createGoal } from './goals.mjs';
 import { logAudit } from './audit.mjs';
 import { inspectDatasetQuestion } from './dataProfile.mjs';
 import { resolvePublicErrorMessage } from '../http/response.mjs';
+import { createLogger } from '../utils/logger.mjs';
 import {
   applyConversationApproval,
   ConversationAgentError,
@@ -16,6 +17,7 @@ import {
 } from './conversationAgent.mjs';
 import { getConversationAgentState } from './conversationState.mjs';
 
+const logger = createLogger('chat-service');
 const DEFAULT_CONVERSATION_TITLE = 'Percakapan baru';
 const AUTO_TITLE_MAX_LENGTH = 56;
 
@@ -153,6 +155,14 @@ function createBufferedTimelineStream(stream = null) {
         noteAgent(event.agent);
         maybeMarkComplexFromEvent(event);
         pushStep(event);
+      },
+      onAgentDialogue: (entry) => {
+        noteAgent(entry?.from);
+        noteAgent(entry?.to);
+        markComplex('Diskusi agent');
+        if (typeof stream.onAgentDialogue === 'function') {
+          stream.onAgentDialogue(entry);
+        }
       },
       onDashboardPatch: (patch) => {
         markComplex();
@@ -821,6 +831,15 @@ export async function processChatMessage({
       hooks: bufferedStream.hooks,
     });
   } catch (error) {
+    logger.error('process_chat_failed', {
+      code: error?.code,
+      statusCode: error?.statusCode,
+      message: error?.message,
+      stack: error?.stack,
+      conversation_id: conversation?.id,
+      tenant_id: tenantId,
+      user_id: userId,
+    });
     const fallbackIntent = error instanceof ConversationAgentError
       ? { intent: 'conversation', nlu_source: 'atlas_gemini' }
       : null;

@@ -123,6 +123,53 @@ function parseSheetRows(sheetXml, sharedStrings) {
   return rows;
 }
 
+/**
+ * Detect the actual header row in a sheet matrix.
+ * Many xlsx files have metadata/title rows at the top (e.g., "Dataset Name", "Description", etc.)
+ * before the actual column headers. This function scans the first rows and picks the one
+ * most likely to be the header based on heuristics:
+ * - Most non-empty cells
+ * - All/mostly unique string values
+ * - More than 2 populated cells (metadata rows usually have only 1-2)
+ */
+function detectHeaderRowIndex(matrix) {
+  const scanLimit = Math.min(matrix.length, 20);
+  let bestIndex = 0;
+  let bestScore = -1;
+
+  for (let i = 0; i < scanLimit; i += 1) {
+    const row = matrix[i];
+    const nonEmpty = row.filter((cell) => String(cell || '').trim() !== '');
+    const nonEmptyCount = nonEmpty.length;
+
+    // Skip rows with very few populated cells (metadata/title rows)
+    if (nonEmptyCount <= 2) {
+      continue;
+    }
+
+    // Check uniqueness — headers should have unique labels
+    const uniqueValues = new Set(nonEmpty.map((v) => String(v).toLowerCase().trim()));
+    const uniqueRatio = uniqueValues.size / Math.max(1, nonEmptyCount);
+
+    // Check if values look like headers (mostly non-numeric strings)
+    const numericCount = nonEmpty.filter((v) => {
+      const s = String(v).trim();
+      return s !== '' && !isNaN(Number(s)) && !/[a-z_]/i.test(s);
+    }).length;
+    const numericRatio = numericCount / Math.max(1, nonEmptyCount);
+
+    // Score: prefer rows with many unique string-like cells
+    const score = nonEmptyCount * uniqueRatio * (1 - numericRatio * 0.5);
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  }
+
+  return bestIndex;
+}
+
 export function parseXlsxFile(filePath) {
   const sheets = parseXlsxSheets(filePath);
   if (!sheets.length) {
@@ -161,8 +208,9 @@ export function parseXlsxSheets(filePath) {
       return { name: normalizeWhitespace(entry), columns: [], rows: [] };
     }
 
-    const header = matrix[0].map((col, index) => col || `column_${index + 1}`);
-    const rows = matrix.slice(1).filter((values) => values.some((v) => String(v || '').trim() !== '')).map((values) => {
+    const headerIndex = detectHeaderRowIndex(matrix);
+    const header = matrix[headerIndex].map((col, index) => col || `column_${index + 1}`);
+    const rows = matrix.slice(headerIndex + 1).filter((values) => values.some((v) => String(v || '').trim() !== '')).map((values) => {
       const row = {};
       for (let i = 0; i < header.length; i += 1) {
         row[header[i]] = values[i] ?? '';

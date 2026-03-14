@@ -41,7 +41,6 @@
         </button>
         <button id="headerCtaBtn" class="cta-nav" type="button">Mulai</button>
         <button id="headerLoginBtn" class="ghost">Masuk</button>
-        <button id="logoutBtn" class="ghost" hidden>Logout</button>
       </div>
     </header>
 
@@ -459,9 +458,8 @@
             <h2>Upload Dataset Dulu</h2>
             <p>Workspace ini bekerja dari dataset statis yang kamu upload. Tidak ada stream data real-time.</p>
             <div class="gate-actions">
-              <input id="gateUploadInput" type="file" hidden accept=".csv,.tsv,.ssv,.dsv,.xlsx,.xls,.json,.pdf,.doc,.docx,.db,.sqlite,.sqlite3,.sql,.mdb,.accdb,.dbf,.parquet,.duckdb" />
+              <input id="gateUploadInput" type="file" hidden />
               <button id="gateUploadPickerBtn" type="button" class="ghost attach-btn gate-upload-btn">Pilih Dataset</button>
-              <button id="gateUploadBtn" type="button">Upload & Gunakan</button>
               <button id="gateDemoBtn" type="button" class="ghost">Gunakan Demo test.csv</button>
             </div>
             <span id="gateUploadName" class="gate-upload-name hidden" aria-live="polite"></span>
@@ -485,7 +483,7 @@
 
             <form id="chatForm" class="composer">
               <div class="composer-row">
-                <input id="chatFile" type="file" hidden accept=".csv,.tsv,.ssv,.dsv,.xlsx,.xls,.json,.pdf,.doc,.docx,.db,.sqlite,.sqlite3,.sql,.mdb,.accdb,.dbf,.parquet,.duckdb" />
+                <input id="chatFile" type="file" hidden />
                 <button id="chatFileBtn" class="ghost attach-btn attach-btn-compact" type="button" aria-label="Tambah dataset" title="Tambah dataset">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
                   <span class="sr-only">Tambah dataset</span>
@@ -751,10 +749,23 @@
       </div>
 
       <div class="settings-actions">
+        <button id="logoutBtn" type="button" class="ghost settings-logout-btn" hidden>Logout</button>
         <button id="settingsResetBtn" type="button" class="ghost settings-reset-btn">Kembalikan Saran Awal</button>
         <button type="submit">Simpan Pengaturan</button>
       </div>
     </form>
+  </aside>
+
+  <div id="agentDialogueBackdrop" class="agent-dialogue-backdrop hidden" aria-hidden="true"></div>
+  <aside id="agentDialoguePanel" class="agent-dialogue-panel hidden" role="dialog" aria-modal="true" aria-labelledby="agentDialogueTitle" aria-label="Diskusi Agen" tabindex="-1">
+    <div class="agent-dialogue-head">
+      <div>
+        <p class="agent-dialogue-kicker">Diskusi Agen</p>
+        <h3 id="agentDialogueTitle">Percakapan internal</h3>
+      </div>
+      <button id="agentDialogueCloseBtn" type="button" class="ghost" aria-label="Tutup Diskusi Agen">Tutup</button>
+    </div>
+    <div id="agentDialogueList" class="agent-dialogue-list"></div>
   </aside>
 
   <script src="/vendor/gridstack-all.js"></script>

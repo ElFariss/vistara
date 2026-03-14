@@ -118,8 +118,8 @@ async function queryDailyRevenue(tenantId, days = 30) {
   const points = await all(
     `
       SELECT DATE(transaction_date) AS day,
-             ROUND(COALESCE(SUM(total_revenue), 0), 2) AS revenue,
-             ROUND(COALESCE(SUM(total_revenue - COALESCE(cogs,0) - COALESCE(discount,0)), 0), 2) AS profit
+             ROUND(CAST(COALESCE(SUM(total_revenue), 0) AS numeric), 2) AS revenue,
+             ROUND(CAST(COALESCE(SUM(total_revenue - COALESCE(cogs,0) - COALESCE(discount,0)), 0) AS numeric), 2) AS profit
       FROM transactions
       WHERE tenant_id = :tenant_id
         AND transaction_date BETWEEN :start_date AND :end_date

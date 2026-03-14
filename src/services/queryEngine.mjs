@@ -621,9 +621,9 @@ function buildBuilderParts(query) {
     };
 
     const measures = {
-      amount: `ROUND(COALESCE(SUM(e.amount), 0), 2)`,
+      amount: `ROUND(CAST(COALESCE(SUM(e.amount), 0) AS numeric), 2)`,
       count: `COUNT(*)`,
-      avg: `ROUND(COALESCE(AVG(e.amount), 0), 2)`,
+      avg: `ROUND(CAST(COALESCE(AVG(e.amount), 0) AS numeric), 2)`,
     };
 
     return {
@@ -650,11 +650,11 @@ function buildBuilderParts(query) {
   };
 
   const measures = {
-    revenue: `ROUND(COALESCE(SUM(t.total_revenue), 0), 2)`,
-    profit: `ROUND(COALESCE(SUM(t.total_revenue - COALESCE(t.cogs, 0) - COALESCE(t.discount, 0)), 0), 2)`,
-    quantity: `ROUND(COALESCE(SUM(t.quantity), 0), 2)`,
-    margin: `CASE WHEN COALESCE(SUM(t.total_revenue),0)=0 THEN 0 ELSE ROUND((SUM(t.total_revenue - COALESCE(t.cogs, 0) - COALESCE(t.discount, 0)) / SUM(t.total_revenue)) * 100, 2) END`,
-    cogs: `ROUND(COALESCE(SUM(t.cogs), 0), 2)`,
+    revenue: `ROUND(CAST(COALESCE(SUM(t.total_revenue), 0) AS numeric), 2)`,
+    profit: `ROUND(CAST(COALESCE(SUM(t.total_revenue - COALESCE(t.cogs, 0) - COALESCE(t.discount, 0)), 0) AS numeric), 2)`,
+    quantity: `ROUND(CAST(COALESCE(SUM(t.quantity), 0) AS numeric), 2)`,
+    margin: `CASE WHEN COALESCE(SUM(t.total_revenue),0)=0 THEN 0 ELSE ROUND(CAST(((SUM(t.total_revenue - COALESCE(t.cogs, 0) - COALESCE(t.discount, 0)) / SUM(t.total_revenue)) * 100) AS numeric), 2) END`,
+    cogs: `ROUND(CAST(COALESCE(SUM(t.cogs), 0) AS numeric), 2)`,
     count: `COUNT(*)`,
   };
 

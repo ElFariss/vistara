@@ -104,6 +104,10 @@ const state = {
   pendingMessageId: null,
   timelineMessageId: null,
   timelineRunId: null,
+  agentDialogueOpen: false,
+  agentDialogueMessageId: null,
+  agentDialogueItems: [],
+  agentDialogueReturnFocus: null,
   canvasPage: 1,
   canvasPagesCount: 1,
   canvasWidthPct: DEFAULT_CANVAS_PCT,
@@ -176,6 +180,11 @@ const refs = {
   settingsBusinessTimezone: document.getElementById('settingsBusinessTimezone'),
   settingsBusinessCurrency: document.getElementById('settingsBusinessCurrency'),
   settingsBusinessVerdictTime: document.getElementById('settingsBusinessVerdictTime'),
+  agentDialogueBackdrop: document.getElementById('agentDialogueBackdrop'),
+  agentDialoguePanel: document.getElementById('agentDialoguePanel'),
+  agentDialogueCloseBtn: document.getElementById('agentDialogueCloseBtn'),
+  agentDialogueList: document.getElementById('agentDialogueList'),
+  agentDialogueTitle: document.getElementById('agentDialogueTitle'),
 
   landingPage: document.getElementById('landingPage'),
   authPage: document.getElementById('authPage'),
@@ -229,7 +238,6 @@ const refs = {
   dataGate: document.getElementById('dataGate'),
   gateUploadInput: document.getElementById('gateUploadInput'),
   gateUploadPickerBtn: document.getElementById('gateUploadPickerBtn'),
-  gateUploadBtn: document.getElementById('gateUploadBtn'),
   gateUploadName: document.getElementById('gateUploadName'),
   gateDemoBtn: document.getElementById('gateDemoBtn'),
 
@@ -677,6 +685,90 @@ function setSettingsOpen(open, options = {}) {
     state.settingsReturnFocus.focus();
     state.settingsReturnFocus = null;
   }
+}
+
+function setAgentDialogueOpen(open, options = {}) {
+  state.agentDialogueOpen = Boolean(open);
+  if (state.agentDialogueOpen) {
+    state.agentDialogueReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  document.body.classList.toggle('agent-dialogue-open', state.agentDialogueOpen);
+  refs.agentDialogueBackdrop?.classList.toggle('hidden', !state.agentDialogueOpen);
+  refs.agentDialoguePanel?.classList.toggle('hidden', !state.agentDialogueOpen);
+  if (refs.appShell) {
+    if ('inert' in refs.appShell) {
+      refs.appShell.inert = state.agentDialogueOpen;
+    }
+    refs.appShell.setAttribute('aria-hidden', String(state.agentDialogueOpen));
+  }
+  if (state.agentDialogueOpen) {
+    refs.agentDialoguePanel?.focus();
+  } else if (state.agentDialogueReturnFocus && typeof state.agentDialogueReturnFocus.focus === 'function') {
+    state.agentDialogueReturnFocus.focus();
+    state.agentDialogueReturnFocus = null;
+  }
+}
+
+function formatDialogueAgent(value) {
+  const cleaned = String(value || '').trim();
+  if (!cleaned) {
+    return 'Agent';
+  }
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+function renderAgentDialogueList(items = []) {
+  if (!refs.agentDialogueList) {
+    return;
+  }
+  refs.agentDialogueList.innerHTML = '';
+  if (!Array.isArray(items) || items.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'agent-dialogue-empty';
+    empty.textContent = 'Belum ada diskusi agen untuk respons ini.';
+    refs.agentDialogueList.append(empty);
+    return;
+  }
+
+  items.forEach((entry) => {
+    const row = document.createElement('div');
+    row.className = 'agent-dialogue-item';
+
+    const meta = document.createElement('div');
+    meta.className = 'agent-dialogue-meta';
+    const from = document.createElement('span');
+    from.className = 'agent-dialogue-from';
+    from.textContent = formatDialogueAgent(entry.from);
+    const arrow = document.createElement('span');
+    arrow.className = 'agent-dialogue-arrow';
+    arrow.textContent = '→';
+    const to = document.createElement('span');
+    to.className = 'agent-dialogue-to';
+    to.textContent = formatDialogueAgent(entry.to);
+    const time = document.createElement('span');
+    time.className = 'agent-dialogue-time';
+    const ts = entry.ts ? new Date(entry.ts) : null;
+    time.textContent = ts ? ts.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '';
+    meta.append(from, arrow, to, time);
+
+    const text = document.createElement('p');
+    text.className = 'agent-dialogue-text';
+    text.textContent = String(entry.message || '').trim();
+
+    row.append(meta, text);
+    refs.agentDialogueList.append(row);
+  });
+}
+
+function openAgentDialogue(message) {
+  const items = Array.isArray(message?.agentDialogue) ? message.agentDialogue : [];
+  state.agentDialogueItems = items;
+  state.agentDialogueMessageId = message?.id || null;
+  if (refs.agentDialogueTitle) {
+    refs.agentDialogueTitle.textContent = 'Diskusi Agen';
+  }
+  renderAgentDialogueList(items);
+  setAgentDialogueOpen(true);
 }
 
 function setWorkspaceBooting(booting, options = {}) {
@@ -1725,6 +1817,8 @@ function centerCanvasStage(options = {}) {
     viewportRect: {
       width: refs.canvasViewport.clientWidth,
       height: refs.canvasViewport.clientHeight,
+      scrollWidth: refs.canvasViewport.scrollWidth,
+      scrollHeight: refs.canvasViewport.scrollHeight,
     },
     focusRect,
   });
@@ -1854,6 +1948,7 @@ function appendMessage(message) {
     mode: message.mode || 'chat',
     widgets: Array.isArray(message.widgets) ? message.widgets : [],
     artifacts: Array.isArray(message.artifacts) ? message.artifacts : [],
+    agentDialogue: Array.isArray(message.agentDialogue) ? message.agentDialogue : [],
     timeline: message.timeline || null,
     collapsed: Boolean(message.collapsed),
     timelineRunId: message.timelineRunId || null,
@@ -1893,6 +1988,7 @@ function ensurePendingAssistantMessage(content = 'Sedang menyiapkan jawaban...')
     timeline: [],
     collapsed: false,
     showTimelineDetails: false,
+    agentDialogue: [],
   });
   state.pendingMessageId = id;
   return state.messages.find((entry) => entry.id === id) || null;
@@ -1919,6 +2015,7 @@ function commitAssistantMessage(message) {
     mode: message.mode || 'chat',
     widgets: Array.isArray(message.widgets) ? message.widgets : [],
     artifacts: Array.isArray(message.artifacts) ? message.artifacts : [],
+    agentDialogue: Array.isArray(message.agentDialogue) ? message.agentDialogue : [],
     timeline: message.timeline || null,
     collapsed: Boolean(message.collapsed),
     timelineRunId: message.timelineRunId || null,
@@ -1947,6 +2044,37 @@ function commitAssistantMessage(message) {
   }
 
   state.pendingMessageId = null;
+  renderThread();
+}
+
+function mergeAgentDialogue(existing = [], incoming = []) {
+  const merged = [];
+  const seen = new Set();
+  const append = (entry) => {
+    if (!entry || typeof entry !== 'object') {
+      return;
+    }
+    const key = entry.id || `${entry.from || ''}:${entry.to || ''}:${entry.message || ''}:${entry.ts || ''}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    merged.push(entry);
+  };
+  (Array.isArray(existing) ? existing : []).forEach(append);
+  (Array.isArray(incoming) ? incoming : []).forEach(append);
+  return merged;
+}
+
+function appendAgentDialogueEntry(entry) {
+  if (!entry) {
+    return;
+  }
+  const pending = findPendingAssistantMessage();
+  if (!pending) {
+    return;
+  }
+  pending.agentDialogue = mergeAgentDialogue(pending.agentDialogue || [], [entry]);
   renderThread();
 }
 
@@ -2141,6 +2269,18 @@ function renderTimeline(message) {
   header.className = 'timeline-head';
   const title = document.createElement('strong');
   title.textContent = normalizeTimelineTitle(message.timelineTitle || message.content);
+  if (Array.isArray(message.agentDialogue) && message.agentDialogue.length > 0) {
+    const dialogueBtn = document.createElement('button');
+    dialogueBtn.type = 'button';
+    dialogueBtn.className = 'ghost timeline-dialogue-btn';
+    dialogueBtn.textContent = 'Diskusi Agen';
+    dialogueBtn.addEventListener('click', () => {
+      openAgentDialogue(message);
+    });
+    header.append(title, dialogueBtn);
+  } else {
+    header.append(title);
+  }
   const toggle = document.createElement('button');
   toggle.type = 'button';
   toggle.className = 'ghost timeline-toggle';
@@ -2149,7 +2289,7 @@ function renderTimeline(message) {
     message.collapsed = !message.collapsed;
     renderThread();
   });
-  header.append(title, toggle);
+  header.append(toggle);
   wrap.append(header);
 
   if (!message.collapsed && Array.isArray(message.timeline)) {
@@ -3426,7 +3566,7 @@ async function refreshSources() {
     const totalRows = ready.reduce((acc, item) => acc + Number(item.row_count || 0), 0);
     const hasSources = sources.length > 0;
 
-    state.datasetReady = ready.length > 0 && totalRows > 0;
+    state.datasetReady = ready.length > 0;
     if (refs.sourceStats) {
       refs.sourceStats.textContent = `Data: ${ready.length}/${sources.length} source • ${totalRows.toLocaleString('id-ID')} baris`;
     }
@@ -3436,7 +3576,7 @@ async function refreshSources() {
     if (refs.sourceStats) {
       refs.sourceStats.textContent = 'Data: tidak dapat dimuat';
     }
-    setDatasetGateVisible(!state.datasetReady);
+    setDatasetGateVisible(true);
     syncComposerChrome();
   }
 }
@@ -3706,6 +3846,38 @@ function renderDashboardList() {
     openBtn.append(title);
 
     card.append(openBtn);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.type = 'button';
+    deleteBtn.className = 'session-card-delete ghost';
+    deleteBtn.setAttribute('aria-label', 'Hapus dashboard');
+    deleteBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6v-6M14 11v6v-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
+    deleteBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Hapus versi dashboard "${title.textContent}"?`)) return;
+
+      try {
+        await api(`/api/chat/dashboards/${dashboard.id}`, { method: 'DELETE' });
+        state.dashboards = state.dashboards.filter(d => d.id !== dashboard.id);
+        
+        if (state.selectedDashboardId === dashboard.id) {
+          const fallback = state.dashboards[0];
+          state.selectedDashboardId = fallback ? fallback.id : null;
+          syncSelectedDashboard();
+          applySelectedDashboardToCanvas();
+          if (!fallback) {
+            setCanvasOpen(false);
+          }
+        }
+        
+        renderDashboardList();
+        showToast('Dashboard dihapus');
+      } catch (err) {
+        showToast(`Gagal menghapus: ${err.message}`);
+      }
+    });
+    card.append(deleteBtn);
+
     refs.dashboardList.append(card);
   });
 }
@@ -3763,6 +3935,7 @@ async function refreshChatHistory(conversationId = state.conversationId) {
           contentFormat: payload.content_format || 'plain',
           artifacts: Array.isArray(payload.artifacts) ? payload.artifacts : [],
           widgets: Array.isArray(payload.widgets) ? payload.widgets : [],
+          agentDialogue: Array.isArray(payload.agent_dialogue) ? payload.agent_dialogue : [],
           mode: payload.presentation_mode || 'chat',
           fileName: null,
           error: Boolean(payload.error),
@@ -4106,6 +4279,10 @@ function shouldHydrateTimelineFromResponse(response = {}) {
     return true;
   }
 
+  if (Array.isArray(response.agent_dialogue) && response.agent_dialogue.length > 0) {
+    return true;
+  }
+
   const routeAction = String(response.agent?.route?.action || '').toLowerCase();
   if (['analyze', 'inspect_dataset', 'create_dashboard', 'edit_dashboard'].includes(routeAction)) {
     return true;
@@ -4146,6 +4323,9 @@ function applyAssistantResponse(response, options = {}) {
 
   const widgets = response.widgets || [];
   const artifacts = response.artifacts || [];
+  const pending = findPendingAssistantMessage();
+  const incomingDialogue = Array.isArray(response.agent_dialogue) ? response.agent_dialogue : [];
+  const mergedDialogue = mergeAgentDialogue(pending?.agentDialogue || [], incomingDialogue);
   const mode = response.presentation_mode || 'chat';
   const isSingleWidget = Array.isArray(widgets) && widgets.length === 1;
   const isSingleArtifact = !isSingleWidget && Array.isArray(artifacts) && artifacts.length === 1;
@@ -4165,6 +4345,7 @@ function applyAssistantResponse(response, options = {}) {
       mode: 'chat',
       widgets: [],
       artifacts: [normalized.artifact],
+      agentDialogue: mergedDialogue,
     });
     return;
   }
@@ -4177,6 +4358,7 @@ function applyAssistantResponse(response, options = {}) {
       mode: 'chat',
       widgets: [],
       artifacts,
+      agentDialogue: mergedDialogue,
     });
     return;
   }
@@ -4188,6 +4370,7 @@ function applyAssistantResponse(response, options = {}) {
     mode,
     widgets,
     artifacts,
+    agentDialogue: mergedDialogue,
   });
 
   if (mode === 'canvas' && Array.isArray(widgets) && widgets.length > 0) {
@@ -4329,6 +4512,9 @@ async function streamChatMessage(userText, streamState = createTimelineStreamSta
           if (event.approval?.prompt) {
             showToast(event.approval.prompt);
           }
+        } else if (event.type === 'agent_dialogue') {
+          markStreamComplexity(streamState, event.run_id || streamState.runId || null);
+          appendAgentDialogueEntry(event);
         } else if (event.type === 'final') {
           finalPayload = event.payload || null;
         } else if (event.type === 'error') {
@@ -4870,11 +5056,26 @@ refs.chatFile.addEventListener('change', () => {
   syncComposerChrome();
 });
 
-refs.gateUploadInput?.addEventListener('change', () => {
+refs.gateUploadInput?.addEventListener('change', async () => {
   const file = refs.gateUploadInput.files[0];
   if (refs.gateUploadName) {
     refs.gateUploadName.hidden = !file;
     refs.gateUploadName.textContent = file ? file.name : '';
+  }
+  
+  if (!file) {
+    return;
+  }
+  
+  try {
+    await uploadDataset({ file });
+    refs.gateUploadInput.value = '';
+    if (refs.gateUploadName) {
+      refs.gateUploadName.hidden = true;
+      refs.gateUploadName.textContent = '';
+    }
+  } catch (error) {
+    showToast(error.message);
   }
 });
 
@@ -4943,23 +5144,7 @@ if (refs.openCanvasBtn) {
   });
 }
 
-refs.gateUploadBtn.addEventListener('click', async () => {
-  const file = refs.gateUploadInput.files[0];
-  if (!file) {
-    return showToast('Pilih file dataset dulu.');
-  }
 
-  try {
-    await uploadDataset({ file });
-    refs.gateUploadInput.value = '';
-    if (refs.gateUploadName) {
-      refs.gateUploadName.hidden = true;
-      refs.gateUploadName.textContent = '';
-    }
-  } catch (error) {
-    showToast(error.message);
-  }
-});
 
 refs.gateDemoBtn.addEventListener('click', async () => {
   try {
@@ -5437,6 +5622,18 @@ if (refs.settingsCloseBtn) {
 if (refs.settingsBackdrop) {
   refs.settingsBackdrop.addEventListener('click', () => {
     setSettingsOpen(false);
+  });
+}
+
+if (refs.agentDialogueCloseBtn) {
+  refs.agentDialogueCloseBtn.addEventListener('click', () => {
+    setAgentDialogueOpen(false);
+  });
+}
+
+if (refs.agentDialogueBackdrop) {
+  refs.agentDialogueBackdrop.addEventListener('click', () => {
+    setAgentDialogueOpen(false);
   });
 }
 

@@ -30,7 +30,7 @@ const TEMPLATE_DEFINITIONS = {
       SELECT
         CASE
           WHEN COALESCE(SUM(total_revenue), 0) = 0 THEN 0
-          ELSE ROUND((SUM(total_revenue - COALESCE(cogs, 0) - COALESCE(discount, 0)) / SUM(total_revenue)) * 100, 2)
+          ELSE ROUND(CAST(((SUM(total_revenue - COALESCE(cogs, 0) - COALESCE(discount, 0)) / SUM(total_revenue)) * 100) AS numeric), 2)
         END AS value
       FROM transactions
       WHERE tenant_id = :tenant_id
@@ -58,8 +58,8 @@ const TEMPLATE_DEFINITIONS = {
     title: 'Produk Terlaris',
     sql: `
       SELECT p.name,
-             ROUND(COALESCE(SUM(t.quantity), 0), 2) AS total_qty,
-             ROUND(COALESCE(SUM(t.total_revenue), 0), 2) AS total_revenue
+             ROUND(CAST(COALESCE(SUM(t.quantity), 0) AS numeric), 2) AS total_qty,
+             ROUND(CAST(COALESCE(SUM(t.total_revenue), 0) AS numeric), 2) AS total_revenue
       FROM transactions t
       JOIN products p ON p.id = t.product_id
       WHERE t.tenant_id = :tenant_id
@@ -76,8 +76,8 @@ const TEMPLATE_DEFINITIONS = {
     title: 'Performa Cabang',
     sql: `
       SELECT b.name,
-             ROUND(COALESCE(SUM(t.total_revenue), 0), 2) AS revenue,
-             ROUND(COALESCE(SUM(t.total_revenue - COALESCE(t.cogs, 0) - COALESCE(t.discount, 0)), 0), 2) AS profit
+             ROUND(CAST(COALESCE(SUM(t.total_revenue), 0) AS numeric), 2) AS revenue,
+             ROUND(CAST(COALESCE(SUM(t.total_revenue - COALESCE(t.cogs, 0) - COALESCE(t.discount, 0)), 0) AS numeric), 2) AS profit
       FROM transactions t
       JOIN branches b ON b.id = t.branch_id
       WHERE t.tenant_id = :tenant_id

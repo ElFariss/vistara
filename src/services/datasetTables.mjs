@@ -118,12 +118,36 @@ export async function listDatasetTables(tenantId) {
   }));
 }
 
+export async function listDatasetTablesForSource(tenantId, sourceId) {
+  const rows = await all(
+    `
+      SELECT *
+      FROM dataset_tables
+      WHERE tenant_id = :tenant_id
+        AND source_file_id = :source_file_id
+      ORDER BY created_at DESC
+    `,
+    { tenant_id: tenantId, source_file_id: sourceId },
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: normalizeTableName(row.table_name, 'Dataset'),
+    row_count: Number(row.row_count || 0),
+    columns: safeJsonParse(row.columns_json, []),
+    profile: safeJsonParse(row.profile_json, {}),
+    sample_rows: safeJsonParse(row.sample_rows_json, []),
+    data_path: row.data_path || null,
+    source_file_id: row.source_file_id || null,
+  }));
+}
+
 export async function getDatasetTable(tenantId, tableId) {
   const row = await get(
     `
       SELECT *
       FROM dataset_tables
-      WHERE id = :id AND tenant_id = :tenant_id
+      WHERE (id = :id OR LOWER(table_name) = LOWER(:id)) AND tenant_id = :tenant_id
       LIMIT 1
     `,
     { id: tableId, tenant_id: tenantId },

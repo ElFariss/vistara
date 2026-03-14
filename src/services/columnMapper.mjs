@@ -26,21 +26,21 @@ const EXPENSE_FIELDS = [
 ];
 
 const keywordMap = new Map([
-  ['transaction_date', ['tanggal', 'date', 'waktu', 'time']],
-  ['product_name', ['produk', 'product', 'item', 'menu', 'nama barang', 'nama produk', 'barang']],
-  ['quantity', ['qty', 'jumlah', 'kuantitas', 'pcs', 'unit terjual']],
-  ['unit_price', ['harga satuan', 'unit price', 'harga', 'price']],
-  ['total_revenue', ['total', 'omzet', 'revenue', 'sales', 'pendapatan', 'subtotal']],
-  ['cogs', ['hpp', 'cogs', 'harga pokok', 'modal']],
-  ['discount', ['diskon', 'discount', 'potongan']],
-  ['branch_name', ['cabang', 'branch', 'outlet', 'toko']],
-  ['channel', ['channel', 'kanal', 'marketplace', 'source']],
-  ['payment_method', ['payment', 'pembayaran', 'metode bayar']],
-  ['category', ['kategori', 'category']],
+  ['transaction_date', ['tanggal', 'date', 'waktu', 'time', 'opened_at', 'closed_at', 'issue_date', 'created_at', 'order_date', 'usage_timestamp', 'paid_at', 'timestamp']],
+  ['product_name', ['produk', 'product', 'item', 'menu', 'nama barang', 'nama produk', 'barang', 'part_desc', 'complaint_text', 'service']],
+  ['quantity', ['qty', 'jumlah', 'kuantitas', 'pcs', 'unit terjual', 'labor_hours']],
+  ['unit_price', ['harga satuan', 'unit price', 'harga', 'price', 'unit_cost', 'unit_cost_idr', 'cost']],
+  ['total_revenue', ['total', 'omzet', 'revenue', 'sales', 'pendapatan', 'subtotal', 'grand_total', 'grand_total_idr', 'amount', 'extended_cost', 'extended_cost_idr', 'subtotal_parts', 'subtotal_labor', 'amount_paid']],
+  ['cogs', ['hpp', 'cogs', 'harga pokok', 'modal', 'core_charge', 'cost']],
+  ['discount', ['diskon', 'discount', 'potongan', 'discount_amt']],
+  ['branch_name', ['cabang', 'branch', 'outlet', 'toko', 'warehouse', 'bay_no']],
+  ['channel', ['channel', 'kanal', 'marketplace', 'source', 'source_channel']],
+  ['payment_method', ['payment', 'pembayaran', 'metode bayar', 'payment_method', 'payment_type']],
+  ['category', ['kategori', 'category', 'diag_code', 'part_condition', 'status', 'priority']],
   ['expense_date', ['tanggal', 'date', 'waktu']],
   ['expense_category', ['kategori', 'category', 'jenis biaya']],
   ['expense_amount', ['nominal', 'amount', 'biaya', 'pengeluaran', 'expense']],
-  ['description', ['deskripsi', 'keterangan', 'description', 'catatan']],
+  ['description', ['deskripsi', 'keterangan', 'description', 'catatan', 'notes', 'tech_note', 'memo', 'complaint_text']],
   ['recurring', ['berulang', 'recurring', 'langganan']],
 ]);
 
@@ -52,7 +52,15 @@ function detectDatasetType(columns) {
   const normalized = columns.map((column) => toLowerAlnum(column)).join(' ');
   const expenseSignals = ['biaya', 'expense', 'pengeluaran', 'gaji', 'sewa'];
   const hasExpenseSignal = expenseSignals.some((signal) => normalized.includes(signal));
-  return hasExpenseSignal ? 'expense' : 'transaction';
+  if (hasExpenseSignal) return 'expense';
+
+  // Check for standard UMKM transaction signals
+  const transactionSignals = ['produk', 'product', 'revenue', 'omzet', 'sales', 'pendapatan', 'qty', 'quantity', 'harga', 'jumlah', 'barang'];
+  const hasTransactionSignal = transactionSignals.some((signal) => normalized.includes(signal));
+  if (hasTransactionSignal) return 'transaction';
+
+  // Non-standard data (e.g., repair orders, logistics, custom schemas) → generic
+  return 'generic';
 }
 
 function scoreColumn(columnName, targetField) {
@@ -256,7 +264,7 @@ export function requiredFieldsForDataset(datasetType) {
   if (datasetType === 'expense') {
     return ['expense_date', 'expense_amount'];
   }
-  if (datasetType === 'raw') {
+  if (datasetType === 'raw' || datasetType === 'generic') {
     return [];
   }
   return ['transaction_date', 'total_revenue'];

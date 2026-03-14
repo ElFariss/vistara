@@ -10,6 +10,7 @@ import {
   renameConversation,
   setChatFeedback,
 } from '../services/chat.mjs';
+import { deleteDashboard } from '../services/dashboards.mjs';
 
 export function registerChatRoutes(router) {
   function handleChatError(res, error, fallbackCode, fallbackMessage) {
@@ -195,6 +196,9 @@ export function registerChatRoutes(router) {
             onAgentStep: (data) => {
               writeStreamEvent(ctx.res, 'agent_step', data);
             },
+            onAgentDialogue: (entry) => {
+              writeStreamEvent(ctx.res, 'agent_dialogue', entry);
+            },
             onDashboardPatch: (patch) => {
               writeStreamEvent(ctx.res, 'dashboard_patch', patch);
             },
@@ -292,6 +296,23 @@ export function registerChatRoutes(router) {
       }
 
       return sendJson(ctx.res, 200, { ok: true });
+    },
+    { auth: true },
+  );
+
+  router.register(
+    'DELETE',
+    '/api/chat/dashboards/:dashboardId',
+    async (ctx) => {
+      try {
+        const deleted = await deleteDashboard(ctx.user.tenant_id, ctx.user.id, ctx.params.dashboardId);
+        if (!deleted) {
+          return sendError(ctx.res, 404, 'DASHBOARD_NOT_FOUND', 'Dashboard tidak ditemukan.');
+        }
+        return sendJson(ctx.res, 200, { ok: true });
+      } catch (error) {
+        return handleChatError(ctx.res, error, 'DASHBOARD_DELETE_FAILED', 'Gagal menghapus dashboard.');
+      }
     },
     { auth: true },
   );

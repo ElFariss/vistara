@@ -6,6 +6,7 @@ import {
   deleteSource,
   getSource,
   storeUploadedSource,
+  ingestUploadedSource,
   listSources,
   repairLatestSourceIfNeeded,
   updateSourceMapping,
@@ -200,45 +201,77 @@ export function registerDataRoutes(router) {
       });
 
       try {
-        const stored = await storeUploadedSource({
+        const ingested = await ingestUploadedSource({
           tenantId: ctx.user.tenant_id,
           userId: ctx.user.id,
           filePath: storedPath,
           filename: safeName,
           contentType: file.contentType,
+          replaceExisting: true,
+          keepFilePaths: [storedPath],
         });
 
-        logger.info('upload_stored', {
+        logger.info('upload_ingested', {
           user_id: ctx.user?.id || null,
-          source_id: stored.source?.id || null,
+          source_id: ingested.source?.id || null,
+          dataset_type: ingested.analysis?.suggestion?.datasetType || null,
+          row_count: ingested.analysis?.rowCount || 0,
+          tables: ingested.analysis?.tables?.length || 0,
         });
 
         return sendJson(ctx.res, 201, {
           ok: true,
-          source: stored.source,
-          status: 'uploaded',
+          source: ingested.source,
+          analysis: {
+            fileType: ingested.analysis?.fileType || null,
+            rowCount: ingested.analysis?.rowCount || 0,
+            tables: ingested.analysis?.tables || [],
+            datasetType: ingested.analysis?.suggestion?.datasetType || null,
+          },
+          status: 'ready',
         });
       } catch (error) {
-        if (fs.existsSync(storedPath)) {
-          fs.unlinkSync(storedPath);
-        }
-        logger.error('upload_failed', {
+        // If full ingestion fails, fall back to raw storage
+        logger.warn('upload_ingest_failed_falling_back', {
           user_id: ctx.user?.id || null,
-          error: error?.message || 'unknown_error',
+          error: error?.message || 'unknown',
         });
-        const msg = error?.message || '';
-        const isParserError =
-          msg.includes('Gunakan data tabular') ||
-          msg.includes('AI parser tidak menemukan') ||
-          msg.includes('Coba unggah') ||
-          msg.includes('Format file tidak didukung');
+        try {
+          const stored = await storeUploadedSource({
+            tenantId: ctx.user.tenant_id,
+            userId: ctx.user.id,
+            filePath: storedPath,
+            filename: safeName,
+            contentType: file.contentType,
+          });
+          return sendJson(ctx.res, 201, {
+            ok: true,
+            source: stored.source,
+            status: 'uploaded',
+            warning: 'Data stored as raw — could not fully parse.',
+          });
+        } catch (fallbackError) {
+          if (fs.existsSync(storedPath)) {
+            fs.unlinkSync(storedPath);
+          }
+          logger.error('upload_failed', {
+            user_id: ctx.user?.id || null,
+            error: fallbackError?.message || 'unknown_error',
+          });
+          const msg = fallbackError?.message || '';
+          const isParserError =
+            msg.includes('Gunakan data tabular') ||
+            msg.includes('AI parser tidak menemukan') ||
+            msg.includes('Coba unggah') ||
+            msg.includes('Format file tidak didukung');
 
-        return sendError(
-          ctx.res,
-          400,
-          'UPLOAD_PROCESS_ERROR',
-          isParserError ? msg : resolvePublicErrorMessage(error, 'File tidak bisa diproses sebagai dataset.'),
-        );
+          return sendError(
+            ctx.res,
+            400,
+            'UPLOAD_PROCESS_ERROR',
+            isParserError ? msg : resolvePublicErrorMessage(fallbackError, 'File tidak bisa diproses sebagai dataset.'),
+          );
+        }
       }
     },
     { auth: true },

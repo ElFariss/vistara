@@ -1415,6 +1415,32 @@ label {
   box-shadow: none;
 }
 
+.session-card-delete {
+  position: absolute;
+  right: 0.25rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--ink-secondary);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.session-card:hover .session-card-delete {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.session-card-delete:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
 .session-card-title {
   margin: 0;
   display: block;
@@ -2943,6 +2969,15 @@ label {
   align-items: center;
 }
 
+.timeline-dialogue-btn {
+  margin-left: auto;
+  font-size: 0.75rem;
+}
+
+.timeline-toggle {
+  margin-left: 0.4rem;
+}
+
 .timeline-steps {
   display: grid;
   gap: 0.4rem;
@@ -3166,6 +3201,117 @@ label {
   font-size: 0.85rem;
 }
 
+.agent-dialogue-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 14, 20, 0.35);
+  backdrop-filter: blur(8px);
+  z-index: 72;
+  animation: agent-dialogue-fade 180ms ease;
+}
+
+@keyframes agent-dialogue-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.agent-dialogue-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: min(560px, calc(100vw - 2rem));
+  max-height: min(80dvh, 640px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: var(--shadow-lg);
+  z-index: 73;
+  padding: 1rem;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0.9rem;
+  transform: translate(-50%, -50%);
+  animation: agent-dialogue-pop 220ms ease;
+}
+
+@keyframes agent-dialogue-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -47%) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.agent-dialogue-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.agent-dialogue-kicker {
+  margin: 0;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+}
+
+.agent-dialogue-head h3 {
+  margin: 0.25rem 0 0;
+}
+
+.agent-dialogue-list {
+  overflow: auto;
+  display: grid;
+  gap: 0.75rem;
+  padding-right: 0.25rem;
+}
+
+.agent-dialogue-item {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.75rem 0.85rem;
+  background: color-mix(in srgb, var(--surface) 86%, var(--bg-warm));
+}
+
+.agent-dialogue-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.agent-dialogue-time {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-dialogue-text {
+  margin: 0.45rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+.agent-dialogue-empty {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
+
 .settings-form {
   min-height: 0;
   display: grid;
@@ -3244,6 +3390,16 @@ label {
   position: sticky;
   bottom: 0;
   background: linear-gradient(180deg, transparent, var(--surface) 38%);
+}
+
+.settings-logout-btn {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+}
+
+.settings-logout-btn:hover {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
 }
 
 .settings-reset-btn {
@@ -3368,6 +3524,12 @@ label {
     gap: 0.75rem;
   }
 
+  .app-shell.workspace-active .app-header {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
   body:not(.workspace-mode) .app-header {
     gap: 0.35rem;
   }
@@ -3407,8 +3569,25 @@ label {
     justify-content: flex-end;
   }
 
+  .app-shell.workspace-active .header-actions {
+    width: auto;
+    display: inline-flex;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 0.4rem;
+  }
+
+  .app-shell.workspace-active .header-actions > * {
+    width: auto;
+  }
+
   body.is-authenticated:not(.workspace-mode) .header-actions > * {
     width: auto;
+  }
+
+  .agent-dialogue-panel {
+    width: calc(100vw - 1.5rem);
+    max-height: calc(100dvh - 2.5rem);
   }
 
   .workspace-page {

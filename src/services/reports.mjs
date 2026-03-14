@@ -29,8 +29,8 @@ async function topProducts(tenantId, start, end, limit = 5) {
   return all(
     `
       SELECT p.name,
-             ROUND(COALESCE(SUM(t.total_revenue), 0), 2) AS revenue,
-             ROUND(COALESCE(SUM(t.quantity), 0), 2) AS qty
+             ROUND(CAST(COALESCE(SUM(t.total_revenue), 0) AS numeric), 2) AS revenue,
+             ROUND(CAST(COALESCE(SUM(t.quantity), 0) AS numeric), 2) AS qty
       FROM transactions t
       LEFT JOIN products p ON p.id = t.product_id
       WHERE t.tenant_id = :tenant_id
@@ -48,7 +48,7 @@ async function branchRanking(tenantId, start, end, limit = 5) {
   return all(
     `
       SELECT b.name,
-             ROUND(COALESCE(SUM(t.total_revenue), 0), 2) AS revenue
+             ROUND(CAST(COALESCE(SUM(t.total_revenue), 0) AS numeric), 2) AS revenue
       FROM transactions t
       LEFT JOIN branches b ON b.id = t.branch_id
       WHERE t.tenant_id = :tenant_id
