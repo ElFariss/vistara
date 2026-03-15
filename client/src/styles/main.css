@@ -2633,9 +2633,10 @@ label {
 
 .canvas-world {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 1280px;
+  height: 720px;
+  min-width: 1280px;
+  min-height: 720px;
   margin: auto;
 }
 
@@ -3487,8 +3488,10 @@ label {
   }
 
   .canvas-world {
-    min-width: calc(100% + 520px);
-    min-height: calc(100% + 420px);
+    width: 1280px;
+    height: 720px;
+    min-width: 1280px;
+    min-height: 720px;
   }
 
   .canvas-stage {
@@ -3913,6 +3916,9 @@ label {
   }
   
   .canvas-world {
+    width: 100%;
+    height: auto;
+    max-width: 100%;
     min-width: 100%;
     min-height: 100%;
     display: block;

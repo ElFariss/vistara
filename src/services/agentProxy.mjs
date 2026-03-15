@@ -19,7 +19,7 @@ function trimUrl(url) {
  * Build the common JSON request body for both endpoints.
  */
 function buildRequestBody({ tenantId, userId, conversationId, dashboardId, message, history,
-  datasetReady, userDisplayName, savedDashboard, datasetProfile }) {
+  datasetReady, userDisplayName, savedDashboard, datasetProfile, agentState }) {
   return JSON.stringify({
     tenant_id: tenantId,
     user_id: userId,
@@ -31,6 +31,7 @@ function buildRequestBody({ tenantId, userId, conversationId, dashboardId, messa
     dataset_profile: datasetProfile || null,
     user_display_name: userDisplayName || null,
     saved_dashboard: savedDashboard || null,
+    agent_state: agentState || null,
   });
 }
 
@@ -51,6 +52,7 @@ function normalizePayload(payload) {
     agent_dialogue: payload.agent_dialogue || [],
     analysis_brief: payload.analysis_brief || null,
     analytics_intent: payload.analytics_intent || null,
+    agent_state: payload.agent_state || null,
   };
 }
 
@@ -190,6 +192,7 @@ export async function runConversationAgent({
   userDisplayName = null,
   savedDashboard = null,
   datasetProfile = null,
+  agentState = null,
   hooks = null,
 }) {
   const baseUrl = trimUrl(config.pythonAgentBackendUrl);
@@ -215,7 +218,19 @@ export async function runConversationAgent({
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: buildRequestBody({ tenantId, userId, conversationId, dashboardId, message, history, datasetReady, userDisplayName, savedDashboard, datasetProfile }),
+      body: buildRequestBody({
+        tenantId,
+        userId,
+        conversationId,
+        dashboardId,
+        message,
+        history,
+        datasetReady,
+        userDisplayName,
+        savedDashboard,
+        datasetProfile,
+        agentState,
+      }),
       signal: controller.signal,
     });
 

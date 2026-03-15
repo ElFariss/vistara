@@ -2636,8 +2636,10 @@ label {
 
 .canvas-world {
   position: relative;
-  min-width: calc(100% + 680px);
-  min-height: calc(100% + 520px);
+  width: 1280px;
+  height: 720px;
+  min-width: 1280px;
+  min-height: 720px;
 }
 
 .canvas-page-controls {
@@ -3489,8 +3491,10 @@ label {
   }
 
   .canvas-world {
-    min-width: calc(100% + 520px);
-    min-height: calc(100% + 420px);
+    width: 1280px;
+    height: 720px;
+    min-width: 1280px;
+    min-height: 720px;
   }
 
   .canvas-stage {
@@ -3859,6 +3863,13 @@ label {
 
   .canvas-dock-group + .canvas-dock-group {
     padding-left: 0.32rem;
+  }
+
+  .canvas-world {
+    width: 1080px;
+    height: 608px;
+    min-width: 1080px;
+    min-height: 608px;
   }
 
   .canvas-stage {

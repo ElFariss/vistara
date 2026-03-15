@@ -145,6 +145,16 @@ test('resolveAllowedOrigin fails closed in production without an allowlist', () 
     isProduction: true,
     allowedOrigins: ['https://app.example.com'],
   }), 'https://app.example.com');
+
+  assert.equal(resolveAllowedOrigin('https://demo.vistara.vercel.app', {
+    isProduction: true,
+    allowedOrigins: ['https://*.vercel.app'],
+  }), 'https://demo.vistara.vercel.app');
+
+  assert.equal(resolveAllowedOrigin('https://foo.example.com', {
+    isProduction: true,
+    allowedOrigins: ['*'],
+  }), 'https://foo.example.com');
 });
 
 test('resolvePublicErrorMessage hides raw 500 messages but preserves explicit 4xx messages', () => {

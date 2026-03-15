@@ -1,0 +1,103 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy-vps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Trust VPS host key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Build app image
+        run: docker build -t vistara-app:${{ github.sha }} .
+
+      - name: Build agent image
+        run: docker build -t vistara-agent-backend:${{ github.sha }} ./agent
+
+      - name: Upload deploy files
+        run: |
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'mkdir -p ~/apps/vistara/data/uploads ~/apps/vistara/data/tables ~/apps/vistara/backups ~/apps/vistara/scripts'
+          scp -P "${{ secrets.SSH_PORT }}" docker-compose.vps.yml scripts/deploy-vps.sh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:~/apps/vistara/"
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'chmod +x ~/apps/vistara/deploy-vps.sh'
+
+      - name: Upload VPS env file
+        run: |
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "cat > ~/apps/vistara/.env" <<'EOF2'
+          ${{ secrets.VPS_ENV_FILE }}
+          EOF2
+
+      - name: Ship app image
+        run: docker save vistara-app:${{ github.sha }} | gzip -1 | ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'gunzip | docker load'
+
+      - name: Ship agent image
+        run: docker save vistara-agent-backend:${{ github.sha }} | gzip -1 | ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" 'gunzip | docker load'
+
+      - name: Deploy on VPS
+        run: |
+          ssh -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" '
+            cd ~/apps/vistara && \
+            APP_IMAGE=vistara-app:${{ github.sha }} AGENT_IMAGE=vistara-agent-backend:${{ github.sha }} ./deploy-vps.sh
+          '
+
+      - name: Verify backend health
+        run: curl --retry 10 --retry-delay 3 --retry-connrefused --fail --silent --show-error "http://${{ secrets.SSH_HOST }}:8081/api/health"
+
+  deploy-vercel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: deploy-vps
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install client deps
+        run: npm ci --prefix client
+
+      - name: Pull Vercel project settings
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: npx vercel pull --yes --environment=production --cwd client --token "$VERCEL_TOKEN"
+
+      - name: Build Vercel artifact
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VISTARA_BUILD_TARGET: standalone
+        run: npx vercel build --prod --cwd client --token "$VERCEL_TOKEN"
+
+      - name: Deploy to Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: npx vercel deploy --prebuilt --prod --cwd client --token "$VERCEL_TOKEN"

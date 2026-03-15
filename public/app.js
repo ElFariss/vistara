@@ -2352,6 +2352,12 @@ function toMetricArtifact(widget) {
   };
 
   if (widget.type === 'MetricCard') {
+    if (!widget.artifact && widget.displayValue == null && widget.value == null) {
+      return {
+        kind: 'placeholder',
+        title: widget.title || 'Metric',
+      };
+    }
     return {
       kind: 'metric',
       title: widget.title || 'Metric',
@@ -2361,6 +2367,12 @@ function toMetricArtifact(widget) {
   }
 
   if (widget.type === 'TrendChart') {
+    if (!widget.artifact && (!Array.isArray(widget.points) || widget.points.length === 0)) {
+      return {
+        kind: 'placeholder',
+        title: widget.title || 'Trend',
+      };
+    }
     return {
       kind: 'chart',
       chart_type: 'line',
@@ -2376,6 +2388,12 @@ function toMetricArtifact(widget) {
   }
 
   if (widget.type === 'TopList') {
+    if (!widget.artifact && (!Array.isArray(widget.items) || widget.items.length === 0)) {
+      return {
+        kind: 'placeholder',
+        title: widget.title || 'Top List',
+      };
+    }
     return {
       kind: 'table',
       title: widget.title || 'Top List',
@@ -2396,6 +2414,35 @@ function toMetricArtifact(widget) {
     title: widget.title || 'Widget',
     content: JSON.stringify(widget, null, 2),
   };
+}
+
+function artifactHasRenderableData(artifact = null) {
+  if (!artifact || typeof artifact !== 'object') {
+    return false;
+  }
+
+  if (artifact.kind === 'metric') {
+    return artifact.value !== null && artifact.value !== undefined && String(artifact.value).trim() !== '' && String(artifact.value).trim() !== '—';
+  }
+
+  if (artifact.kind === 'table') {
+    return Array.isArray(artifact.rows) && artifact.rows.length > 0;
+  }
+
+  if (artifact.kind === 'chart') {
+    const labels = Array.isArray(artifact.labels) ? artifact.labels : [];
+    const series = Array.isArray(artifact.series) ? artifact.series : [];
+    return labels.length > 0 && series.some((item) => Array.isArray(item?.values) && item.values.length > 0);
+  }
+
+  return false;
+}
+
+function draftHasRenderableWidgets(draft = null) {
+  if (!draft || typeof draft !== 'object' || !Array.isArray(draft.widgets)) {
+    return false;
+  }
+  return draft.widgets.some((widget) => artifactHasRenderableData(widget?.artifact || null));
 }
 
 function normalizeIncomingWidgets(inputWidgets = []) {
@@ -4296,17 +4343,19 @@ function applyAssistantResponse(response, options = {}) {
   state.conversationId = response.conversation_id;
   state.conversationTitle = response.conversation?.title || state.conversationTitle || 'Percakapan baru';
   upsertConversation(response.conversation);
+  const serverDraftDashboard = response.draft_dashboard || response.agent_state?.draft_dashboard || null;
+  const canRenderServerDraft = draftHasRenderableWidgets(serverDraftDashboard) || String(serverDraftDashboard?.status || '').toLowerCase() === 'ready';
   if (response.dashboard) {
     upsertDashboardRecord(response.dashboard);
     state.selectedDashboardId = response.dashboard.id;
     syncSelectedDashboard({ fallbackToFirst: true });
     renderDashboardList();
   }
-  if (response.draft_dashboard) {
+  if (serverDraftDashboard) {
     state.draftDashboard = {
-      ...response.draft_dashboard,
-      widgets: Array.isArray(response.draft_dashboard.widgets)
-        ? normalizeIncomingWidgets(response.draft_dashboard.widgets)
+      ...serverDraftDashboard,
+      widgets: Array.isArray(serverDraftDashboard.widgets)
+        ? normalizeIncomingWidgets(serverDraftDashboard.widgets)
         : [],
     };
     state.draftSaveDirty = response.save_required !== false;
@@ -4373,20 +4422,20 @@ function applyAssistantResponse(response, options = {}) {
     agentDialogue: mergedDialogue,
   });
 
-  if (mode === 'canvas' && Array.isArray(widgets) && widgets.length > 0) {
+  if (mode === 'canvas' && ((canRenderServerDraft && serverDraftDashboard) || (Array.isArray(widgets) && widgets.length > 0))) {
     try {
-      applyDraftDashboardPayload(response.draft_dashboard || buildDraftDashboardFromCanvas({
+      applyDraftDashboardPayload((canRenderServerDraft ? serverDraftDashboard : null) || buildDraftDashboardFromCanvas({
         widgets: normalizeIncomingWidgets(widgets),
         pages: pageCountForWidgets(widgets),
         note: response.answer || null,
         status: 'ready',
       }), {
-        openCanvas: Boolean(state.canvasOpen),
+        openCanvas: true,
         preserveViewport: state.canvasViewportMovedByUser,
         markDirty: Boolean(response.save_required !== false),
         resetPage: true,
         page: 1,
-        runId: response.draft_dashboard?.run_id || null,
+        runId: serverDraftDashboard?.run_id || null,
         forceCenter: !state.canvasViewportMovedByUser,
       });
     } catch (error) {

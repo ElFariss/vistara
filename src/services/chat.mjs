@@ -1,7 +1,13 @@
 import { all, get, run } from '../db.mjs';
 import { generateId } from '../utils/ids.mjs';
 import { executeAnalyticsIntent } from './queryEngine.mjs';
-import { getDashboard, getLatestDashboard, getLatestDashboardForConversation } from './dashboards.mjs';
+import {
+  createDashboard,
+  getDashboard,
+  getLatestDashboard,
+  getLatestDashboardForConversation,
+  updateDashboard,
+} from './dashboards.mjs';
 import { config } from '../config.mjs';
 import { Prompts } from './agents/index.mjs';
 import { generateReport } from './reports.mjs';
@@ -14,7 +20,11 @@ import {
   applyConversationApproval,
   runConversationAgent,
 } from './agentProxy.mjs';
-import { getConversationAgentState } from './conversationState.mjs';
+import {
+  ensureConversationAgentState,
+  getConversationAgentState,
+  updateConversationAgentState,
+} from './conversationState.mjs';
 
 // Minimal error class for proxy error type checking (legacy runtime)
 class ConversationAgentError extends Error {
@@ -628,6 +638,169 @@ async function lookupUserDisplayName(tenantId, userId) {
   return name || null;
 }
 
+function compactText(value, maxLength = 320) {
+  const text = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) {
+    return null;
+  }
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function pageCountForWidgets(widgets = []) {
+  return widgets.reduce((max, widget) => Math.max(max, Number(widget?.layout?.page || 1)), 1);
+}
+
+function normalizeDraftDashboard(draft = null, fallback = {}) {
+  if (!draft || typeof draft !== 'object') {
+    return null;
+  }
+
+  const widgets = Array.isArray(draft.widgets) ? draft.widgets : [];
+  const artifacts = Array.isArray(draft.artifacts)
+    ? draft.artifacts
+    : widgets.map((widget) => widget?.artifact).filter(Boolean);
+
+  return {
+    run_id: draft.run_id || fallback.run_id || null,
+    name: String(draft.name || fallback.name || 'Draft Dashboard').trim() || 'Draft Dashboard',
+    goal: compactText(draft.goal || fallback.goal || fallback.message || ''),
+    pages: Math.max(1, Number(draft.pages || fallback.pages || pageCountForWidgets(widgets) || 1)),
+    widgets,
+    artifacts,
+    saved_dashboard_id: draft.saved_dashboard_id || fallback.saved_dashboard_id || null,
+    note: compactText(draft.note || fallback.note || ''),
+    status: String(draft.status || fallback.status || 'drafting').trim() || 'drafting',
+    updated_at: draft.updated_at || fallback.updated_at || new Date().toISOString(),
+  };
+}
+
+function dashboardConfigFromDraft(draftDashboard = null) {
+  const normalized = normalizeDraftDashboard(draftDashboard);
+  if (!normalized) {
+    return null;
+  }
+
+  return {
+    mode: 'ai',
+    pages: Math.max(1, Number(normalized.pages || pageCountForWidgets(normalized.widgets) || 1)),
+    components: normalized.widgets,
+    updated_by: 'assistant',
+  };
+}
+
+async function persistDashboardDraft({
+  tenantId,
+  userId,
+  conversationId,
+  savedDashboard,
+  draftDashboard,
+}) {
+  const normalizedDraft = normalizeDraftDashboard(draftDashboard);
+  if (!normalizedDraft || normalizedDraft.status !== 'ready' || normalizedDraft.widgets.length === 0) {
+    return {
+      dashboard: savedDashboard || null,
+      draftDashboard: normalizedDraft,
+    };
+  }
+
+  const config = dashboardConfigFromDraft(normalizedDraft);
+  const targetDashboardId = normalizedDraft.saved_dashboard_id || savedDashboard?.id || null;
+  let dashboard = null;
+
+  if (targetDashboardId) {
+    dashboard = await updateDashboard(tenantId, userId, targetDashboardId, {
+      name: normalizedDraft.name || savedDashboard?.name || 'Dashboard Utama',
+      config,
+    });
+  } else {
+    dashboard = await createDashboard(
+      tenantId,
+      userId,
+      normalizedDraft.name || 'Dashboard Utama',
+      config,
+      { conversationId },
+    );
+  }
+
+  if (!dashboard) {
+    return {
+      dashboard: savedDashboard || null,
+      draftDashboard: normalizedDraft,
+    };
+  }
+
+  return {
+    dashboard,
+    draftDashboard: {
+      ...normalizedDraft,
+      saved_dashboard_id: dashboard.id,
+      name: dashboard.name || normalizedDraft.name,
+      updated_at: dashboard.updated_at || new Date().toISOString(),
+    },
+  };
+}
+
+function finalizeAgentState({
+  existingState,
+  responsePayload,
+  datasetProfile,
+  draftDashboard,
+  dashboard,
+  message,
+}) {
+  const incoming = responsePayload?.agent_state && typeof responsePayload.agent_state === 'object'
+    ? responsePayload.agent_state
+    : {};
+  const existingMemory = existingState?.memory && typeof existingState.memory === 'object'
+    ? existingState.memory
+    : {};
+  const nextMemory = incoming.memory && typeof incoming.memory === 'object'
+    ? { ...existingMemory, ...incoming.memory }
+    : { ...existingMemory };
+  const analysisBrief = responsePayload?.analysis_brief && typeof responsePayload.analysis_brief === 'object'
+    ? responsePayload.analysis_brief
+    : null;
+  const intent = responsePayload?.intent?.intent || responsePayload?.agent?.route?.action || null;
+  const isAnalyticalTurn = ['analyze', 'create_dashboard', 'modify_dashboard', 'edit_dashboard', 'inspect_dataset']
+    .includes(String(intent || '').toLowerCase());
+
+  nextMemory.last_user_goal = compactText(message, 240) || nextMemory.last_user_goal || null;
+  nextMemory.last_route = compactText(responsePayload?.agent?.route?.action || intent, 80) || nextMemory.last_route || null;
+  if (isAnalyticalTurn || analysisBrief) {
+    nextMemory.last_analysis_summary = compactText(
+      analysisBrief?.executive_summary || analysisBrief?.headline || responsePayload?.answer || nextMemory.last_analysis_summary,
+      420,
+    ) || nextMemory.last_analysis_summary || null;
+  }
+  if (draftDashboard || analysisBrief?.business_goal) {
+    nextMemory.last_dashboard_goal = compactText(
+      draftDashboard?.goal || analysisBrief?.business_goal || nextMemory.last_dashboard_goal,
+      240,
+    ) || nextMemory.last_dashboard_goal || null;
+  }
+  nextMemory.active_dataset_summary = compactText(
+    incoming?.dataset_profile?.summary || datasetProfile?.summary || nextMemory.active_dataset_summary,
+    280,
+  ) || nextMemory.active_dataset_summary || null;
+  if (dashboard?.id) {
+    nextMemory.current_dashboard_id = dashboard.id;
+    nextMemory.current_dashboard_name = dashboard.name || nextMemory.current_dashboard_name || null;
+  }
+
+  return {
+    memory: nextMemory,
+    dataset_profile: incoming.dataset_profile ?? datasetProfile ?? existingState?.dataset_profile ?? null,
+    draft_dashboard: draftDashboard ?? incoming.draft_dashboard ?? existingState?.draft_dashboard ?? null,
+    pending_approval: responsePayload?.pending_approval ?? incoming.pending_approval ?? existingState?.pending_approval ?? null,
+    active_run: null,
+  };
+}
+
 
 function buildDashboardAgentError(error, options = {}) {
   if (error instanceof DashboardAgentError) {
@@ -707,6 +880,11 @@ export async function processChatMessage({
   stream = null,
 }) {
   let conversation = await ensureConversation(tenantId, userId, conversationId);
+  let agentState = await ensureConversationAgentState({
+    tenantId,
+    userId,
+    conversationId: conversation.id,
+  });
   await createMessage({
     conversationId: conversation.id,
     tenantId,
@@ -735,6 +913,17 @@ export async function processChatMessage({
 
   let responsePayload = null;
   const bufferedStream = createBufferedTimelineStream(stream);
+  await updateConversationAgentState({
+    tenantId,
+    userId,
+    conversationId: conversation.id,
+    activeRun: {
+      status: 'running',
+      message: compactText(message, 240),
+      dashboard_id: dashboardId || savedDashboard?.id || null,
+      started_at: new Date().toISOString(),
+    },
+  });
 
   try {
     responsePayload = await runConversationAgent({
@@ -748,6 +937,7 @@ export async function processChatMessage({
       datasetReady,
       datasetProfile,
       userDisplayName,
+      agentState,
       hooks: bufferedStream.hooks,
     });
 
@@ -775,7 +965,72 @@ export async function processChatMessage({
     throw attachConversationContext(error, conversation.id);
   } finally {
     bufferedStream.finalize();
+    try {
+      await updateConversationAgentState({
+        tenantId,
+        userId,
+        conversationId: conversation.id,
+        activeRun: null,
+      });
+    } catch (stateError) {
+      logger.warn('conversation_state_clear_failed', {
+        conversation_id: conversation.id,
+        tenant_id: tenantId,
+        user_id: userId,
+        error: stateError?.message,
+      });
+    }
   }
+
+  const shouldPersistDashboard = ['canvas', 'create_dashboard', 'edit_dashboard', 'modify_dashboard']
+    .includes(String(responsePayload?.presentation_mode || responsePayload?.intent?.intent || '').toLowerCase());
+  const persistedDraftResult = shouldPersistDashboard
+    ? await persistDashboardDraft({
+      tenantId,
+      userId,
+      conversationId: conversation.id,
+      savedDashboard,
+      draftDashboard: responsePayload?.draft_dashboard,
+    })
+    : {
+      dashboard: null,
+      draftDashboard: normalizeDraftDashboard(
+        responsePayload?.draft_dashboard,
+        {
+          saved_dashboard_id: savedDashboard?.id || null,
+          name: savedDashboard?.name || null,
+          updated_at: savedDashboard?.updated_at || null,
+          message,
+        },
+      ) || agentState?.draft_dashboard || null,
+    };
+
+  const finalizedAgentState = finalizeAgentState({
+    existingState: agentState,
+    responsePayload,
+    datasetProfile,
+    draftDashboard: persistedDraftResult.draftDashboard,
+    dashboard: persistedDraftResult.dashboard,
+    message,
+  });
+
+  agentState = await updateConversationAgentState({
+    tenantId,
+    userId,
+    conversationId: conversation.id,
+    memory: finalizedAgentState.memory,
+    datasetProfile: finalizedAgentState.dataset_profile,
+    draftDashboard: finalizedAgentState.draft_dashboard,
+    pendingApproval: finalizedAgentState.pending_approval,
+    activeRun: null,
+  });
+
+  responsePayload = {
+    ...responsePayload,
+    draft_dashboard: persistedDraftResult.draftDashboard,
+    dashboard: shouldPersistDashboard ? persistedDraftResult.dashboard : null,
+    agent_state: agentState,
+  };
 
   await persistAssistantMessage({
     conversationId: conversation.id,
@@ -846,9 +1101,16 @@ export async function processConversationApproval({
     payload: responsePayload,
   });
 
+  const agentState = await getConversationAgentState({
+    tenantId,
+    userId,
+    conversationId: conversation.id,
+  });
+
   return {
     conversation_id: conversation.id,
     conversation: await getConversationWithStats(tenantId, userId, conversation.id),
+    agent_state: agentState,
     ...responsePayload,
   };
 }

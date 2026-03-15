@@ -23,6 +23,7 @@ class ChatRequest(BaseModel):
     user_display_name: str | None = None
     dataset_profile: dict[str, Any] | None = None
     saved_dashboard: dict[str, Any] | None = None
+    agent_state: dict[str, Any] | None = None
 
 
 class ApprovalRequest(BaseModel):
@@ -85,3 +86,4 @@ class ChatResponse(BaseModel):
     agent_dialogue: list[dict[str, Any]] = Field(default_factory=list)
     analysis_brief: dict[str, Any] | None = None
     analytics_intent: dict[str, Any] | None = None
+    agent_state: dict[str, Any] | None = None

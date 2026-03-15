@@ -28,6 +28,14 @@ VALID_ACTIONS = frozenset([
     "ask_clarification",
 ])
 
+EDIT_HINT_PATTERN = re.compile(
+    r"\b(edit|ubah|update|revisi|refine|perbaiki|tambah|tambahkan|kurangi|hapus|detail|detailkan|rapikan|fokus|filter|halaman|page)\b",
+    flags=re.IGNORECASE,
+)
+
+DASHBOARD_PATTERN = re.compile(r"\b(dashboard|dash|canvas)\b", flags=re.IGNORECASE)
+ACK_PATTERN = re.compile(r"\b(ok|oke|siap|sip|mantap|thanks|thank you|makasih|terima kasih)\b", flags=re.IGNORECASE)
+
 
 def _strip_code_fences(text: str) -> str:
     value = str(text or "").strip()
@@ -136,6 +144,16 @@ def _build_system_prompt(state: AgentState) -> str:
     else:
         parts.append("Dataset user belum tersedia.")
 
+    memory = state.get("memory") if isinstance(state.get("memory"), dict) else {}
+    if state.get("draft_dashboard"):
+        parts.append("Ada draft dashboard aktif di percakapan ini.")
+    elif state.get("saved_dashboard"):
+        parts.append("Ada dashboard tersimpan yang terkait percakapan ini.")
+    if memory.get("last_analysis_summary"):
+        parts.append(f"Ringkasan analisis terakhir: {memory['last_analysis_summary']}.")
+    if memory.get("last_dashboard_goal"):
+        parts.append(f"Tujuan dashboard terakhir: {memory['last_dashboard_goal']}.")
+
     return " ".join(parts)
 
 
@@ -143,6 +161,64 @@ def _build_history_context(history: list[dict[str, Any]], limit: int = 10) -> st
     """Compact recent history into a string."""
     recent = history[-limit:] if history else []
     return "\n".join(f"{item.get('role', 'user')}: {str(item.get('content', '')).strip()}" for item in recent)
+
+
+def _workflow_context(state: AgentState) -> dict[str, Any]:
+    memory = state.get("memory") if isinstance(state.get("memory"), dict) else {}
+    draft = state.get("draft_dashboard") if isinstance(state.get("draft_dashboard"), dict) else None
+    saved = state.get("saved_dashboard") if isinstance(state.get("saved_dashboard"), dict) else None
+    return {
+        "has_draft_dashboard": bool(draft),
+        "has_saved_dashboard": bool(saved),
+        "last_route": memory.get("last_route"),
+        "last_dashboard_goal": memory.get("last_dashboard_goal"),
+        "last_analysis_summary": memory.get("last_analysis_summary"),
+        "recent_findings": memory.get("recent_findings") if isinstance(memory.get("recent_findings"), list) else [],
+    }
+
+
+def _message_mentions_dashboard(message: Any) -> bool:
+    return bool(DASHBOARD_PATTERN.search(str(message or "")))
+
+
+def _message_looks_like_dashboard_edit(message: Any, workflow: dict[str, Any]) -> bool:
+    source = str(message or "").strip()
+    if not source:
+        return False
+    if EDIT_HINT_PATTERN.search(source):
+        return True
+    if (
+        str(workflow.get("last_route") or "").lower() in {"create_dashboard", "edit_dashboard"}
+        and len(source.split()) <= 8
+        and not _message_mentions_dashboard(source)
+        and not ACK_PATTERN.search(source)
+    ):
+        return True
+    return False
+
+
+def _apply_workflow_bias(state: AgentState, route: dict[str, Any]) -> dict[str, Any]:
+    next_route = dict(route or {})
+    action = _normalize_action(next_route.get("action"))
+    workflow = _workflow_context(state)
+    message = state.get("message", "")
+
+    has_existing_dashboard = workflow["has_draft_dashboard"] or workflow["has_saved_dashboard"]
+    has_analysis_context = bool(workflow.get("last_analysis_summary") or workflow.get("recent_findings"))
+
+    if has_existing_dashboard and _message_looks_like_dashboard_edit(message, workflow):
+        action = "edit_dashboard"
+        next_route.setdefault("reason", "workflow_bias_existing_dashboard")
+
+    if _message_mentions_dashboard(message) and state.get("dataset_ready"):
+        if action in {"ask_clarification", "inspect_dataset"}:
+            action = "create_dashboard"
+            next_route["reason"] = "workflow_bias_dashboard_request"
+        if has_analysis_context:
+            next_route["reuse_existing_analysis"] = True
+
+    next_route["action"] = action
+    return next_route
 
 
 async def orchestrator_node(state: AgentState) -> dict[str, Any]:
@@ -164,6 +240,7 @@ async def orchestrator_node(state: AgentState) -> dict[str, Any]:
         {
             "message": state.get("message", ""),
             "history": _build_history_context(state.get("history", [])),
+            "workflow_state": _workflow_context(state),
         },
         ensure_ascii=False,
     )
@@ -197,11 +274,12 @@ async def orchestrator_node(state: AgentState) -> dict[str, Any]:
         if not route:
             raise ValueError("unable_to_parse_route_json")
         route["action"] = _normalize_action(route.get("action"))
+        route = _apply_workflow_bias(state, route)
 
     except Exception as e:
         logger.warning("Orchestrator classification failed: %s | raw=%r", e, locals().get("text", "")[:240])
         # On LLM failure, ask user to clarify — do NOT use hardcoded keyword matching
-        route = {"action": "ask_clarification", "reason": f"classification_error: {e}"}
+        route = _apply_workflow_bias(state, {"action": "ask_clarification", "reason": f"classification_error: {e}"})
 
     return {
         "route": route,

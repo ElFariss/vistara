@@ -94,6 +94,7 @@ async def chat(request: ChatRequest):
             user_display_name=request.user_display_name,
             dataset_profile=request.dataset_profile,
             saved_dashboard=request.saved_dashboard,
+            agent_state=request.agent_state,
         )
 
         return JSONResponse(content={"ok": True, **result})
@@ -130,6 +131,7 @@ async def chat_stream(request: ChatRequest):
             user_display_name=request.user_display_name,
             dataset_profile=request.dataset_profile,
             saved_dashboard=request.saved_dashboard,
+            agent_state=request.agent_state,
         ),
         media_type="application/x-ndjson",
     )

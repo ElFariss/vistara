@@ -29,6 +29,8 @@ class AgentState(TypedDict, total=False):
     user_display_name: str | None
     dataset_profile: dict[str, Any] | None
     saved_dashboard: dict[str, Any] | None
+    memory: dict[str, Any] | None
+    active_run: dict[str, Any] | None
 
     # ── Orchestrator output ─────────────────────────────────────────────
     route: dict[str, Any] | None  # {"action": "conversational"|"analyze"|..., "reason": ...}
@@ -46,6 +48,8 @@ class AgentState(TypedDict, total=False):
     # ── Dashboard sub-graph output ──────────────────────────────────────
     analysis_brief: dict[str, Any] | None
     planner_steps: list[str]
+    dashboard_spec: dict[str, Any] | None
+    dashboard_validation: dict[str, Any] | None
     widgets: list[dict[str, Any]]
     artifacts: list[dict[str, Any]]
     dashboard_summary: str
@@ -63,6 +67,7 @@ class AgentState(TypedDict, total=False):
     agent_dialogue: list[dict[str, Any]]
     trace: list[dict[str, Any]]
     run_id: str
+    dashboard_retry_count: int
 
     # ── Error handling ──────────────────────────────────────────────────
     error: str | None

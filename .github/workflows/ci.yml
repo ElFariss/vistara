@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Install client deps
+        run: npm ci --prefix client
+
+      - name: Check Node entrypoints
+        run: |
+          node --check src/http/cors.mjs
+          node --check src/services/chat.mjs
+          node --check src/services/agentProxy.mjs
+          node --check public/app.js
+          node --check client/src/legacy-app.js
+
+      - name: Build client
+        run: npm run build --prefix client
+
+      - name: Install agent package
+        run: python -m pip install --upgrade pip && python -m pip install -e ./agent
+
+      - name: Compile Python agent
+        run: python -m py_compile agent/agent/main.py agent/agent/schemas.py agent/agent/graph/*.py
+
+      - name: Graph smoke check
+        run: python -c "from agent.graph.graph import get_graph; get_graph()"
+
+      - name: Diff hygiene
+        run: git diff --check
