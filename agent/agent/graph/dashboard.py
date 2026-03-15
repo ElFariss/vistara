@@ -37,6 +37,8 @@ PRODUCT_SIGNAL_TERMS = ("product", "produk", "item", "sku", "brand", "merk", "ba
 BRANCH_SIGNAL_TERMS = ("branch", "cabang", "store", "outlet", "lokasi")
 TREND_TEMPLATE_IDS = {template_id for template_id, spec in SUPPORTED_TEMPLATES.items() if spec["template_type"] == "trend"}
 BREAKDOWN_TEMPLATE_IDS = {template_id for template_id, spec in SUPPORTED_TEMPLATES.items() if spec["template_type"] == "breakdown"}
+PROFIT_SIGNAL_TERMS = ("profit", "untung", "laba", "margin", "gross", "net")
+MARGIN_SIGNAL_TERMS = ("margin", "persen", "persentase", "%")
 
 
 async def analyst_brief_node(state: AgentState) -> dict[str, Any]:
@@ -211,6 +213,7 @@ async def dashboard_spec_node(state: AgentState) -> dict[str, Any]:
             "candidate_widgets": [],
         }
 
+    spec = _normalize_dashboard_spec(spec, state.get("dataset_profile"))
     spec_issues, requirement_state = _validate_dashboard_spec(spec, state.get("dataset_profile"))
     validation = {
         "issues": spec_issues,
@@ -229,8 +232,11 @@ async def dashboard_spec_node(state: AgentState) -> dict[str, Any]:
 async def worker_node(state: AgentState) -> dict[str, Any]:
     """Execute a validated dashboard spec through the internal analytics API."""
     spec = state.get("dashboard_spec") if isinstance(state.get("dashboard_spec"), dict) else {}
+    spec = _normalize_dashboard_spec(spec, state.get("dataset_profile"))
     spec_validation = state.get("dashboard_validation") if isinstance(state.get("dashboard_validation"), dict) else {}
     spec_issues = list(spec_validation.get("issues") or [])
+    if spec_issues:
+        spec_issues, _ = _validate_dashboard_spec(spec, state.get("dataset_profile"))
     candidate_widgets = spec.get("candidate_widgets") if isinstance(spec.get("candidate_widgets"), list) else []
 
     if spec_issues:
@@ -515,6 +521,81 @@ def _existing_dashboard_context(state: AgentState) -> dict[str, Any]:
         "name": (saved or {}).get("name"),
         "saved_dashboard_id": (saved or {}).get("id"),
         "widget_titles": [component.get("title") for component in components if isinstance(component, dict)][:8],
+    }
+
+
+def _infer_template_id(candidate: dict[str, Any], allowed_templates: set[str], dataset_profile: dict[str, Any] | None) -> str | None:
+    if not allowed_templates:
+        return None
+
+    kind = _normalize_widget_kind(candidate.get("kind"))
+    text_bits = [
+        candidate.get("title"),
+        candidate.get("measure"),
+        candidate.get("dimension"),
+        candidate.get("rationale"),
+        candidate.get("expected_signal"),
+        candidate.get("visualization"),
+    ]
+    text = " ".join(str(bit or "") for bit in text_bits).lower()
+
+    trend_options = [template_id for template_id in TREND_TEMPLATE_IDS if template_id in allowed_templates]
+    breakdown_options = [template_id for template_id in BREAKDOWN_TEMPLATE_IDS if template_id in allowed_templates]
+    kpi_options = [
+        template_id
+        for template_id, spec in SUPPORTED_TEMPLATES.items()
+        if spec["template_type"] == "kpi" and template_id in allowed_templates
+    ]
+
+    if kind == "chart" and trend_options:
+        return "revenue_trend" if "revenue_trend" in trend_options else trend_options[0]
+
+    if kind == "table" and breakdown_options:
+        if _contains_any(text, PRODUCT_SIGNAL_TERMS) and "top_products" in breakdown_options:
+            return "top_products"
+        if _contains_any(text, BRANCH_SIGNAL_TERMS) and "branch_performance" in breakdown_options:
+            return "branch_performance"
+        return breakdown_options[0]
+
+    if kind == "metric" and kpi_options:
+        if _contains_any(text, MARGIN_SIGNAL_TERMS) and "margin_percentage" in kpi_options:
+            return "margin_percentage"
+        if _contains_any(text, PROFIT_SIGNAL_TERMS) and "total_profit" in kpi_options:
+            return "total_profit"
+        if _contains_any(text, EXPENSE_SIGNAL_TERMS) and "total_expense" in kpi_options:
+            return "total_expense"
+        if _contains_any(text, SALES_SIGNAL_TERMS) and "total_revenue" in kpi_options:
+            return "total_revenue"
+        return kpi_options[0]
+
+    fallback = next(iter(allowed_templates), None)
+    return fallback
+
+
+def _normalize_dashboard_spec(spec: dict[str, Any], dataset_profile: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(spec, dict):
+        return {"candidate_widgets": []}
+    allowed_templates = _allowed_template_ids(dataset_profile)
+    widgets = spec.get("candidate_widgets") if isinstance(spec.get("candidate_widgets"), list) else []
+    normalized_widgets: list[dict[str, Any]] = []
+
+    for candidate in widgets:
+        if not isinstance(candidate, dict):
+            continue
+        normalized = {**candidate}
+        normalized["kind"] = _normalize_widget_kind(normalized.get("kind"))
+        template_id = str(normalized.get("template_id") or "").strip()
+        if template_id not in allowed_templates:
+            template_id = _infer_template_id(normalized, allowed_templates, dataset_profile) or ""
+        if template_id:
+            normalized["template_id"] = template_id
+            if not str(normalized.get("title") or "").strip() and template_id in SUPPORTED_TEMPLATES:
+                normalized["title"] = SUPPORTED_TEMPLATES[template_id]["title"]
+        normalized_widgets.append(normalized)
+
+    return {
+        **spec,
+        "candidate_widgets": normalized_widgets,
     }
 
 

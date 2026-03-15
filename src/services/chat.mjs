@@ -14,6 +14,7 @@ import { generateReport } from './reports.mjs';
 import { createGoal } from './goals.mjs';
 import { logAudit } from './audit.mjs';
 import { getDatasetProfile, inspectDatasetQuestion } from './dataProfile.mjs';
+import { ensureSourcesProcessed } from './ingestion.mjs';
 import { resolvePublicErrorMessage } from '../http/response.mjs';
 import { createLogger } from '../utils/logger.mjs';
 import {
@@ -547,18 +548,19 @@ function _safeTitle(input) {
 }
 
 async function hasDataset(tenantId) {
-  const latestSource = await get(
+  const latestReady = await get(
     `
       SELECT id
       FROM source_files
       WHERE tenant_id = :tenant_id
+        AND status = 'ready'
       ORDER BY upload_date DESC
       LIMIT 1
     `,
     { tenant_id: tenantId },
   );
 
-  if (latestSource) {
+  if (latestReady) {
     return true;
   }
 
@@ -572,6 +574,30 @@ async function hasDataset(tenantId) {
 
   const storedRows = Number(txCount.value || 0) + Number(expenseCount.value || 0);
   return storedRows > 0;
+}
+
+async function enforceDemoLimit({ tenantId, userId, role, limit }) {
+  if (role !== 'demo') {
+    return;
+  }
+  const row = await get(
+    `
+      SELECT COUNT(*) AS value
+      FROM chat_messages
+      WHERE tenant_id = :tenant_id
+        AND user_id = :user_id
+        AND role = 'user'
+    `,
+    { tenant_id: tenantId, user_id: userId },
+  ) || { value: 0 };
+  const used = Number(row.value || 0);
+  if (used >= limit) {
+    throw new ChatRequestError(
+      'DEMO_LIMIT',
+      `Batas demo ${limit} pertanyaan sudah tercapai. Mulai ulang demo atau daftar untuk akses penuh.`,
+      429,
+    );
+  }
 }
 
 function widgetsToArtifacts(widgets = []) {
@@ -696,11 +722,18 @@ function dashboardConfigFromDraft(draftDashboard = null) {
 async function persistDashboardDraft({
   tenantId,
   userId,
+  isDemo = false,
   conversationId,
   savedDashboard,
   draftDashboard,
 }) {
   const normalizedDraft = normalizeDraftDashboard(draftDashboard);
+  if (isDemo) {
+    return {
+      dashboard: null,
+      draftDashboard: normalizedDraft,
+    };
+  }
   if (!normalizedDraft || normalizedDraft.status !== 'ready' || normalizedDraft.widgets.length === 0) {
     return {
       dashboard: savedDashboard || null,
@@ -874,11 +907,21 @@ function shouldRetryDashboardFailure(error) {
 export async function processChatMessage({
   tenantId,
   userId,
+  userRole = null,
   message,
   conversationId,
   dashboardId,
   stream = null,
 }) {
+  await enforceDemoLimit({
+    tenantId,
+    userId,
+    role: userRole,
+    limit: config.demoMaxQueries,
+  });
+
+  await ensureSourcesProcessed({ tenantId, userId });
+
   let conversation = await ensureConversation(tenantId, userId, conversationId);
   let agentState = await ensureConversationAgentState({
     tenantId,
@@ -988,6 +1031,7 @@ export async function processChatMessage({
     ? await persistDashboardDraft({
       tenantId,
       userId,
+      isDemo: userRole === 'demo',
       conversationId: conversation.id,
       savedDashboard,
       draftDashboard: responsePayload?.draft_dashboard,

@@ -165,6 +165,9 @@ export function registerDataRoutes(router) {
     'POST',
     '/api/data/upload',
     async (ctx) => {
+      if (ctx.user?.role === 'demo') {
+        return sendError(ctx.res, 403, 'DEMO_UPLOAD_BLOCKED', 'Demo tidak mendukung upload dataset.');
+      }
       logger.info('upload_started', {
         user_id: ctx.user?.id || null,
         content_length: ctx.req.headers['content-length'] || null,
@@ -281,6 +284,9 @@ export function registerDataRoutes(router) {
     'POST',
     '/api/data/demo/import',
     async (ctx) => {
+      if (ctx.user?.role !== 'demo') {
+        return sendError(ctx.res, 403, 'DEMO_ONLY', 'Endpoint demo hanya untuk sesi demo.');
+      }
       const demoSource = path.resolve(process.cwd(), 'test.csv');
       if (!fs.existsSync(demoSource)) {
         return sendError(ctx.res, 404, 'DEMO_NOT_FOUND', 'File demo test.csv tidak ditemukan.');
@@ -384,6 +390,9 @@ export function registerDataRoutes(router) {
     'POST',
     '/api/data/repair',
     async (ctx) => {
+      if (ctx.user?.role === 'demo') {
+        return sendError(ctx.res, 403, 'DEMO_REPAIR_BLOCKED', 'Demo tidak mendukung perbaikan dataset.');
+      }
       const body = await ctx.getBody();
 
       try {
@@ -452,6 +461,9 @@ export function registerDataRoutes(router) {
     'PUT',
     '/api/data/sources/:id/mapping',
     async (ctx) => {
+      if (ctx.user?.role === 'demo') {
+        return sendError(ctx.res, 403, 'DEMO_MAPPING_BLOCKED', 'Demo tidak mendukung perubahan mapping dataset.');
+      }
       const body = await ctx.getBody();
       if (!body.mapping || typeof body.mapping !== 'object') {
         return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'Body harus berisi object mapping.');
@@ -566,6 +578,9 @@ export function registerDataRoutes(router) {
     'DELETE',
     '/api/data/sources/:id',
     async (ctx) => {
+      if (ctx.user?.role === 'demo') {
+        return sendError(ctx.res, 403, 'DEMO_DELETE_BLOCKED', 'Demo tidak mendukung penghapusan dataset.');
+      }
       const deleted = await deleteSource(ctx.user.tenant_id, ctx.params.id);
       if (!deleted) {
         return sendError(ctx.res, 404, 'SOURCE_NOT_FOUND', 'Data source tidak ditemukan.');

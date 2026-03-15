@@ -1192,12 +1192,40 @@ export async function processSourceFile({ tenantId, userId, sourceId }) {
     throw new Error('Sumber data tidak ditemukan.');
   }
 
-  const mappingInfo = parseColumnMapping(source);
-  validateMapping(mappingInfo.datasetType, mappingInfo.mapping);
+  let mappingInfo = parseColumnMapping(source);
+  let mappingRefreshed = false;
 
   try {
     const tables = await parseDatasetTables(source.file_path, source.file_type, source.filename);
     const primary = pickPrimaryTable(tables);
+    try {
+      validateMapping(mappingInfo.datasetType, mappingInfo.mapping);
+    } catch (mappingError) {
+      const sampleRows = Array.isArray(primary?.rows) ? primary.rows.slice(0, 20) : [];
+      const suggestion = await suggestColumnMapping(primary?.columns || [], sampleRows);
+      mappingInfo = {
+        datasetType: suggestion.datasetType,
+        mapping: suggestion.mapping,
+      };
+      validateMapping(mappingInfo.datasetType, mappingInfo.mapping);
+      mappingRefreshed = true;
+    }
+    if (mappingRefreshed) {
+      await run(
+        `
+          UPDATE source_files
+          SET column_mapping = :column_mapping
+          WHERE id = :id
+        `,
+        {
+          id: sourceId,
+          column_mapping: JSON.stringify({
+            dataset_type: mappingInfo.datasetType,
+            mapping: mappingInfo.mapping,
+          }),
+        },
+      );
+    }
     const requiredColumns = requiredColumnsForMapping(mappingInfo.datasetType, mappingInfo.mapping);
     const { included: includedTables, skipped: skippedTables } = splitCompatibleTables(tables, requiredColumns);
     if (includedTables.length === 0) {

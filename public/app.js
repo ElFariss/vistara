@@ -798,6 +798,52 @@ function syncComposerChrome() {
   updateChatHeader();
 }
 
+function syncDemoRestrictions() {
+  const isDemo = Boolean(state.isDemoSession);
+  if (refs.sessionRail) {
+    refs.sessionRail.classList.toggle('hidden', isDemo);
+  }
+  if (refs.sessionRailPeekBtn) {
+    refs.sessionRailPeekBtn.classList.toggle('hidden', isDemo);
+  }
+  if (refs.sessionRailToggleBtn) {
+    refs.sessionRailToggleBtn.classList.toggle('hidden', isDemo);
+  }
+  if (refs.newSessionBtn) {
+    refs.newSessionBtn.disabled = isDemo;
+    refs.newSessionBtn.classList.toggle('hidden', isDemo);
+  }
+  if (refs.dashboardList) {
+    refs.dashboardList.classList.toggle('hidden', isDemo);
+  }
+  if (refs.persistDraftBtn) {
+    refs.persistDraftBtn.hidden = isDemo;
+  }
+  if (refs.saveCanvasBtn) {
+    refs.saveCanvasBtn.hidden = isDemo;
+  }
+  if (refs.addWidgetToolbar) {
+    refs.addWidgetToolbar.classList.toggle('hidden', isDemo);
+  }
+  if (refs.gateUploadPickerBtn) {
+    refs.gateUploadPickerBtn.disabled = isDemo;
+    refs.gateUploadPickerBtn.classList.toggle('hidden', isDemo);
+  }
+  if (refs.gateUploadInput) {
+    refs.gateUploadInput.disabled = isDemo;
+  }
+  if (refs.chatFileBtn) {
+    refs.chatFileBtn.disabled = isDemo;
+    refs.chatFileBtn.classList.toggle('hidden', isDemo);
+  }
+  if (refs.chatFile) {
+    refs.chatFile.disabled = isDemo;
+  }
+  if (refs.fileLabel && isDemo) {
+    refs.fileLabel.hidden = true;
+  }
+}
+
 function getPreChatTickerMessages() {
   const nickname = state.settings.nickname || 'Anda';
   return [
@@ -1111,6 +1157,7 @@ function setAuth(token, user = null, options = {}) {
 
   syncHeaderActions();
   syncAppHeaderOffset();
+  syncDemoRestrictions();
 }
 
 function escapeHtml(text) {
@@ -3535,6 +3582,13 @@ function renderCanvas() {
 }
 
 async function refreshDashboards() {
+  if (state.isDemoSession) {
+    state.dashboards = [];
+    state.currentDashboard = null;
+    state.selectedDashboardId = null;
+    renderDashboardList();
+    return;
+  }
   try {
     const response = await api('/api/dashboards');
     state.dashboards = normalizeDashboardCollection(response.dashboards || []);
@@ -3958,6 +4012,12 @@ function upsertConversation(conversation) {
 }
 
 async function refreshConversationList() {
+  if (state.isDemoSession) {
+    state.conversations = [];
+    renderConversationList();
+    syncComposerChrome();
+    return;
+  }
   const response = await api('/api/chat/conversations');
   state.conversations = Array.isArray(response.conversations) ? response.conversations : [];
   renderConversationList();
@@ -3965,6 +4025,9 @@ async function refreshConversationList() {
 }
 
 async function refreshChatHistory(conversationId = state.conversationId) {
+  if (state.isDemoSession) {
+    return;
+  }
   state.isLoadingConversation = true;
   try {
     const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : '';
@@ -4092,6 +4155,11 @@ function refreshWelcomeGreeting() {
 }
 
 async function loadSchema() {
+  if (state.isDemoSession) {
+    state.schema = null;
+    state.datasetTables = [];
+    return;
+  }
   try {
     const response = await api('/api/data/schema');
     state.schema = response.schema;
@@ -4213,6 +4281,9 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
     showPage('auth');
     showToast('Login dulu.');
     return null;
+  }
+  if (state.isDemoSession && !demo) {
+    throw new Error('Demo tidak mendukung upload dataset.');
   }
 
   state.isUploadingDataset = true;
@@ -4372,15 +4443,26 @@ function applyAssistantResponse(response, options = {}) {
 
   const widgets = response.widgets || [];
   const artifacts = response.artifacts || [];
+  const validationIssues = Array.isArray(response.dashboard_validation?.issues)
+    ? response.dashboard_validation.issues
+    : [];
   const pending = findPendingAssistantMessage();
   const incomingDialogue = Array.isArray(response.agent_dialogue) ? response.agent_dialogue : [];
   const mergedDialogue = mergeAgentDialogue(pending?.agentDialogue || [], incomingDialogue);
   const mode = response.presentation_mode || 'chat';
   const isSingleWidget = Array.isArray(widgets) && widgets.length === 1;
   const isSingleArtifact = !isSingleWidget && Array.isArray(artifacts) && artifacts.length === 1;
-  const isCanvasPending = mode === 'canvas' && (!Array.isArray(widgets) || widgets.length === 0);
+  const hasRenderableWidgets = Array.isArray(widgets) && widgets.length > 0;
+  const shouldCanvasPrepare = mode === 'canvas'
+    && !hasRenderableWidgets
+    && !canRenderServerDraft
+    && validationIssues.length === 0;
   if (mode === 'canvas') {
-    setCanvasPreparing(isCanvasPending, { message: 'Dashboard sedang disiapkan...' });
+    setCanvasPreparing(shouldCanvasPrepare, { message: 'Dashboard sedang disiapkan...' });
+    if (validationIssues.length > 0 && !hasRenderableWidgets && !canRenderServerDraft) {
+      setCanvasPreparing(false);
+      showToast('Dashboard belum lolos kurasi. Silakan ulangi dengan request yang lebih spesifik.');
+    }
   } else {
     setCanvasPreparing(false);
   }
@@ -5001,6 +5083,15 @@ function bindHintTooltips() {
 }
 
 async function loadWorkspace() {
+  if (state.isDemoSession) {
+    await Promise.allSettled([refreshProfile(), refreshSources(), refreshVerdict()]);
+    state.conversations = [];
+    state.dashboards = [];
+    resetConversationWorkspaceState({ preserveDashboard: false });
+    syncDemoRestrictions();
+    ensureWelcomeMessage();
+    return;
+  }
   await Promise.allSettled([refreshProfile(), refreshSources(), refreshDashboards(), refreshConversationList(), loadSchema()]);
   await refreshVerdict();
   const initialConversationId = resolveInitialConversationId(state.conversations);

@@ -94,6 +94,7 @@ export const config = {
   dashboardAgentMaxAttempts: Math.max(1, toInt(process.env.DASHBOARD_AGENT_MAX_ATTEMPTS, 2)),
   otpMaxAttempts: Math.max(1, toInt(process.env.OTP_MAX_ATTEMPTS, 5)),
   demoAuthRateLimitPerMinute: Math.max(1, toInt(process.env.DEMO_AUTH_RATE_LIMIT_PER_MINUTE, 5)),
+  demoMaxQueries: Math.max(1, toInt(process.env.DEMO_MAX_QUERIES, 3)),
   pythonAgentBackendUrl: process.env.PYTHON_AGENT_BACKEND_URL || 'http://localhost:8001',
 };
 

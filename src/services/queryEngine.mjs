@@ -416,6 +416,7 @@ function calculateComparison(currentValue, previousValue) {
 }
 
 export async function executeAnalyticsIntent({ tenantId, userId, intent }) {
+  await ensureSourcesProcessed({ tenantId, userId });
   const templateId = intent.template_id;
   if (!templateId) {
     throw new Error('template_id is required for analytics execution');

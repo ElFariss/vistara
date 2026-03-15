@@ -22,6 +22,9 @@ export function registerDashboardRoutes(router) {
     'GET',
     '/api/dashboards',
     async (ctx) => {
+      if (ctx.user?.role === 'demo') {
+        return sendJson(ctx.res, 200, { ok: true, dashboards: [] });
+      }
       await ensureDefaultDashboard(ctx.user.tenant_id, ctx.user.id);
       const conversationId = ctx.query.get('conversation_id') || null;
       const dashboards = await listDashboards(ctx.user.tenant_id, ctx.user.id, { conversationId });
@@ -47,6 +50,9 @@ export function registerDashboardRoutes(router) {
     'POST',
     '/api/dashboards',
     async (ctx) => {
+      if (ctx.user?.role === 'demo') {
+        return sendError(ctx.res, 403, 'DEMO_DASHBOARD_BLOCKED', 'Demo tidak mendukung menyimpan dashboard.');
+      }
       const body = await ctx.getBody();
       if (!body.name || typeof body.name !== 'string') {
         return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'name wajib diisi.');
@@ -66,6 +72,9 @@ export function registerDashboardRoutes(router) {
     'PUT',
     '/api/dashboards/:id',
     async (ctx) => {
+      if (ctx.user?.role === 'demo') {
+        return sendError(ctx.res, 403, 'DEMO_DASHBOARD_BLOCKED', 'Demo tidak mendukung menyimpan dashboard.');
+      }
       const body = await ctx.getBody();
       if (body.name !== undefined && typeof body.name !== 'string') {
         return sendError(ctx.res, 400, 'VALIDATION_ERROR', 'name harus berupa string.');
@@ -91,6 +100,9 @@ export function registerDashboardRoutes(router) {
     'DELETE',
     '/api/dashboards/:id',
     async (ctx) => {
+      if (ctx.user?.role === 'demo') {
+        return sendError(ctx.res, 403, 'DEMO_DASHBOARD_BLOCKED', 'Demo tidak mendukung menghapus dashboard.');
+      }
       const deleted = await deleteDashboard(ctx.user.tenant_id, ctx.user.id, ctx.params.id);
       if (!deleted) {
         return sendError(ctx.res, 400, 'DASHBOARD_DELETE_FAILED', 'Dashboard tidak bisa dihapus.');

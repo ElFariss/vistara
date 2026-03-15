@@ -52,6 +52,9 @@ export function registerChatRoutes(router) {
     'GET',
     '/api/chat/conversations',
     async (ctx) => {
+      if (ctx.user?.role === 'demo') {
+        return sendJson(ctx.res, 200, { ok: true, conversations: [] });
+      }
       const conversations = await listChatConversations({
         tenantId: ctx.user.tenant_id,
         userId: ctx.user.id,
@@ -145,6 +148,7 @@ export function registerChatRoutes(router) {
         const response = await processChatMessage({
           tenantId: ctx.user.tenant_id,
           userId: ctx.user.id,
+          userRole: ctx.user.role,
           message: body.message,
           conversationId: body.conversation_id || null,
           dashboardId: body.dashboard_id || null,
@@ -177,6 +181,7 @@ export function registerChatRoutes(router) {
         const response = await processChatMessage({
           tenantId: ctx.user.tenant_id,
           userId: ctx.user.id,
+          userRole: ctx.user.role,
           message: body.message,
           conversationId: body.conversation_id || null,
           dashboardId: body.dashboard_id || null,
@@ -260,6 +265,15 @@ export function registerChatRoutes(router) {
     'GET',
     '/api/chat/history',
     async (ctx) => {
+      if (ctx.user?.role === 'demo') {
+        return sendJson(ctx.res, 200, {
+          ok: true,
+          conversation_id: null,
+          conversation: null,
+          messages: [],
+          agent_state: null,
+        });
+      }
       try {
       const response = await getChatHistory({
           tenantId: ctx.user.tenant_id,
