@@ -29,8 +29,11 @@ async def analyst_node(state: AgentState) -> dict[str, Any]:
     """
     llm = get_llm(
         model=settings.gemini_model_light,
-        temperature=0.1,
+        temperature=0.25,
+        top_p=0.9,
+        top_k=32,
         max_output_tokens=512,
+        json_mode=True,
     )
 
     route = state.get("route", {}) or {}

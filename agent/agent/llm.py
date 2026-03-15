@@ -20,25 +20,50 @@ def get_llm(
     model: str | None = None,
     temperature: float = 0.1,
     max_output_tokens: int = 1024,
+    top_p: float | None = None,
+    top_k: int | None = None,
+    json_mode: bool = False,
 ) -> ChatGoogleGenerativeAI:
     """Get a cached LLM instance for the given model and parameters."""
     resolved_model = model or settings.gemini_model
+    kwargs = {
+        "model": resolved_model,
+        "google_api_key": settings.gemini_api_key,
+        "temperature": temperature,
+        "max_output_tokens": max_output_tokens,
+    }
+    if top_p is not None:
+        kwargs["top_p"] = top_p
+    if top_k is not None:
+        kwargs["top_k"] = top_k
+    if json_mode:
+        kwargs["response_mime_type"] = "application/json"
+
     return ChatGoogleGenerativeAI(
-        model=resolved_model,
-        google_api_key=settings.gemini_api_key,
-        temperature=temperature,
-        max_output_tokens=max_output_tokens,
+        **kwargs,
     )
 
 
 def get_default_llm() -> ChatGoogleGenerativeAI:
     """Get the default LLM (gemini-2.5-pro, low temp)."""
-    return get_llm(model=settings.gemini_model, temperature=0.1, max_output_tokens=1024)
+    return get_llm(
+        model=settings.gemini_model,
+        temperature=0.2,
+        top_p=0.9,
+        top_k=40,
+        max_output_tokens=1024,
+    )
 
 
 def get_light_llm() -> ChatGoogleGenerativeAI:
     """Get the lighter/faster LLM for simple tasks."""
-    return get_llm(model=settings.gemini_model_light, temperature=0.4, max_output_tokens=512)
+    return get_llm(
+        model=settings.gemini_model_light,
+        temperature=0.3,
+        top_p=0.9,
+        top_k=40,
+        max_output_tokens=512,
+    )
 
 
 def extract_text(response) -> str:

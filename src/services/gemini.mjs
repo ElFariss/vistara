@@ -171,7 +171,14 @@ function extractFunctionCalls(data) {
   return calls;
 }
 
-export async function generateJsonWithGemini({ systemPrompt = '', userPrompt, temperature = 0.1, maxOutputTokens = 800 }) {
+export async function generateJsonWithGemini({
+  systemPrompt = '',
+  userPrompt,
+  temperature = 0.1,
+  topP = null,
+  topK = null,
+  maxOutputTokens = 800,
+}) {
   if (!config.geminiApiKey) {
     return {
       ok: false,
@@ -197,6 +204,18 @@ export async function generateJsonWithGemini({ systemPrompt = '', userPrompt, te
   const prompt = buildPrompt(systemPrompt, userPrompt);
 
   try {
+    const generationConfig = {
+      temperature,
+      maxOutputTokens,
+      responseMimeType: 'application/json',
+    };
+    if (Number.isFinite(topP)) {
+      generationConfig.topP = topP;
+    }
+    if (Number.isFinite(topK)) {
+      generationConfig.topK = Math.max(1, Math.floor(topK));
+    }
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -205,11 +224,7 @@ export async function generateJsonWithGemini({ systemPrompt = '', userPrompt, te
       },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature,
-          maxOutputTokens,
-          responseMimeType: 'application/json',
-        },
+        generationConfig,
       }),
       signal: controller.signal,
     });
@@ -261,7 +276,15 @@ export async function generateJsonWithGemini({ systemPrompt = '', userPrompt, te
   }
 }
 
-export async function generateTextWithGemini({ systemPrompt = '', userPrompt, temperature = 0.7, maxOutputTokens = 200, modelOverride = null }) {
+export async function generateTextWithGemini({
+  systemPrompt = '',
+  userPrompt,
+  temperature = 0.7,
+  topP = null,
+  topK = null,
+  maxOutputTokens = 200,
+  modelOverride = null,
+}) {
   if (!config.geminiApiKey) {
     return { ok: false, reason: 'missing_api_key', text: null };
   }
@@ -277,6 +300,14 @@ export async function generateTextWithGemini({ systemPrompt = '', userPrompt, te
   const prompt = buildPrompt(systemPrompt, userPrompt);
 
   try {
+    const generationConfig = { temperature, maxOutputTokens };
+    if (Number.isFinite(topP)) {
+      generationConfig.topP = topP;
+    }
+    if (Number.isFinite(topK)) {
+      generationConfig.topK = Math.max(1, Math.floor(topK));
+    }
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -285,7 +316,7 @@ export async function generateTextWithGemini({ systemPrompt = '', userPrompt, te
       },
       body: JSON.stringify({
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature, maxOutputTokens },
+        generationConfig,
       }),
       signal: controller.signal,
     });

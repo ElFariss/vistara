@@ -30,8 +30,10 @@ async def surface_node(state: AgentState) -> dict[str, Any]:
     """
     llm = get_llm(
         model=settings.gemini_model_light,
-        temperature=0.45,
-        max_output_tokens=280,
+        temperature=0.4,
+        top_p=0.9,
+        top_k=40,
+        max_output_tokens=320,
     )
 
     route = state.get("route", {}) or {}
@@ -130,8 +132,10 @@ async def surface_with_data_node(state: AgentState) -> dict[str, Any]:
 
     llm = get_llm(
         model=settings.gemini_model_light,
-        temperature=0.3, # Slightly lower temp for data accuracy
-        max_output_tokens=300,
+        temperature=0.35,
+        top_p=0.9,
+        top_k=40,
+        max_output_tokens=320,
     )
     
     system_prompt = f"Kamu adalah {TEAM['surface']}, asisten bisnis UMKM.\n\n{VIRA_SURFACE_WITH_DATA}"

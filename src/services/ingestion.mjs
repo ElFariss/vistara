@@ -155,6 +155,8 @@ async function parseWithAiFallback(buffer, filename) {
       },
     }),
     temperature: 0,
+    topP: 0.8,
+    topK: 10,
     maxOutputTokens: 1200,
   });
 

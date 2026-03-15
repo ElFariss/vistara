@@ -153,7 +153,10 @@ async def orchestrator_node(state: AgentState) -> dict[str, Any]:
     llm = get_llm(
         model=settings.gemini_model_light,
         temperature=0.1,
-        max_output_tokens=512,
+        top_p=0.85,
+        top_k=32,
+        max_output_tokens=256,
+        json_mode=True,
     )
 
     system_prompt = _build_system_prompt(state)

@@ -31,7 +31,14 @@ MIN_WIDGETS = 2
 
 async def analyst_brief_node(state: AgentState) -> dict[str, Any]:
     """Generate an analysis brief with findings for dashboard creation."""
-    llm = get_llm(model=settings.gemini_model_light, temperature=0.1, max_output_tokens=8192)
+    llm = get_llm(
+        model=settings.gemini_model_light,
+        temperature=0.25,
+        top_p=0.9,
+        top_k=32,
+        max_output_tokens=4096,
+        json_mode=True,
+    )
 
     dataset_info = _format_dataset_info(state.get("dataset_profile"))
 
@@ -74,7 +81,14 @@ async def analyst_brief_node(state: AgentState) -> dict[str, Any]:
 
 async def planner_node(state: AgentState) -> dict[str, Any]:
     """Create an execution plan for the worker agent."""
-    llm = get_llm(model=settings.gemini_model_light, temperature=0.1, max_output_tokens=4096)
+    llm = get_llm(
+        model=settings.gemini_model_light,
+        temperature=0.2,
+        top_p=0.85,
+        top_k=32,
+        max_output_tokens=2048,
+        json_mode=True,
+    )
 
     brief = state.get("analysis_brief", {}) or {}
     dataset_info = _format_dataset_info(state.get("dataset_profile"))
@@ -122,7 +136,14 @@ async def worker_node(state: AgentState) -> dict[str, Any]:
     The actual query execution will be done via the Node.js backend
     proxy in the initial version, or directly via psycopg in a later phase.
     """
-    llm = get_llm(model=settings.gemini_model_light, temperature=0.1, max_output_tokens=8192)
+    llm = get_llm(
+        model=settings.gemini_model_light,
+        temperature=0.2,
+        top_p=0.85,
+        top_k=32,
+        max_output_tokens=4096,
+        json_mode=True,
+    )
 
     brief = state.get("analysis_brief", {}) or {}
     steps = state.get("planner_steps", [])
@@ -235,7 +256,14 @@ async def worker_node(state: AgentState) -> dict[str, Any]:
 
 async def argus_node(state: AgentState) -> dict[str, Any]:
     """Review the dashboard for quality and completeness."""
-    llm = get_llm(model=settings.gemini_model_light, temperature=0.1, max_output_tokens=4096)
+    llm = get_llm(
+        model=settings.gemini_model_light,
+        temperature=0.15,
+        top_p=0.85,
+        top_k=32,
+        max_output_tokens=2048,
+        json_mode=True,
+    )
 
     widgets = state.get("widgets", [])
 
@@ -331,7 +359,9 @@ async def dashboard_answer_node(state: AgentState) -> dict[str, Any]:
     try:
         llm = get_llm(
             model=settings.gemini_model_light,
-            temperature=0.3,
+            temperature=0.35,
+            top_p=0.9,
+            top_k=40,
             max_output_tokens=400,
         )
         response = await llm.ainvoke([

@@ -210,6 +210,8 @@ async function aiMapping(columns, sampleRows, datasetType, fallbackMapping) {
       },
     }),
     temperature: 0,
+    topP: 0.8,
+    topK: 10,
     maxOutputTokens: 600,
   });
 
