@@ -1534,8 +1534,8 @@ label {
 }
 
 .chat-pane {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto auto auto;
+  display: flex;
+  flex-direction: column;
   position: relative;
   background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, transparent), transparent 12%);
 }
@@ -1596,6 +1596,8 @@ label {
 }
 
 .chat-thread {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
   padding: 0.95rem clamp(0.75rem, 2.2vw, 1.8rem) 1.1rem;
@@ -1915,7 +1917,7 @@ label {
   display: grid;
   gap: 0;
   width: min(100%, 760px);
-  justify-self: center;
+  margin: 0 auto;
   padding: 0 0.8rem 0.7rem;
   background: transparent;
 }

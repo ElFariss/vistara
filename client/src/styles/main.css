@@ -1427,6 +1427,7 @@ label {
   color: var(--danger);
   opacity: 1;
   background: color-mix(in srgb, var(--danger) 10%, transparent);
+  transform: none;
 }
 
 .session-card-open:hover {
@@ -1527,8 +1528,8 @@ label {
 }
 
 .chat-pane {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto auto auto;
+  display: flex;
+  flex-direction: column;
   position: relative;
   background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 88%, transparent), transparent 12%);
 }
@@ -1589,6 +1590,8 @@ label {
 }
 
 .chat-thread {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
   padding: 0.95rem clamp(0.75rem, 2.2vw, 1.8rem) 1.1rem;
@@ -1908,7 +1911,7 @@ label {
   display: grid;
   gap: 0;
   width: min(100%, 760px);
-  justify-self: center;
+  margin: 0 auto;
   padding: 0 0.8rem 0.7rem;
   background: transparent;
 }
@@ -3440,19 +3443,19 @@ label {
     display: none !important;
   }
 
-	  .session-rail {
-	    position: absolute;
-	    left: 0.75rem;
-	    top: 0.75rem;
-	    bottom: 0.75rem;
-	    width: min(320px, calc(100vw - 1.5rem));
-	    border: 1px solid var(--line);
-	    border-radius: 20px;
-	    padding: 0.9rem 0.8rem;
-	    box-shadow: var(--shadow-lg);
-	    /* Must stay above the canvas overlay on small screens. */
-	    z-index: 34;
-	  }
+  .workspace-page.canvas-open .session-rail {
+    position: absolute;
+    left: 0.75rem;
+    top: 0.75rem;
+    bottom: 0.75rem;
+    width: min(320px, calc(100vw - 1.5rem));
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 0.9rem 0.8rem;
+    box-shadow: var(--shadow-lg);
+    /* Must stay above the canvas overlay on small screens. */
+    z-index: 34;
+  }
 
   .session-rail-handle {
     z-index: 35;
@@ -3830,6 +3833,8 @@ label {
     position: fixed;
     z-index: 32;
   }
+  
+  .chat-thread {
     padding: 0.75rem 0.65rem 0.95rem;
   }
 
@@ -4324,7 +4329,7 @@ label {
 
 /* ─── Upload Loading Indicator ─── */
 .upload-loading {
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 21;
   display: flex;
@@ -4435,4 +4440,64 @@ label {
   background: color-mix(in srgb, var(--accent) 10%, var(--surface));
   color: var(--accent);
   box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--backdrop);
+  z-index: 9998;
+}
+
+.confirm-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  border-radius: 16px;
+  width: 90%;
+  max-width: 400px;
+  z-index: 9999;
+  padding: 1.5rem;
+}
+
+.confirm-modal-body {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.confirm-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--ink);
+  display: block;
+  margin-bottom: 0.4rem;
+}
+
+.confirm-message {
+  margin: 0;
+  color: var(--ink-secondary);
+  line-height: 1.5;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.confirm-actions button {
+  padding: 0.5rem 1.1rem;
+}
+
+@media (max-width: 640px) {
+  .confirm-actions {
+    flex-direction: column-reverse;
+  }
+  .confirm-actions button {
+    width: 100%;
+  }
 }

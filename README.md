@@ -12,7 +12,6 @@ This build now focuses on a linear, production-ready MVP flow:
 - One-click demo import (`test.csv`) for hackathon onboarding
 - AI-powered column mapping (Gemini + heuristic fallback)
 - Multi-agent runtime (Planner/Worker/Reviewer) with Gemini function-calling + deterministic fallback
-- Optional isolated Python tool runtime (separate container) for safe code-based review/analysis steps
 - Conversational analytics in Bahasa Indonesia with inline metric/table/chart artifacts
 - Canvas mode with draggable/resizable widgets and manual query builder
 - Dashboard persistence via existing dashboards API
@@ -25,6 +24,7 @@ This build now focuses on a linear, production-ready MVP flow:
 - Database: PostgreSQL (via `pg`, in-memory `pg-mem` for tests)
 - API: native HTTP server + custom router
 - AI: Gemini API using model **`gemini-2.5-pro`** by default (configurable)
+- Agent backend: Python FastAPI + LangGraph (planner/worker/curator)
 - Frontend: vanilla JS + GridStack + Chart.js (self-hosted vendor assets)
 
 ## Environment Variables
@@ -37,9 +37,7 @@ Key fields:
 - `GEMINI_API` or `GEMINI_API_KEY` (required for AI mapping/NLU)
 - `GEMINI_MODEL=gemini-2.5-pro`
 - `API_BASE_URL` (optional frontend runtime override)
-- `PYTHON_AGENT_URL` (optional, enables Python execution tool)
-- `PYTHON_AGENT_TOKEN` (recommended when Python tool is enabled)
-- `PYTHON_AGENT_TIMEOUT_MS=3500`
+- `PYTHON_AGENT_BACKEND_URL` (optional override, defaults to `http://localhost:8001`)
 - `DASHBOARD_AGENT_TIMEOUT_MS=180000`
 - `JWT_SECRET` (required in production)
 
@@ -98,9 +96,9 @@ Current automated tests cover:
 - Indonesian number/date parsing
 - Token signing/verification
 - Query-template registry and SQL-injection safety via parameterization
-- Agentic runtime fallback on stale dataset periods and canvas dashboard generation
+- Dashboard layout, canvas rendering, and export regressions
 - Data-quality profiling, repair, and alias regressions
-- Session onboarding, empty-state, and NLU routing regressions
+- Session onboarding and chat routing regressions
 - Backup/restore filesystem operations
 - CSV wrapped-row recovery regression (`test.csv`)
 - JSON dataset normalization
@@ -122,7 +120,7 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
 Services started:
 
 - `app` on `8080`
-- `python-agent` internal on `8091` (used by app when configured)
+- `agent-backend` internal on `8001`
 
 ## Operations
 
@@ -130,7 +128,6 @@ Operational runbook, backup/restore flow, and rollback notes live in [OPERATIONS
 
 ## Notes
 
-- Endpoint `/api/data/sources/:id/process` is deprecated because upload now does parse+ingest in one step.
 - XLSX ingestion supports common single-sheet exports (`.xlsx`).
 - Legacy `.xls` is supported via `ssconvert` conversion to CSV before normalization.
 - For production-scale multi-tenant SaaS, consider enforcing RLS at the database level.

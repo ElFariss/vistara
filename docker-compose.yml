@@ -17,26 +17,25 @@ services:
       timeout: 5s
       retries: 5
 
-  python-agent:
-    build: ./tools/python-agent
-    container_name: umkm-python-agent
+  agent-backend:
+    build: ./agent
+    container_name: umkm-agent-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     environment:
-      PY_AGENT_HOST: 0.0.0.0
-      PY_AGENT_PORT: 8091
-      PY_AGENT_TOKEN: ${PYTHON_AGENT_TOKEN:-replace-python-token}
-      PY_AGENT_TIMEOUT_SEC: 2.5
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-pro}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${PGUSER:-postgres}:${PGPASSWORD:-change-me}@postgres:5432/${PGDATABASE:-umkm}}
+      HOST: 0.0.0.0
+      PORT: 8001
+      DEBUG: "false"
+      NODEJS_INTERNAL_URL: http://app:8080
     expose:
-      - "8091"
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=64m
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+      - "8001"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8091/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -45,27 +44,27 @@ services:
     build: .
     container_name: umkm-intelligence
     depends_on:
-      - postgres
-      - python-agent
+      postgres:
+        condition: service_healthy
+      agent-backend:
+        condition: service_healthy
     restart: unless-stopped
     env_file:
       - .env
     ports:
-      - "${HOST_PORT:-8080}:8080"
+      - "${HOST_PORT:-8081}:8080"
     environment:
       NODE_ENV: production
       PORT: 8080
       DATA_DIR: /app/data
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${PGUSER:-postgres}:${PGPASSWORD:-change-me}@postgres:5432/${PGDATABASE:-umkm}}
+      DATABASE_URL: postgresql://${PGUSER:-postgres}:${PGPASSWORD:-change-me}@postgres:5432/${PGDATABASE:-umkm}
       SERVE_PUBLIC_ASSETS: ${SERVE_PUBLIC_ASSETS:-true}
       JWT_SECRET: ${JWT_SECRET:-replace-me}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_API: ${GEMINI_API:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-pro}
       API_BASE_URL: ${API_BASE_URL:-}
-      PYTHON_AGENT_URL: http://python-agent:8091
-      PYTHON_AGENT_TOKEN: ${PYTHON_AGENT_TOKEN:-replace-python-token}
-      PYTHON_AGENT_TIMEOUT_MS: 3500
+      PYTHON_AGENT_BACKEND_URL: http://agent-backend:8001
     volumes:
       - ./data:/app/data
       - ./backups:/app/backups

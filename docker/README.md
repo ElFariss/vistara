@@ -1,3 +1,3 @@
 # Docker Configuration
 
-The `/docker` directory and root `docker-compose.yml` provide everything needed to encapsulate the monolithic Node.js runtime and its accompanying sidecar instances (like the Sandboxed Python Agent) into isolated containers.
+The `/docker` directory and root `docker-compose.yml` provide everything needed to encapsulate the Node.js runtime plus the LangGraph agent backend into isolated containers.

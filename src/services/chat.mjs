@@ -7,15 +7,24 @@ import { Prompts } from './agents/index.mjs';
 import { generateReport } from './reports.mjs';
 import { createGoal } from './goals.mjs';
 import { logAudit } from './audit.mjs';
-import { inspectDatasetQuestion } from './dataProfile.mjs';
+import { getDatasetProfile, inspectDatasetQuestion } from './dataProfile.mjs';
 import { resolvePublicErrorMessage } from '../http/response.mjs';
 import { createLogger } from '../utils/logger.mjs';
 import {
   applyConversationApproval,
-  ConversationAgentError,
   runConversationAgent,
-} from './conversationAgent.mjs';
+} from './agentProxy.mjs';
 import { getConversationAgentState } from './conversationState.mjs';
+
+// Minimal error class for proxy error type checking (legacy runtime)
+class ConversationAgentError extends Error {
+  constructor({ code, statusCode, reason, message: msg }) {
+    super(msg);
+    this.code = code;
+    this.statusCode = statusCode;
+    this.reason = reason;
+  }
+}
 
 const logger = createLogger('chat-service');
 const DEFAULT_CONVERSATION_TITLE = 'Percakapan baru';
@@ -106,14 +115,17 @@ function createBufferedTimelineStream(stream = null) {
     }
   };
 
+  const TEAM_AGENTS = new Set(['analyst', 'raka', 'planner', 'worker', 'citra', 'curator', 'argus', 'engineer', 'tala']);
+
   const noteAgent = (agent) => {
     const normalized = String(agent || '').trim().toLowerCase();
     if (!normalized) {
       return;
     }
     seenAgents.add(normalized);
-    if (seenAgents.size > 2) {
-      markComplex();
+    // Show timeline immediately when a team agent appears (not just orchestrator/surface)
+    if (TEAM_AGENTS.has(normalized)) {
+      startTimelineIfNeeded();
     }
   };
 
@@ -196,30 +208,6 @@ function createBufferedTimelineStream(stream = null) {
 function isDefaultConversationTitle(title) {
   return String(title || '').trim().toLowerCase() === DEFAULT_CONVERSATION_TITLE.toLowerCase();
 }
-
-function buildConversationTitle(input) {
-  const cleaned = String(input || '')
-    .replace(/\s+/g, ' ')
-    .replace(/^["'`]+|["'`]+$/g, '')
-    .trim();
-
-  if (!cleaned) {
-    return DEFAULT_CONVERSATION_TITLE;
-  }
-
-  const withoutCommand = cleaned
-    .replace(/^(tolong|please|coba|bantu|bisa|mohon)\s+/i, '')
-    .trim();
-  const firstSentence = withoutCommand.split(/[.!?\n]/, 1)[0].trim() || withoutCommand;
-  const normalized = firstSentence.charAt(0).toUpperCase() + firstSentence.slice(1);
-
-  if (normalized.length <= AUTO_TITLE_MAX_LENGTH) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, AUTO_TITLE_MAX_LENGTH - 1).trimEnd()}…`;
-}
-
 async function ensureConversation(tenantId, userId, conversationId = null) {
   if (conversationId) {
     const existing = await get(
@@ -437,7 +425,7 @@ async function maybeAutoTitleConversation({ tenantId, userId, conversationId, me
     return conversation;
   }
 
-  const nextTitle = buildConversationTitle(message);
+  const nextTitle = _safeTitle(message);
   await run(
     `
       UPDATE conversations
@@ -539,55 +527,13 @@ async function historyForConversation(tenantId, userId, conversationId, limit = 
   }));
 }
 
-function parseGoalFromMessage(message, intent) {
-  if (intent.target_value) {
-    return intent.target_value;
-  }
-  const match = message.match(/(\d+[\d.,]*)/);
-  if (!match) {
-    return null;
-  }
-  const raw = match[1].replace(/\./g, '').replace(/,/g, '.');
-  const number = Number(raw);
-  return Number.isFinite(number) ? number : null;
-}
-
-function normalizeReportPeriod(intent) {
-  if (intent.time_period) {
-    return intent.time_period;
-  }
-  return 'minggu ini';
-}
-
-function isComplexDashboardRequest(message, intent) {
-  const text = String(message || '').toLowerCase().replace(/\s+/g, ' ').trim();
-  if (!text) {
-    return false;
-  }
-
-  const hasCanvas = /\b(canvas|kanvas)\b/.test(text);
-  const hasDashboard = /\bdashboard\b/.test(text);
-  const hasBuildVerb = /\b(buat|buatkan|bikin|generate|susun|siapkan|bangun|create)\b/.test(text);
-  const hasComplexQualifier = /\b(lengkap|komplet|full|penuh|multi|beberapa|overview|ringkasan)\b/.test(text);
-  const hasVisualTerms = (text.match(/\b(grafik|chart|tabel|widget|visual)\b/g) || []).length;
-
-  if (hasCanvas) {
-    return true;
-  }
-
-  if (hasDashboard && (hasBuildVerb || hasComplexQualifier || hasVisualTerms >= 1)) {
-    return true;
-  }
-
-  if (hasVisualTerms >= 2 && hasBuildVerb) {
-    return true;
-  }
-
-  if (intent.intent === 'modify_dashboard') {
-    return hasDashboard || hasCanvas || /\b(widget|layout|komponen|panel)\b/.test(text);
-  }
-
-  return false;
+// Title helper — just trim and truncate, NO regex text manipulation.
+// The Python agent generates proper titles via LLM when needed.
+function _safeTitle(input) {
+  const cleaned = String(input || '').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return DEFAULT_CONVERSATION_TITLE;
+  if (cleaned.length <= AUTO_TITLE_MAX_LENGTH) return cleaned;
+  return `${cleaned.slice(0, AUTO_TITLE_MAX_LENGTH - 1).trimEnd()}…`;
 }
 
 async function hasDataset(tenantId) {
@@ -682,34 +628,6 @@ async function lookupUserDisplayName(tenantId, userId) {
   return name || null;
 }
 
-async function generateConversationalReply({ message, history, datasetReady, userDisplayName }) {
-  const contextParts = [
-    'Kamu adalah Vistara, asisten AI analitik bisnis UMKM berbahasa Indonesia.',
-    Prompts.CHAT_AGENT,
-    'Jika user bertanya nama mereka, ' + (userDisplayName ? `nama mereka adalah ${userDisplayName}.` : 'katakan bahwa kamu belum mengetahui nama mereka dan sarankan untuk mengisi profil di Pengaturan.'),
-    datasetReady
-      ? 'Dataset user sudah tersedia dan siap dianalisis.'
-      : 'Dataset user belum tersedia. Sarankan untuk upload dataset (CSV/JSON/XLSX/XLS) jika relevan, tapi jangan memaksa.',
-  ];
-
-  const historyContext = history.slice(-6).map((h) => `${h.role}: ${h.content}`).join('\n');
-  const userPrompt = historyContext
-    ? `Riwayat percakapan:\n${historyContext}\n\nPesan terbaru user: ${message}`
-    : `Pesan user: ${message}`;
-
-  const result = await generateTextWithGemini({
-    systemPrompt: contextParts.join(' '),
-    userPrompt,
-    temperature: 0.7,
-    maxOutputTokens: 150,
-  });
-
-  if (result.ok && result.text) {
-    return result.text.trim();
-  }
-
-  return 'Saya siap membantu. Ada yang bisa saya bantu terkait analisis bisnis Anda?';
-}
 
 function buildDashboardAgentError(error, options = {}) {
   if (error instanceof DashboardAgentError) {
@@ -809,6 +727,7 @@ export async function processChatMessage({
   }));
 
   const datasetReady = await hasDataset(tenantId);
+  const datasetProfile = datasetReady ? await getDatasetProfile(tenantId) : null;
   const userDisplayName = await lookupUserDisplayName(tenantId, userId);
   const savedDashboard = dashboardId
     ? await getDashboard(tenantId, userId, dashboardId)
@@ -827,9 +746,13 @@ export async function processChatMessage({
       message,
       history,
       datasetReady,
+      datasetProfile,
       userDisplayName,
       hooks: bufferedStream.hooks,
     });
+
+    // Python agent completely handles the response generation and execution.
+    // We removed the analytics_intent intercept block here so Python can execute natively.
   } catch (error) {
     logger.error('process_chat_failed', {
       code: error?.code,
@@ -1023,7 +946,7 @@ export async function createConversation({ tenantId, userId, title = null }) {
         id: conversation.id,
         tenant_id: tenantId,
         user_id: userId,
-        title: buildConversationTitle(nextTitle),
+        title: _safeTitle(nextTitle),
       },
     );
   }
@@ -1046,7 +969,7 @@ export async function renameConversation({ tenantId, userId, conversationId, tit
     return null;
   }
 
-  const nextTitle = buildConversationTitle(title);
+  const nextTitle = _safeTitle(title);
   await run(
     `
       UPDATE conversations

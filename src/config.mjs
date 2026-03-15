@@ -90,13 +90,11 @@ export const config = {
   geminiModelLight: process.env.GEMINI_MODEL_LIGHT || 'gemini-2.5-flash',
   geminiVisionModel: process.env.GEMINI_VISION_MODEL || 'gemini-3-flash-preview',
   rawUploadAiFallbackEnabled: toBoolean(process.env.RAW_UPLOAD_AI_FALLBACK_ENABLED, true),
-  pythonAgentUrl: process.env.PYTHON_AGENT_URL || '',
-  pythonAgentToken: process.env.PYTHON_AGENT_TOKEN || '',
-  pythonAgentTimeoutMs: toInt(process.env.PYTHON_AGENT_TIMEOUT_MS, 3500),
   dashboardAgentTimeoutMs: toInt(process.env.DASHBOARD_AGENT_TIMEOUT_MS, 120000),
   dashboardAgentMaxAttempts: Math.max(1, toInt(process.env.DASHBOARD_AGENT_MAX_ATTEMPTS, 2)),
   otpMaxAttempts: Math.max(1, toInt(process.env.OTP_MAX_ATTEMPTS, 5)),
   demoAuthRateLimitPerMinute: Math.max(1, toInt(process.env.DEMO_AUTH_RATE_LIMIT_PER_MINUTE, 5)),
+  pythonAgentBackendUrl: process.env.PYTHON_AGENT_BACKEND_URL || 'http://localhost:8001',
 };
 
 if (config.isProduction && !process.env.JWT_SECRET) {

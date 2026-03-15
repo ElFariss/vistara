@@ -21,6 +21,7 @@ import { registerDashboardRoutes } from './routes/dashboards.mjs';
 import { registerInsightRoutes } from './routes/insights.mjs';
 import { registerReportRoutes } from './routes/reports.mjs';
 import { registerGoalRoutes } from './routes/goals.mjs';
+import { registerInternalRoutes } from './routes/internal.mjs';
 
 const logger = createLogger('server');
 const __filename = fileURLToPath(import.meta.url);
@@ -41,6 +42,7 @@ registerDashboardRoutes(router);
 registerInsightRoutes(router);
 registerReportRoutes(router);
 registerGoalRoutes(router);
+registerInternalRoutes(router);
 
 router.register('GET', '/api/health', async (ctx) => {
   return sendJson(ctx.res, 200, {
@@ -48,7 +50,7 @@ router.register('GET', '/api/health', async (ctx) => {
     service: 'umkm-conversational-intelligence',
     env: config.env,
     gemini_model: config.geminiModel,
-    python_agent_enabled: Boolean(config.pythonAgentUrl),
+    python_agent_enabled: Boolean(config.pythonAgentBackendUrl),
     timestamp: new Date().toISOString(),
   });
 });
@@ -272,7 +274,7 @@ async function listenWithRetry(startPort, maxAttempts = 5) {
         env: config.env,
         gemini_model: config.geminiModel,
         gemini_enabled: Boolean(config.geminiApiKey),
-        python_agent_enabled: Boolean(config.pythonAgentUrl),
+        python_agent_enabled: Boolean(config.pythonAgentBackendUrl),
       });
 
       return actualPort;

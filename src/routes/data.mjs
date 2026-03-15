@@ -482,20 +482,6 @@ export function registerDataRoutes(router) {
   );
 
   router.register(
-    'POST',
-    '/api/data/sources/:id/process',
-    async (ctx) => {
-      return sendError(
-        ctx.res,
-        410,
-        'ENDPOINT_DEPRECATED',
-        'Endpoint process sudah deprecated. Upload sekarang langsung parse + ingest sebagai snapshot statis.',
-      );
-    },
-    { auth: true },
-  );
-
-  router.register(
     'GET',
     '/api/data/schema',
     async (ctx) => {

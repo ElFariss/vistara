@@ -1,3 +1,20 @@
+/**
+ * Vistara — Main application entry point.
+ *
+ * Foundation data modules (constants, state/refs) have been extracted to
+ * client/src/lib/ for reuse across future modules.
+ *
+ * Behavioral modules (api, theme, settings, auth, landing, utils) exist
+ * in client/src/lib/ as the canonical source for new code.
+ * This file retains the original function definitions because they have
+ * deep cross-references to workspace functions (renderThread, renderCanvas, etc.).
+ *
+ * Future work: migrate remaining workspace functions into lib/ modules
+ * and switch to importing everything from lib/.
+ */
+
+// ── Vendor + existing utility imports ──────────────────────────────────────
+
 import { renderArtifact } from '@/vendor/chart-lite.js';
 import { createGridStackLite } from '@/vendor/gridstack-lite.js';
 import { resolveCanvasViewportTarget } from '@/dashboard/canvasViewport.js';
@@ -26,317 +43,24 @@ import {
   suggestDashboardLayout,
 } from '@/dashboard/layout.js';
 
-const GRID_COLS = 16;
-const GRID_ROWS = 9;
-const GRID_GAP = 10;
-const MOBILE_BREAKPOINT = 768;
-const MIN_CANVAS_PCT = 28;
-const MAX_CANVAS_PCT = 92;
-const DEFAULT_CANVAS_PCT = 58;
-const STAGE_BASE_WIDTH = 1280;
-const STAGE_BASE_HEIGHT = 720;
-const MIN_STAGE_ZOOM = 0.5;
-const MAX_STAGE_ZOOM = 1.75;
-const ZOOM_STEP = 0.1;
-const SETTINGS_STORAGE_KEY = 'vistara_settings';
-const PRECHAT_ROTATE_MS = 5000;
-const PRECHAT_FADE_MS = 320;
-const UPLOAD_ALLOWED_EXTENSIONS = new Set([
-  '.csv',
-  '.tsv',
-  '.ssv',
-  '.dsv',
-  '.xlsx',
-  '.xls',
-  '.json',
-  '.pdf',
-  '.doc',
-  '.docx',
-  '.db',
-  '.sqlite',
-  '.sqlite3',
-  '.sql',
-  '.mdb',
-  '.accdb',
-  '.dbf',
-  '.parquet',
-  '.duckdb',
-]);
-const UPLOAD_BLOCKED_EXTENSIONS = new Set([
-  '.zip',
-  '.tar',
-  '.gz',
-  '.tgz',
-  '.7z',
-  '.rar',
-  '.py',
-]);
-const UPLOAD_ALLOWED_LABEL = 'CSV, TSV, SSV, DSV, XLSX, XLS, JSON, PDF, DOC/DOCX, dan file database';
+// ── Shared data layer from lib/ ────────────────────────────────────────────
+// Constants and state are imported from lib/ so future modules can share them.
+// Note: the behavioral functions (showToast, api, etc.) are still defined
+// inline below because they cross-reference workspace functions.
 
-const runtimeConfig = window.__VISTARA_RUNTIME__ || {};
-const API_BASE_URL = String(runtimeConfig.API_BASE_URL || '').trim().replace(/\/+$/, '');
-const DEFAULT_API_TIMEOUT_MS = 30000;
-const UPLOAD_API_TIMEOUT_MS = 180000;
-const STREAM_API_TIMEOUT_MS = 0;
+import {
+  GRID_COLS, GRID_ROWS, GRID_GAP, MOBILE_BREAKPOINT,
+  MIN_CANVAS_PCT, MAX_CANVAS_PCT, DEFAULT_CANVAS_PCT,
+  STAGE_BASE_WIDTH, STAGE_BASE_HEIGHT,
+  MIN_STAGE_ZOOM, MAX_STAGE_ZOOM, ZOOM_STEP,
+  SETTINGS_STORAGE_KEY, PRECHAT_ROTATE_MS, PRECHAT_FADE_MS,
+  UPLOAD_ALLOWED_EXTENSIONS, UPLOAD_BLOCKED_EXTENSIONS, UPLOAD_ALLOWED_LABEL,
+  API_BASE_URL, DEFAULT_API_TIMEOUT_MS, UPLOAD_API_TIMEOUT_MS, STREAM_API_TIMEOUT_MS,
+  DEFAULT_SETTINGS, ACCENT_PRESETS,
+} from '@/lib/constants.js';
 
-const DEFAULT_SETTINGS = {
-  theme_mode: 'system',
-  accent_color: 'orange',
-  nickname: '',
-  response_style: 'ringkas',
-  assistant_character: 'proaktif',
-  personalization_focus: '',
-};
+import { state, refs } from '@/lib/state.js';
 
-const ACCENT_PRESETS = {
-  orange: {
-    accent: '#f97316',
-    hover: '#fb8a2c',
-    light: '#fef0e4',
-  },
-  blue: {
-    accent: '#2563eb',
-    hover: '#3b82f6',
-    light: '#dbeafe',
-  },
-  green: {
-    accent: '#16a34a',
-    hover: '#22c55e',
-    light: '#dcfce7',
-  },
-  rose: {
-    accent: '#e11d48',
-    hover: '#f43f5e',
-    light: '#ffe4e6',
-  },
-};
-
-const state = {
-  token: localStorage.getItem('umkm_token') || '',
-  user: null,
-  profile: null,
-  conversationId: null,
-  conversationTitle: 'Percakapan baru',
-  conversationMessageCount: 0,
-  conversations: [],
-  messages: [],
-  dashboards: [],
-  selectedDashboardId: null,
-  currentDashboard: null,
-  draftDashboard: null,
-  canvasWidgets: [],
-  workspaceLoaded: false,
-  isWorkspaceBooting: false,
-  datasetReady: false,
-  schema: null,
-  datasetTables: [],
-  grid: null,
-  isDemoSession: false,
-  canvasOpen: false,
-  selectedWidgetId: null,
-  editMode: false,
-  pendingMessageId: null,
-  timelineMessageId: null,
-  timelineRunId: null,
-  agentDialogueOpen: false,
-  agentDialogueMessageId: null,
-  agentDialogueItems: [],
-  agentDialogueReturnFocus: null,
-  canvasPage: 1,
-  canvasPagesCount: 1,
-  canvasWidthPct: DEFAULT_CANVAS_PCT,
-  isResizingPanels: false,
-  stageZoom: 1,
-  settings: { ...DEFAULT_SETTINGS },
-  settingsGroup: 'user',
-  settingsOpen: false,
-  settingsReturnFocus: null,
-  sessionRailCollapsed: true,
-  openConversationMenuId: null,
-  dataPaneCollapsed: true,
-  configPaneCollapsed: true,
-  widgetBuilderOpen: false,
-  widgetBuilderStep: 'type',
-  widgetBuilderSelection: {
-    visualization: null,
-    datasetId: null,
-    axes: {},
-  },
-  widgetBuilderActiveAxis: null,
-  preChatTickerIndex: 0,
-  preChatTickerInterval: null,
-  preChatTickerSwapTimer: null,
-  preChatTickerKey: '',
-  isProgrammaticGridUpdate: false,
-  isRenderingCanvas: false,
-  isCanvasPreparing: false,
-  isLoadingConversation: false,
-  isSendingMessage: false,
-  isUploadingDataset: false,
-  dragDepth: 0,
-  canvasViewportMovedByUser: false,
-  canvasAutoCenteredRunId: null,
-  draftSaveDirty: false,
-  landingRevealObserver: null,
-  onboardingSlideIndex: 0,
-  currentPage: 'landing',
-};
-
-const refs = {
-  appShell: document.querySelector('.app-shell'),
-  appHeader: document.querySelector('.app-header'),
-  headerLoginBtn: document.getElementById('headerLoginBtn'),
-  headerCtaBtn: document.getElementById('headerCtaBtn'),
-  brandHomeLink: document.getElementById('brandHomeLink'),
-  headerSettingsBtn: document.getElementById('headerSettingsBtn'),
-  editProfileBtn: document.getElementById('editProfileBtn'),
-  logoutBtn: document.getElementById('logoutBtn'),
-  themeToggle: document.getElementById('themeToggle'),
-  settingsBackdrop: document.getElementById('settingsBackdrop'),
-  settingsPanel: document.getElementById('settingsPanel'),
-  settingsCloseBtn: document.getElementById('settingsCloseBtn'),
-  settingsForm: document.getElementById('settingsForm'),
-  settingsResetBtn: document.getElementById('settingsResetBtn'),
-  settingsGroupTabs: document.getElementById('settingsGroupTabs'),
-  settingsGroupUserBtn: document.getElementById('settingsGroupUserBtn'),
-  settingsGroupAgentBtn: document.getElementById('settingsGroupAgentBtn'),
-  settingsUserGroup: document.getElementById('settingsUserGroup'),
-  settingsAgentGroup: document.getElementById('settingsAgentGroup'),
-  settingsThemeMode: document.getElementById('settingsThemeMode'),
-  settingsAccentColor: document.getElementById('settingsAccentColor'),
-  settingsNickname: document.getElementById('settingsNickname'),
-  settingsResponseStyle: document.getElementById('settingsResponseStyle'),
-  settingsAssistantCharacter: document.getElementById('settingsAssistantCharacter'),
-  settingsPersonalizationFocus: document.getElementById('settingsPersonalizationFocus'),
-  settingsBusinessName: document.getElementById('settingsBusinessName'),
-  settingsBusinessIndustry: document.getElementById('settingsBusinessIndustry'),
-  settingsBusinessCity: document.getElementById('settingsBusinessCity'),
-  settingsBusinessTimezone: document.getElementById('settingsBusinessTimezone'),
-  settingsBusinessCurrency: document.getElementById('settingsBusinessCurrency'),
-  settingsBusinessVerdictTime: document.getElementById('settingsBusinessVerdictTime'),
-  agentDialogueBackdrop: document.getElementById('agentDialogueBackdrop'),
-  agentDialoguePanel: document.getElementById('agentDialoguePanel'),
-  agentDialogueCloseBtn: document.getElementById('agentDialogueCloseBtn'),
-  agentDialogueList: document.getElementById('agentDialogueList'),
-  agentDialogueTitle: document.getElementById('agentDialogueTitle'),
-
-  landingPage: document.getElementById('landingPage'),
-  authPage: document.getElementById('authPage'),
-  contextPage: document.getElementById('contextPage'),
-  workspacePage: document.getElementById('workspacePage'),
-
-  landingWelcomeCta: document.getElementById('landingWelcomeCta'),
-  landingWelcomeDemo: document.getElementById('landingWelcomeDemo'),
-  landingCtaBottom: document.getElementById('landingCtaBottom'),
-  landingTryNowBtn: document.getElementById('landingTryNowBtn'),
-  landingFinalCta: document.getElementById('landingFinalCta'),
-  landingScrollCue: document.getElementById('landingScrollCue'),
-  landingHeroStart: document.getElementById('landingHeroStart'),
-
-  authTabs: document.getElementById('authTabs'),
-  loginForm: document.getElementById('loginForm'),
-  registerForm: document.getElementById('registerForm'),
-  loginPasswordInput: document.getElementById('loginPasswordInput'),
-  loginPasswordToggle: document.getElementById('loginPasswordToggle'),
-  registerPasswordInput: document.getElementById('registerPasswordInput'),
-  registerPasswordToggle: document.getElementById('registerPasswordToggle'),
-  authOnboardingSlides: Array.from(document.querySelectorAll('[data-onboarding-slide]')),
-  authOnboardingDots: Array.from(document.querySelectorAll('[data-onboarding-dot]')),
-  contextForm: document.getElementById('contextForm'),
-  workspaceLoading: document.getElementById('workspaceLoading'),
-  workspaceLoadingText: document.getElementById('workspaceLoadingText'),
-
-  sessionRail: document.getElementById('sessionRail'),
-  sessionRailPeekBtn: document.getElementById('sessionRailPeekBtn'),
-  sessionRailToggleBtn: document.getElementById('sessionRailToggleBtn'),
-  sessionRailToggleLabel: document.getElementById('sessionRailToggleLabel'),
-  sessionList: document.getElementById('sessionList'),
-  dashboardList: document.getElementById('dashboardList'),
-  dashboardVersionsBtn: document.getElementById('dashboardVersionsBtn'),
-  newSessionBtn: document.getElementById('newSessionBtn'),
-
-  chatPane: document.getElementById('chatPane'),
-  chatPaneHead: document.getElementById('chatPaneHead'),
-  chatSubtitle: document.getElementById('chatSubtitle'),
-  openCanvasBtn: document.getElementById('openCanvasBtn'),
-  workspaceShell: document.querySelector('.workspace-shell'),
-  panelDivider: document.getElementById('panelDivider'),
-  canvasPane: document.getElementById('canvasPane'),
-  canvasShell: document.querySelector('.canvas-shell'),
-  canvasViewport: document.getElementById('canvasViewport'),
-  canvasWorld: document.getElementById('canvasWorld'),
-  canvasLoading: document.getElementById('canvasLoading'),
-  uploadDropOverlay: document.getElementById('uploadDropOverlay'),
-  uploadLoading: document.getElementById('uploadLoading'),
-  uploadLoadingText: document.getElementById('uploadLoadingText'),
-
-  dataGate: document.getElementById('dataGate'),
-  gateUploadInput: document.getElementById('gateUploadInput'),
-  gateUploadPickerBtn: document.getElementById('gateUploadPickerBtn'),
-  gateUploadName: document.getElementById('gateUploadName'),
-  gateDemoBtn: document.getElementById('gateDemoBtn'),
-
-  chatMessages: document.getElementById('chatMessages'),
-  preChatTicker: document.getElementById('preChatTicker'),
-  typingIndicator: document.getElementById('typingIndicator'),
-  quickPrompts: document.getElementById('quickPrompts'),
-  chatForm: document.getElementById('chatForm'),
-  chatInput: document.getElementById('chatInput'),
-  chatFile: document.getElementById('chatFile'),
-  chatFileBtn: document.getElementById('chatFileBtn'),
-  fileLabel: document.getElementById('fileLabel'),
-
-  persistDraftBtn: document.getElementById('persistDraftBtn'),
-  saveCanvasBtn: document.getElementById('saveCanvasBtn'),
-  toggleDataPaneBtn: document.getElementById('toggleDataPaneBtn'),
-  toggleConfigPaneBtn: document.getElementById('toggleConfigPaneBtn'),
-  addWidgetToolbar: document.getElementById('addWidgetToolbar'),
-  widgetBuilderBackdrop: document.getElementById('widgetBuilderBackdrop'),
-  widgetBuilderModal: document.getElementById('widgetBuilderModal'),
-  widgetBuilderCloseBtn: document.getElementById('widgetBuilderCloseBtn'),
-  widgetBuilderTitle: document.getElementById('widgetBuilderTitle'),
-  widgetBuilderStepType: document.getElementById('widgetBuilderStepType'),
-  widgetBuilderStepConfig: document.getElementById('widgetBuilderStepConfig'),
-  widgetTypeGrid: document.getElementById('widgetTypeGrid'),
-  widgetAxisList: document.getElementById('widgetAxisList'),
-  widgetAxisHint: document.getElementById('widgetAxisHint'),
-  widgetDatasetTitle: document.getElementById('widgetDatasetTitle'),
-  widgetDatasetMeta: document.getElementById('widgetDatasetMeta'),
-  widgetDatasetList: document.getElementById('widgetDatasetList'),
-  widgetDatasetPreview: document.getElementById('widgetDatasetPreview'),
-  widgetBuilderBackBtn: document.getElementById('widgetBuilderBackBtn'),
-  widgetBuilderNextBtn: document.getElementById('widgetBuilderNextBtn'),
-  editModeBtn: document.getElementById('editModeBtn'),
-  floatingAddBtn: document.getElementById('floatingAddBtn'),
-  zoomInBtn: document.getElementById('zoomInBtn'),
-  zoomOutBtn: document.getElementById('zoomOutBtn'),
-  zoomResetBtn: document.getElementById('zoomResetBtn'),
-  zoomLevelLabel: document.getElementById('zoomLevelLabel'),
-  canvasStage: document.getElementById('canvasStage'),
-  canvasPrevPage: document.getElementById('canvasPrevPage'),
-  canvasNextPage: document.getElementById('canvasNextPage'),
-  canvasAddPage: document.getElementById('canvasAddPage'),
-  canvasDeletePage: document.getElementById('canvasDeletePage'),
-  canvasPageIndicator: document.getElementById('canvasPageIndicator'),
-  canvasDock: document.getElementById('canvasDock'),
-  canvasGrid: document.getElementById('canvasGrid'),
-  sessionRailBackdrop: document.getElementById('sessionRailBackdrop'),
-  sourceList: document.getElementById('sourceList'),
-  dataFields: document.getElementById('dataFields'),
-  dataPane: document.getElementById('dataPane'),
-
-  configForm: document.getElementById('configForm'),
-  configEmpty: document.getElementById('configEmpty'),
-  configDataset: document.getElementById('configDataset'),
-  configMeasure: document.getElementById('configMeasure'),
-  configGroupBy: document.getElementById('configGroupBy'),
-  configVisualization: document.getElementById('configVisualization'),
-
-  statusBar: document.getElementById('statusBar'),
-  verdictBadge: document.getElementById('verdictBadge'),
-  sourceStats: document.getElementById('sourceStats'),
-  toast: document.getElementById('toast'),
-};
 
 function escapeAttribute(value) {
   return escapeHtml(String(value || '')).replace(/"/g, '&quot;');
@@ -380,6 +104,54 @@ function showToast(message, timeout = 3000) {
       refs.toast.classList.add('hidden');
     }
   }, timeout);
+}
+
+function showConfirmModal(message) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'confirm-backdrop';
+    
+    const modal = document.createElement('aside');
+    modal.className = 'confirm-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    
+    const body = document.createElement('div');
+    body.className = 'confirm-modal-body';
+    
+    const textGroup = document.createElement('div');
+    const title = document.createElement('strong');
+    title.className = 'confirm-title';
+    title.textContent = 'Konfirmasi';
+    const text = document.createElement('p');
+    text.className = 'confirm-message';
+    text.textContent = message;
+    textGroup.append(title, text);
+    
+    const actions = document.createElement('div');
+    actions.className = 'confirm-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'ghost confirm-cancel';
+    cancelBtn.textContent = 'Batal';
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.className = 'confirm-ok';
+    okBtn.textContent = 'Ya, Hapus';
+    actions.append(cancelBtn, okBtn);
+    
+    body.append(textGroup, actions);
+    modal.append(body);
+    document.body.append(backdrop, modal);
+    
+    const cleanup = () => {
+      backdrop.remove();
+      modal.remove();
+    };
+    
+    cancelBtn.addEventListener('click', () => { cleanup(); resolve(false); });
+    okBtn.addEventListener('click', () => { cleanup(); resolve(true); });
+  });
 }
 
 function resolveThemeMode(mode = 'light') {
@@ -659,18 +431,12 @@ function syncBusinessSettingsFields() {
     !refs.settingsBusinessName
     || !refs.settingsBusinessIndustry
     || !refs.settingsBusinessCity
-    || !refs.settingsBusinessTimezone
-    || !refs.settingsBusinessCurrency
-    || !refs.settingsBusinessVerdictTime
   ) {
     return;
   }
   refs.settingsBusinessName.value = state.profile?.name || '';
   refs.settingsBusinessIndustry.value = state.profile?.industry || '';
   refs.settingsBusinessCity.value = state.profile?.city || '';
-  refs.settingsBusinessTimezone.value = state.profile?.timezone || 'Asia/Jakarta';
-  refs.settingsBusinessCurrency.value = state.profile?.currency || 'IDR';
-  refs.settingsBusinessVerdictTime.value = state.profile?.morning_verdict_time || '07:00';
 }
 
 function applySettings(nextSettings, options = {}) {
@@ -3842,7 +3608,8 @@ function renderConversationList() {
     deleteBtn.className = 'ghost';
     deleteBtn.textContent = 'Hapus';
     deleteBtn.addEventListener('click', async () => {
-      if (typeof window.confirm === 'function' && !window.confirm('Hapus percakapan ini?')) {
+      const confirmed = await showConfirmModal('Hapus percakapan ini?');
+      if (!confirmed) {
         return;
       }
       state.openConversationMenuId = null;
@@ -3998,7 +3765,8 @@ function renderDashboardList() {
     deleteBtn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" width="16" height="16"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6v-6M14 11v6v-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>';
     deleteBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (!confirm(`Hapus versi dashboard "${title.textContent}"?`)) return;
+      const confirmed = await showConfirmModal(`Hapus versi dashboard "${title.textContent}"?`);
+      if (!confirmed) return;
 
       try {
         await api(`/api/chat/dashboards/${dashboard.id}`, { method: 'DELETE' });
@@ -4180,7 +3948,7 @@ async function deleteConversationById(conversationId) {
   if (removedActiveConversation && nextConversationId) {
     await loadConversation(nextConversationId);
   } else if (removedActiveConversation) {
-    resetConversationWorkspaceState({ preserveDashboard: true });
+    resetConversationWorkspaceState();
     renderConversationList();
   } else {
     renderConversationList();
@@ -4366,7 +4134,7 @@ function renderSourceList(sources = []) {
     delBtn.textContent = 'Hapus';
     delBtn.addEventListener('click', async () => {
       if (!source.id) return;
-      const confirmDelete = window.confirm(`Hapus dataset "${source.filename || 'Dataset'}"?`);
+      const confirmDelete = await showConfirmModal(`Hapus dataset "${source.filename || 'Dataset'}"?`);
       if (!confirmDelete) return;
       delBtn.disabled = true;
       try {
@@ -4430,13 +4198,13 @@ async function uploadDataset({ file = null, demo = false, silent = false } = {})
       });
     }
 
-    await Promise.allSettled([refreshSources(), refreshVerdict(), refreshDashboards()]);
+    await Promise.allSettled([refreshSources(), refreshVerdict(), refreshDashboards(), loadSchema()]);
 
     if (!silent) {
       const filename = response.source?.filename || 'baru';
       const inserted = response.ingestion?.inserted;
       const readyMessage = Number.isFinite(Number(inserted))
-        ? `Dataset ${filename} siap digunakan. ${Number(inserted)} baris diproses.`
+        ? `Dataset ${filename} tersimpan dan siap digunakan. ${Number(inserted)} baris telah berhasil diproses. Anda bisa langsung meminta analisis atau dashboard.`
         : `Dataset ${filename} tersimpan. Akan diproses saat Anda meminta analisis atau dashboard.`;
       appendMessage({
         role: 'assistant',
@@ -5618,10 +5386,10 @@ if (refs.zoomResetBtn) {
 }
 
 if (refs.canvasDeletePage) {
-  refs.canvasDeletePage.addEventListener('click', () => {
+  refs.canvasDeletePage.addEventListener('click', async () => {
     if (state.canvasPagesCount <= 1) {
-      if (typeof window.confirm === 'function'
-        && !window.confirm('Hapus semua widget di dashboard?')) {
+      const confirmed = await showConfirmModal('Hapus semua widget di dashboard?');
+      if (!confirmed) {
         return;
       }
 
@@ -5633,7 +5401,8 @@ if (refs.canvasDeletePage) {
       showToast('Dashboard dikosongkan.');
       return;
     }
-    if (typeof window.confirm === 'function' && !window.confirm(`Hapus halaman ${state.canvasPage}?`)) {
+    const confirmed = await showConfirmModal(`Hapus halaman ${state.canvasPage}?`);
+    if (!confirmed) {
       return;
     }
 

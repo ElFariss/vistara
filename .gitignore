@@ -22,4 +22,6 @@ data/tables/*
 !data/tables/.gitkeep
 __pycache__/
 *.pyc
+.venv/
+*.egg-info/
 .blackboxcli/

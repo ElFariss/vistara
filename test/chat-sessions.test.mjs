@@ -418,7 +418,7 @@ test('processChatMessage auto-builds a dashboard when route classification stays
       assert.equal(response.presentation_mode, 'canvas');
       assert.equal(response.intent.intent, 'create_dashboard');
       assert.equal(response.content_format, 'markdown');
-      assert.match(response.answer, /Ringkasan dashboard:/);
+      assert.match(response.answer, /Widget yang disiapkan:/);
       assert.ok(response.dashboard?.id);
       assert.equal(response.draft_dashboard?.saved_dashboard_id, response.dashboard.id);
     } finally {

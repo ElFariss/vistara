@@ -22,8 +22,7 @@ Recommended:
 - `DATA_DIR=/app/data`
 - `DATABASE_URL=postgresql://postgres:<password>@postgres:5432/umkm`
 - `GEMINI_MODEL=gemini-2.5-pro`
-- `PYTHON_AGENT_URL=http://python-agent:8091`
-- `PYTHON_AGENT_TOKEN=<shared token>`
+- `PYTHON_AGENT_BACKEND_URL=http://agent-backend:8001`
 - `DASHBOARD_AGENT_TIMEOUT_MS=180000`
 
 ## Startup

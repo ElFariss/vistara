@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "start": "node src/server.mjs",
-    "dev": "node --watch src/server.mjs",
+    "dev": "concurrently \"node --watch src/server.mjs\" \"cd agent && .venv/bin/uvicorn agent.main:app --port 8001 --reload\"",
     "backup": "node scripts/backup.mjs",
     "restore": "node scripts/restore.mjs",
     "test": "NODE_ENV=test node --test --test-concurrency=1",
@@ -21,5 +21,8 @@
     "gridstack": "^12.4.2",
     "pg": "^8.20.0",
     "pg-mem": "^3.0.14"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }

@@ -274,56 +274,6 @@ async function resultLooksEmpty(result, tenantId, dataset) {
   return false;
 }
 
-function normalizeMetric(metric) {
-  const value = toLowerAlnum(metric || '');
-  if (value.includes('untung') || value.includes('profit') || value.includes('laba')) {
-    return 'total_profit';
-  }
-  if (value.includes('margin')) {
-    return 'margin_percentage';
-  }
-  if (value.includes('biaya') || value.includes('expense') || value.includes('pengeluaran')) {
-    return 'total_expense';
-  }
-  if (value.includes('top') || value.includes('terlaris') || value.includes('produk')) {
-    return 'top_products';
-  }
-  if (value.includes('cabang') || value.includes('branch')) {
-    return 'branch_performance';
-  }
-  if (value.includes('trend') || value.includes('grafik')) {
-    return 'revenue_trend';
-  }
-  return 'total_revenue';
-}
-
-function inferTemplate(intent) {
-  if (intent.template_id && getTemplate(intent.template_id)) {
-    return intent.template_id;
-  }
-
-  const normalizedMetric = normalizeMetric(intent.metric);
-  const requestedViz = String(intent.visualization || '').toLowerCase();
-  if (requestedViz && requestedViz !== 'metric' && intent.intent !== 'rank') {
-    if (requestedViz === 'line' || requestedViz === 'bar') {
-      if (normalizedMetric === 'total_expense') {
-        return 'total_expense';
-      }
-      return 'revenue_trend';
-    }
-  }
-
-  switch (intent.intent) {
-    case 'rank':
-      return intent.dimension === 'branch' ? 'branch_performance' : 'top_products';
-    case 'compare':
-      return normalizedMetric;
-    case 'show_metric':
-    case 'explain':
-    default:
-      return normalizedMetric;
-  }
-}
 
 async function executeQuery(templateId, { tenantId, period, branch, channel, limit }) {
   const query = buildTemplateQuery(templateId, {
@@ -451,62 +401,6 @@ function buildWidgets(result, comparison = null) {
   return [];
 }
 
-function describeResult(intent, result, comparison) {
-  if (result.type === 'metric') {
-    const value = formatMetricValue(result.templateId, result.data.value);
-    if (comparison) {
-      const delta = comparison.delta;
-      const sign = delta >= 0 ? 'naik' : 'turun';
-      const pct = Number.isFinite(comparison.deltaPct) ? `${Math.abs(comparison.deltaPct).toFixed(1)}%` : '0%';
-      return [
-        `**${result.title}** untuk **${result.period.label}** ada di **${value}**.`,
-        `- Perubahan vs periode sebelumnya: **${sign} ${pct}**.`,
-      ].join('\n');
-    }
-    return [
-      `**${result.title}** untuk **${result.period.label}** ada di **${value}**.`,
-      '- Temuan ini bisa dipakai sebagai patokan utama untuk membaca performa saat ini.',
-    ].join('\n');
-  }
-
-  if (result.type === 'trend') {
-    const latest = result.data.at(-1);
-    if (!latest) {
-      return `Belum ada data untuk ${result.period.label}.`;
-    }
-    const peak = [...result.data].reduce((best, row) => (Number(row.value || 0) > Number(best.value || 0) ? row : best), latest);
-    const low = [...result.data].reduce((worst, row) => (Number(row.value || 0) < Number(worst.value || 0) ? row : worst), latest);
-    return [
-      `**${result.title}** untuk **${result.period.label}** menunjukkan bagaimana performa bergerak dari waktu ke waktu.`,
-      `- Nilai terbaru: **${toRupiah(latest.value)}** pada **${latest.period}**.`,
-      `- Titik tertinggi: **${toRupiah(peak.value)}** pada **${peak.period}**.`,
-      `- Titik terendah: **${toRupiah(low.value)}** pada **${low.period}**.`,
-    ].join('\n');
-  }
-
-  if (result.type === 'list') {
-    if (!result.data.length) {
-      return `Tidak ada data ${result.title.toLowerCase()} pada ${result.period.label}.`;
-    }
-    const top = result.data[0];
-    const topName = top.name || top.product || 'Item';
-    const topValue = top.total_revenue || top.revenue || top.value || 0;
-    const runnerUp = result.data[1] || null;
-    const bullets = [
-      `**${result.title}** untuk **${result.period.label}** membantu melihat siapa kontributor terbesar dari data yang tersedia.`,
-      `- Posisi teratas: **${topName}** dengan **${toRupiah(topValue)}**.`,
-    ];
-    if (runnerUp) {
-      const runnerUpName = runnerUp.name || runnerUp.product || 'Item';
-      const runnerUpValue = runnerUp.total_revenue || runnerUp.revenue || runnerUp.value || 0;
-      bullets.push(`- Posisi berikutnya: **${runnerUpName}** dengan **${toRupiah(runnerUpValue)}**.`);
-    }
-    bullets.push(`- Total item yang dibandingkan: **${result.data.length}**.`);
-    return bullets.join('\n');
-  }
-
-  return 'Analisis selesai.';
-}
 
 function calculateComparison(currentValue, previousValue) {
   const current = Number(currentValue || 0);
@@ -522,9 +416,12 @@ function calculateComparison(currentValue, previousValue) {
 }
 
 export async function executeAnalyticsIntent({ tenantId, userId, intent }) {
-  const templateId = inferTemplate(intent);
+  const templateId = intent.template_id;
+  if (!templateId) {
+    throw new Error('template_id is required for analytics execution');
+  }
   const dataset = datasetForTemplate(templateId);
-  let period = await resolveAgenticPeriod(tenantId, intent.time_period || intent.period || '7 hari terakhir', dataset);
+  let period = await resolveAgenticPeriod(tenantId, intent.time_period || intent.period || '30 hari terakhir', dataset);
 
   let primary = await executeQuery(templateId, {
     tenantId,
@@ -563,7 +460,6 @@ export async function executeAnalyticsIntent({ tenantId, userId, intent }) {
     comparison = calculateComparison(primary.data.value, prev.data.value);
   }
 
-  const answer = describeResult(intent, primary, comparison);
   const widgets = buildWidgets(primary, comparison);
   const artifacts = widgets.map(widgetToArtifact).filter(Boolean);
 
@@ -581,8 +477,7 @@ export async function executeAnalyticsIntent({ tenantId, userId, intent }) {
   });
 
   return {
-    answer,
-    content_format: 'markdown',
+    raw_data: primary.data,
     widgets,
     artifacts,
     period,
