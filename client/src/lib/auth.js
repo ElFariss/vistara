@@ -3,6 +3,7 @@
  */
 
 import { state, refs } from './state.js';
+import { TOKEN_STORAGE_KEY } from './constants.js';
 
 export function syncHeaderActions() {
   const isAuth = Boolean(state.token);
@@ -34,9 +35,9 @@ export function setAuth(token, user = null, options = {}) {
 
   if (state.token) {
     if (persist) {
-      localStorage.setItem('umkm_token', state.token);
+      localStorage.setItem(TOKEN_STORAGE_KEY, state.token);
     } else {
-      localStorage.removeItem('umkm_token');
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
     }
     if (refs.logoutBtn) refs.logoutBtn.hidden = false;
     if (refs.editProfileBtn) refs.editProfileBtn.hidden = true;
@@ -44,7 +45,7 @@ export function setAuth(token, user = null, options = {}) {
     if (refs.headerLoginBtn) refs.headerLoginBtn.hidden = true;
     if (refs.headerCtaBtn) refs.headerCtaBtn.hidden = true;
   } else {
-    localStorage.removeItem('umkm_token');
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
     if (refs.logoutBtn) refs.logoutBtn.hidden = true;
     if (refs.editProfileBtn) refs.editProfileBtn.hidden = true;
     if (refs.headerSettingsBtn) refs.headerSettingsBtn.hidden = true;

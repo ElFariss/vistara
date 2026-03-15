@@ -3,10 +3,10 @@
  * Imported by every module that needs to read/write app state.
  */
 
-import { DEFAULT_CANVAS_PCT, DEFAULT_SETTINGS } from './constants.js';
+import { DEFAULT_CANVAS_PCT, DEFAULT_SETTINGS, TOKEN_STORAGE_KEY, IS_DEMO_HOST } from './constants.js';
 
 export const state = {
-  token: localStorage.getItem('umkm_token') || '',
+  token: localStorage.getItem(TOKEN_STORAGE_KEY) || '',
   user: null,
   profile: null,
   conversationId: null,
@@ -26,6 +26,7 @@ export const state = {
   datasetTables: [],
   grid: null,
   isDemoSession: false,
+  isDemoHost: IS_DEMO_HOST,
   canvasOpen: false,
   selectedWidgetId: null,
   editMode: false,

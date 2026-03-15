@@ -44,6 +44,11 @@ const PRECHAT_FADE_MS = 320;
 
 const runtimeConfig = window.__VISTARA_RUNTIME__ || {};
 const API_BASE_URL = String(runtimeConfig.API_BASE_URL || '').trim().replace(/\/+$/, '');
+const HOSTNAME = window.location.hostname || '';
+const IS_DEMO_HOST = /^demo[.-]/.test(HOSTNAME)
+  || HOSTNAME.includes('.demo.')
+  || HOSTNAME.includes('-demo');
+const TOKEN_STORAGE_KEY = IS_DEMO_HOST ? 'umkm_demo_token' : 'umkm_token';
 
 const DEFAULT_SETTINGS = {
   theme_mode: 'system',
@@ -78,7 +83,7 @@ const ACCENT_PRESETS = {
 };
 
 const state = {
-  token: localStorage.getItem('umkm_token') || '',
+  token: localStorage.getItem(TOKEN_STORAGE_KEY) || '',
   user: null,
   profile: null,
   conversationId: null,
@@ -98,6 +103,7 @@ const state = {
   datasetTables: [],
   grid: null,
   isDemoSession: false,
+  isDemoHost: IS_DEMO_HOST,
   canvasOpen: false,
   selectedWidgetId: null,
   editMode: false,
@@ -1137,9 +1143,9 @@ function setAuth(token, user = null, options = {}) {
 
   if (state.token) {
     if (persist) {
-      localStorage.setItem('umkm_token', state.token);
+      localStorage.setItem(TOKEN_STORAGE_KEY, state.token);
     } else {
-      localStorage.removeItem('umkm_token');
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
     }
     if (refs.logoutBtn) refs.logoutBtn.hidden = false;
     if (refs.editProfileBtn) refs.editProfileBtn.hidden = true;
@@ -1147,7 +1153,7 @@ function setAuth(token, user = null, options = {}) {
     if (refs.headerLoginBtn) refs.headerLoginBtn.hidden = true;
     if (refs.headerCtaBtn) refs.headerCtaBtn.hidden = true;
   } else {
-    localStorage.removeItem('umkm_token');
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
     if (refs.logoutBtn) refs.logoutBtn.hidden = true;
     if (refs.editProfileBtn) refs.editProfileBtn.hidden = true;
     if (refs.headerSettingsBtn) refs.headerSettingsBtn.hidden = true;
@@ -5656,6 +5662,14 @@ async function startDemoSession() {
     refs.landingWelcomeDemo.textContent = 'Menyiapkan Demo...';
   }
 
+  const ensureDemoDataset = async () => {
+    try {
+      await uploadDataset({ demo: true, silent: true });
+    } catch (error) {
+      showToast(`Gagal import demo: ${error.message}`);
+    }
+  };
+
   const fallbackStart = async () => {
     const nonce = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const payload = {
@@ -5689,9 +5703,7 @@ async function startDemoSession() {
       }),
     });
 
-    await api('/api/data/demo/import', {
-      method: 'POST',
-    });
+    await ensureDemoDataset();
   };
 
   try {
@@ -5706,6 +5718,7 @@ async function startDemoSession() {
 
     state.workspaceLoaded = false;
     showPage('workspace', { replace: true });
+    await ensureDemoDataset();
     await ensureWorkspaceLoaded({ force: true });
     setCanvasOpen(false);
     setSessionRailCollapsed(true);
@@ -6045,6 +6058,10 @@ async function bootstrap() {
     persist: true,
     isDemo: false,
   });
+  if (state.isDemoHost && !state.token) {
+    await startDemoSession();
+    return;
+  }
   await handleRouteNavigation(window.location.pathname, {
     replace: pageFromPath(window.location.pathname) !== 'landing',
     scrollTop: false,

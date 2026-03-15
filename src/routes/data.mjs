@@ -297,18 +297,27 @@ export function registerDataRoutes(router) {
       fs.copyFileSync(demoSource, storedPath);
 
       try {
-        const stored = await storeUploadedSource({
+        const ingested = await ingestUploadedSource({
           tenantId: ctx.user.tenant_id,
           userId: ctx.user.id,
           filePath: storedPath,
           filename: safeName,
           contentType: 'text/csv',
+          replaceExisting: true,
+          keepFilePaths: [storedPath],
         });
 
         return sendJson(ctx.res, 201, {
           ok: true,
-          source: stored.source,
-          status: 'uploaded',
+          source: ingested.source,
+          analysis: {
+            fileType: ingested.analysis?.fileType || null,
+            rowCount: ingested.analysis?.rowCount || 0,
+            tables: ingested.analysis?.tables || [],
+            datasetType: ingested.analysis?.suggestion?.datasetType || null,
+          },
+          ingestion: ingested.result || null,
+          status: 'ready',
           demo: true,
         });
       } catch (error) {

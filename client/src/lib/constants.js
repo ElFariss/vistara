@@ -36,6 +36,11 @@ export const UPLOAD_ALLOWED_LABEL = 'CSV, TSV, SSV, DSV, XLSX, XLS, JSON, PDF, D
 
 const runtimeConfig = window.__VISTARA_RUNTIME__ || {};
 export const API_BASE_URL = String(runtimeConfig.API_BASE_URL || '').trim().replace(/\/+$/, '');
+export const HOSTNAME = window.location.hostname || '';
+export const IS_DEMO_HOST = /^demo[.-]/.test(HOSTNAME)
+  || HOSTNAME.includes('.demo.')
+  || HOSTNAME.includes('-demo');
+export const TOKEN_STORAGE_KEY = IS_DEMO_HOST ? 'umkm_demo_token' : 'umkm_token';
 export const DEFAULT_API_TIMEOUT_MS = 30000;
 export const UPLOAD_API_TIMEOUT_MS = 180000;
 export const STREAM_API_TIMEOUT_MS = 0;
