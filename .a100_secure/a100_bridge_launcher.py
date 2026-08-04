@@ -6,7 +6,7 @@ old = (
     "python -m pip install --quiet --disable-pip-version-check "
     "lightgbm holidays pyarrow scipy scikit-learn"
 )
-new = "python -m pip install --user --quiet --disable-pip-version-check holidays"
+new = "true  # optional holidays package omitted; explicit event dates remain active"
 if old not in source:
     raise RuntimeError("Expected dependency-install command was not found")
 source = source.replace(old, new)
