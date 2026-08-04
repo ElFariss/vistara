@@ -1,2 +1,2 @@
 Secure bootstrap trigger for the temporary A100 PasarPulse experiment. Do not merge.
-Synchronize attempt 11: registered CI progress snapshot.
+Synchronize attempt 12: launch GPU-native CatBoost benchmark.
