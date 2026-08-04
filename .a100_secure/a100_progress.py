@@ -13,11 +13,30 @@ token = Path("/tmp/a100-token").read_text().strip()
 client = module.JupyterClient(module.BASE_URL, token)
 command = f"""set -u
 cd {module.REMOTE_ROOT}
+echo '=== deduplicate optimizer processes ==='
+mapfile -t PIDS < <(pgrep -f '^python TEMP_pasarpulse_lgb_fast.py --core TEMP_pasarpulse_optimizer.py --workdir proposed_model_run$' | sort -n)
+if [ "${{#PIDS[@]}}" -gt 1 ]; then
+  KEEP="${{PIDS[0]}}"
+  echo "Keeping oldest optimizer PID $KEEP"
+  for PID in "${{PIDS[@]:1}}"; do
+    echo "Terminating duplicate optimizer PID $PID"
+    kill -TERM "$PID" 2>/dev/null || true
+  done
+  sleep 3
+  for PID in "${{PIDS[@]:1}}"; do
+    if kill -0 "$PID" 2>/dev/null; then
+      echo "Force-killing duplicate optimizer PID $PID"
+      kill -KILL "$PID" 2>/dev/null || true
+    fi
+  done
+else
+  echo "Optimizer process count: ${{#PIDS[@]}}"
+fi
 echo '=== active process ==='
 date -Is
 ps -eo pid,etime,%cpu,%mem,cmd | grep -E 'TEMP_pasarpulse_lgb_fast.py|lightgbm' | grep -v grep || true
 echo '=== current log tail ==='
-tail -n 100 proposed_model_run/a100_fast_run.log 2>/dev/null || true
+tail -n 120 proposed_model_run/a100_fast_run.log 2>/dev/null || true
 echo '=== partial results ==='
 find proposed_model_run/results -maxdepth 1 -type f -printf '%f %s bytes\n' 2>/dev/null || true
 """
