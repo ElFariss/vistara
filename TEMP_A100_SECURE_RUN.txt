@@ -1,2 +1,2 @@
 Secure bootstrap trigger for the temporary A100 PasarPulse experiment. Do not merge.
-Synchronize attempt 2.
+Synchronize attempt 3 through registered workflow.
