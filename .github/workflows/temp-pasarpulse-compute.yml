@@ -48,7 +48,7 @@ jobs:
         run: python -m pip install --quiet websocket-client
 
       - name: Execute optimizer on A100
-        run: python .a100_secure/a100_bridge.py
+        run: python .a100_secure/a100_bridge_launcher.py
 
       - name: Upload A100 results
         uses: actions/upload-artifact@v4
