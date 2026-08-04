@@ -1,0 +1,121 @@
+name: Temporary PasarPulse Fast Search
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'TEMP_PASARPULSE_FAST_20260805.txt'
+  workflow_dispatch:
+
+jobs:
+  fast-search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy pyarrow requests scikit-learn lightgbm catboost holidays nbformat nbconvert jupyter
+      - name: Fetch and patch pinned optimizer
+        run: |
+          mkdir -p /tmp/pasarpulse_fast/run
+          curl --fail --location --retry 5 \
+            https://raw.githubusercontent.com/ElFariss/data-science-mcp/e34672212bc77310e90f5528170f15f7a529ee14/pasarpulse_compute/pasarpulse_optimizer.py \
+            -o /tmp/pasarpulse_fast/pasarpulse_optimizer.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('/tmp/pasarpulse_fast/pasarpulse_optimizer.py')
+          source = path.read_text()
+          source = source.replace(
+              'encoder.transform(train_frame[column].astype(str).fillna("missing")).astype("category")',
+              'encoder.transform(train_frame[column].astype(str).fillna("missing")).astype("int32")',
+          ).replace(
+              'encoder.transform(test_frame[column].astype(str).fillna("missing")).astype("category")',
+              'encoder.transform(test_frame[column].astype(str).fillna("missing")).astype("int32")',
+          ).replace('n_estimators=1200', 'n_estimators=450')
+          source = source.replace('"n_estimators": 1800', '"n_estimators": 700')
+          source = source.replace('"n_estimators": 1100', '"n_estimators": 450')
+          source = source.replace('iterations=1400', 'iterations=500')
+          path.write_text(source)
+          PY
+          python -m py_compile /tmp/pasarpulse_fast/pasarpulse_optimizer.py
+      - name: Acquire nine bulk PIHPS payloads
+        run: |
+          python - <<'PY'
+          import importlib.util
+          from pathlib import Path
+          import pandas as pd
+          import numpy as np
+
+          module_path = Path('/tmp/pasarpulse_fast/pasarpulse_optimizer.py')
+          spec = importlib.util.spec_from_file_location('optimizer', module_path)
+          optimizer = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(optimizer)
+          session = optimizer.session()
+          parts = []
+          for market, price_type in optimizer.MARKETS.items():
+              for commodity_code, meta in optimizer.COMMODITIES.items():
+                  params = {
+                      'price_type_id': price_type,
+                      'comcat_id': meta['source_id'],
+                      'province_id': '', 'regency_id': '',
+                      'showKota': 'false', 'showPasar': 'false',
+                      'tipe_laporan': 1,
+                      'start_date': optimizer.START_DATE.strftime('%Y-%m-%d'),
+                      'end_date': optimizer.END_DATE.strftime('%Y-%m-%d'),
+                      'skip': 0, 'take': 100,
+                      'requireTotalCount': 'true',
+                  }
+                  response = session.get(optimizer.ENDPOINT, params=params, timeout=180)
+                  response.raise_for_status()
+                  payload = response.json()
+                  records = []
+                  for row in payload.get('data', []):
+                      if str(row.get('level', '')) != '1':
+                          continue
+                      province = optimizer.PROVINCES.get(optimizer.norm(row.get('name')))
+                      if not province:
+                          continue
+                      for key, value in row.items():
+                          if not (isinstance(key, str) and len(key) == 10 and key[2:3] == '/' and key[5:6] == '/'):
+                              continue
+                          date = pd.to_datetime(key, dayfirst=True, errors='coerce')
+                          price = optimizer.parse_price(value)
+                          if pd.notna(date) and optimizer.START_DATE <= date <= optimizer.END_DATE and np.isfinite(price) and 1000 < price < 500000:
+                              records.append((date.normalize(), province[0], province[1], commodity_code, meta['name'], market, price))
+                  parts.append(pd.DataFrame(records, columns=['date','province_code','province_name','commodity_code','commodity_name','market_level','price']))
+                  print(market, commodity_code, len(records), flush=True)
+          frame = pd.concat(parts, ignore_index=True)
+          frame = frame.sort_values('date').drop_duplicates(['date','province_code','commodity_code','market_level'], keep='last')
+          frame = frame.sort_values(['province_code','commodity_code','market_level','date']).reset_index(drop=True)
+          assert len(frame) > 175000, len(frame)
+          assert frame['province_code'].nunique() >= 34
+          frame.to_csv('/tmp/pasarpulse_fast/run/price_daily.csv', index=False)
+          print('bulk rows', len(frame), 'series', frame.groupby(['province_code','commodity_code','market_level']).ngroups)
+          PY
+      - name: Run fast architecture search
+        run: python /tmp/pasarpulse_fast/pasarpulse_optimizer.py --workdir /tmp/pasarpulse_fast/run
+      - name: Execute notebook
+        working-directory: /tmp/pasarpulse_fast/run/results
+        run: |
+          jupyter nbconvert --to notebook --execute pasarpulse_proposed_optimizer.ipynb --output pasarpulse_proposed_optimizer_executed.ipynb --ExecutePreprocessor.timeout=900
+      - name: Package results
+        run: |
+          cp /tmp/pasarpulse_fast/pasarpulse_optimizer.py /tmp/pasarpulse_fast/run/results/
+          cd /tmp/pasarpulse_fast/run/results
+          zip -9 -r /tmp/pasarpulse_fast_results.zip .
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pasarpulse-fast-search-results
+          path: /tmp/pasarpulse_fast_results.zip
+          if-no-files-found: error
+          retention-days: 30
