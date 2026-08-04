@@ -34,7 +34,19 @@ else
 fi
 echo '=== active process ==='
 date -Is
-ps -eo pid,etime,%cpu,%mem,cmd | grep -E 'TEMP_pasarpulse_lgb_fast.py|lightgbm' | grep -v grep || true
+ps -eo pid,etime,%cpu,%mem,cmd | grep -E 'TEMP_pasarpulse_lgb_fast.py|lightgbm|catboost|xgboost' | grep -v grep || true
+echo '=== GPU/package capability ==='
+nvidia-smi --query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu --format=csv,noheader || true
+python - <<'CAPABILITY'
+for name in ['catboost', 'xgboost', 'torch']:
+    try:
+        module = __import__(name)
+        print(name, getattr(module, '__version__', 'ok'))
+    except Exception as exc:
+        print(name, 'MISSING', repr(exc))
+CAPABILITY
+echo '=== cached feature panel ==='
+ls -lh proposed_model_run/panel_features.parquet 2>/dev/null || true
 echo '=== current log tail ==='
 tail -n 120 proposed_model_run/a100_fast_run.log 2>/dev/null || true
 echo '=== partial results ==='
