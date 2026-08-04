@@ -35,10 +35,10 @@ path = Path('proposed_model_run/price_daily.csv')
 frame = pd.read_csv(path)
 print('Raw price columns:', frame.columns.tolist(), flush=True)
 if 'price' not in frame.columns:
-    known = {
+    known = set([
         'date', 'province_code', 'province_name', 'commodity_code',
         'commodity_name', 'market_level', 'series_id', 'observed'
-    }
+    ])
     candidates = []
     preferred = [
         'price_idr_per_kg', 'price_clean', 'price_value', 'value',
@@ -64,7 +64,7 @@ if 'price' not in frame.columns:
     candidates.sort(reverse=True)
     selected = candidates[0][2]
     print('Selected price column:', selected, 'candidates:', candidates[:8], flush=True)
-    frame = frame.rename(columns={selected: 'price'})
+    frame = frame.rename(columns=dict([(selected, 'price')]))
 frame['price'] = pd.to_numeric(frame['price'], errors='coerce')
 frame.to_csv(path, index=False)
 print('Normalized rows:', len(frame), 'non-null price:', int(frame['price'].notna().sum()), flush=True)
