@@ -25,4 +25,52 @@ if data_old not in source:
     raise RuntimeError("Expected data-path command was not found")
 source = source.replace(data_old, data_new)
 
+copy_line = 'cp -f "$DATA_PATH" proposed_model_run/price_daily.csv'
+schema_block = r'''cp -f "$DATA_PATH" proposed_model_run/price_daily.csv
+python - <<'NORMALIZE'
+import pandas as pd
+from pathlib import Path
+
+path = Path('proposed_model_run/price_daily.csv')
+frame = pd.read_csv(path)
+print('Raw price columns:', frame.columns.tolist(), flush=True)
+if 'price' not in frame.columns:
+    known = {
+        'date', 'province_code', 'province_name', 'commodity_code',
+        'commodity_name', 'market_level', 'series_id', 'observed'
+    }
+    candidates = []
+    preferred = [
+        'price_idr_per_kg', 'price_clean', 'price_value', 'value',
+        'harga', 'harga_rp', 'median_price', 'mean_price'
+    ]
+    for column in frame.columns:
+        lower = column.lower()
+        numeric = pd.to_numeric(frame[column], errors='coerce')
+        valid = numeric[(numeric > 1000) & (numeric < 500000)]
+        if valid.empty:
+            continue
+        name_score = 0
+        if column in preferred:
+            name_score += 100 - preferred.index(column)
+        if 'price' in lower or 'harga' in lower:
+            name_score += 50
+        if lower in known or lower.endswith('_id') or 'code' in lower:
+            name_score -= 100
+        coverage = float(valid.notna().mean())
+        candidates.append((name_score, coverage, column))
+    if not candidates:
+        raise RuntimeError('No plausible IDR/kg price column found')
+    candidates.sort(reverse=True)
+    selected = candidates[0][2]
+    print('Selected price column:', selected, 'candidates:', candidates[:8], flush=True)
+    frame = frame.rename(columns={selected: 'price'})
+frame['price'] = pd.to_numeric(frame['price'], errors='coerce')
+frame.to_csv(path, index=False)
+print('Normalized rows:', len(frame), 'non-null price:', int(frame['price'].notna().sum()), flush=True)
+NORMALIZE'''
+if copy_line not in source:
+    raise RuntimeError("Expected copied-data line was not found")
+source = source.replace(copy_line, schema_block)
+
 exec(compile(source, str(bridge_path), "exec"), globals(), globals())
