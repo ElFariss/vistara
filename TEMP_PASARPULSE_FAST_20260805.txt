@@ -1,0 +1,1 @@
+Temporary trigger for the reduced-cost PasarPulse architecture search. Do not merge.
