@@ -1,2 +1,2 @@
 Secure bootstrap trigger for the temporary A100 PasarPulse experiment. Do not merge.
-Synchronize attempt 4: create Jupyter compatibility symlink.
+Synchronize attempt 5: launch fast A100 optimizer.
