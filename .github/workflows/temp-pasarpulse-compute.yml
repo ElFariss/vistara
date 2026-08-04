@@ -1,0 +1,56 @@
+name: Temporary PasarPulse Compute
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'TEMP_PASARPULSE_COMPUTE_20260805.txt'
+  workflow_dispatch:
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy pyarrow requests scikit-learn lightgbm catboost holidays nbformat nbconvert jupyter
+      - name: Fetch pinned optimizer
+        run: |
+          mkdir -p /tmp/pasarpulse
+          curl --fail --location --retry 5 \
+            https://raw.githubusercontent.com/ElFariss/data-science-mcp/e34672212bc77310e90f5528170f15f7a529ee14/pasarpulse_compute/pasarpulse_optimizer.py \
+            -o /tmp/pasarpulse/pasarpulse_optimizer.py
+          python -m py_compile /tmp/pasarpulse/pasarpulse_optimizer.py
+      - name: Restore PIHPS cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/pasarpulse/run/raw_pihps
+          key: pihps-province-2024-02-to-2026-07-v2
+      - name: Run optimizer
+        run: python /tmp/pasarpulse/pasarpulse_optimizer.py --workdir /tmp/pasarpulse/run
+      - name: Execute notebook
+        working-directory: /tmp/pasarpulse/run/results
+        run: |
+          jupyter nbconvert --to notebook --execute pasarpulse_proposed_optimizer.ipynb --output pasarpulse_proposed_optimizer_executed.ipynb --ExecutePreprocessor.timeout=900
+      - name: Package results
+        run: |
+          cp /tmp/pasarpulse/pasarpulse_optimizer.py /tmp/pasarpulse/run/results/
+          cd /tmp/pasarpulse/run/results
+          zip -9 -r /tmp/pasarpulse_optimizer_results.zip .
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pasarpulse-optimizer-results
+          path: /tmp/pasarpulse_optimizer_results.zip
+          if-no-files-found: error
+          retention-days: 30
