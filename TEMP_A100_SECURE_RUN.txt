@@ -1,2 +1,2 @@
 Secure bootstrap trigger for the temporary A100 PasarPulse experiment. Do not merge.
-Synchronize attempt 8: non-interrupting live progress probe.
+Synchronize attempt 9: non-interrupting live progress probe on current base.
