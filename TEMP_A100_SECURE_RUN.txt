@@ -1,2 +1,2 @@
 Secure bootstrap trigger for the temporary A100 PasarPulse experiment. Do not merge.
-Synchronize attempt 24: registered-CI launch of checkpointed 120-architecture sweep.
+Synchronize attempt 25: launch staged 120-architecture screening and confirmation sweep.
