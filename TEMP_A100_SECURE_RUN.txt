@@ -1,2 +1,2 @@
 Secure bootstrap trigger for the temporary A100 PasarPulse experiment. Do not merge.
-Synchronize attempt 15: read first GPU V2 checkpoint.
+Synchronize attempt 16: inspect GPU V2 fold 2 and CPU progress.
