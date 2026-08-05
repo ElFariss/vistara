@@ -7,6 +7,7 @@ import pandas as pd
 
 
 PREDICTION_PATH = Path("proposed_gpu_v2/results/oof_predictions.csv")
+OUTPUT_DIRECTORY = PREDICTION_PATH.parent
 EXPERTS = [
     "CAT_GPU_V2_delta",
     "CAT_GPU_V2_logratio",
@@ -87,11 +88,9 @@ def sequential_bias_predictions(frame, group_columns=None, shrinkage=20.0):
     return pd.concat(outputs, ignore_index=True)
 
 
-def chronological_grid_blend(frame):
-    pivot = expert_pivot(frame)
-    rows = []
+def blend_grid():
     grid = []
-    for delta_weight in np.arange(0.4, 1.01, 0.1):
+    for delta_weight in np.arange(0.0, 1.01, 0.1):
         remaining = round(1.0 - delta_weight, 10)
         for log_weight in np.arange(0.0, remaining + 0.001, 0.1):
             for level_weight in np.arange(0.0, remaining - log_weight + 0.001, 0.1):
@@ -102,8 +101,14 @@ def chronological_grid_blend(frame):
                     [delta_weight, log_weight, level_weight, max(0.0, last_weight)]
                 )
                 grid.append(weights / weights.sum())
-    grid = np.unique(np.round(np.asarray(grid), 8), axis=0)
+    return np.unique(np.round(np.asarray(grid), 8), axis=0)
 
+
+def chronological_grid_blend(frame):
+    pivot = expert_pivot(frame)
+    rows = []
+    grid = blend_grid()
+    anchor = np.array([0.6, 0.1, 0.0, 0.3])
     for _, horizon_frame in pivot.groupby("horizon_days", observed=True):
         horizon_frame = horizon_frame.sort_values(["fold_id", "series_id"])
         for fold_id in sorted(horizon_frame["fold_id"].unique()):
@@ -117,10 +122,7 @@ def chronological_grid_blend(frame):
                 scores = np.mean(
                     np.abs(prior_y[:, None] - prior_matrix @ grid.T), axis=0
                 )
-                regularization = 35.0 * np.sum(
-                    (grid - np.array([0.7, 0.1, 0.0, 0.2])) ** 2,
-                    axis=1,
-                )
+                regularization = 30.0 * np.sum((grid - anchor) ** 2, axis=1)
                 weights = grid[np.argmin(scores + regularization)]
             current["predicted_price"] = np.clip(
                 current[EXPERTS].to_numpy(float) @ weights, 1000.0, 500000.0
@@ -199,6 +201,60 @@ def chronological_group_selector(frame, minimum_rows=20, shrinkage=30.0):
     return pd.concat(rows, ignore_index=True)
 
 
+def chronological_group_grid_blend(frame, minimum_rows=20, shrinkage=30.0):
+    pivot = expert_pivot(frame)
+    grid = blend_grid()
+    rows = []
+    groups = ["commodity_code", "market_level"]
+    anchor = np.array([0.5, 0.1, 0.0, 0.4])
+    for _, horizon_frame in pivot.groupby("horizon_days", observed=True):
+        horizon_frame = horizon_frame.sort_values(["fold_id", "series_id"])
+        for fold_id in sorted(horizon_frame["fold_id"].unique()):
+            current = horizon_frame[horizon_frame["fold_id"] == fold_id].copy()
+            prior = horizon_frame[horizon_frame["fold_id"] < fold_id].copy()
+            if prior.empty:
+                current["predicted_price"] = current["CAT_GPU_V2_delta"]
+                current["weights"] = "1.00,0.00,0.00,0.00"
+            else:
+                prior_matrix = prior[EXPERTS].to_numpy(float)
+                prior_y = prior["actual_price"].to_numpy(float)
+                global_scores = np.mean(
+                    np.abs(prior_y[:, None] - prior_matrix @ grid.T), axis=0
+                )
+                outputs = []
+                for group_values, current_group in current.groupby(groups, observed=True):
+                    mask = np.ones(len(prior), dtype=bool)
+                    for column, value in zip(groups, group_values):
+                        mask &= prior[column].to_numpy() == value
+                    prior_group = prior.loc[mask]
+                    if len(prior_group) >= minimum_rows:
+                        local_matrix = prior_group[EXPERTS].to_numpy(float)
+                        local_y = prior_group["actual_price"].to_numpy(float)
+                        local_scores = np.mean(
+                            np.abs(local_y[:, None] - local_matrix @ grid.T), axis=0
+                        )
+                    else:
+                        local_scores = global_scores
+                    weight = len(prior_group) / (len(prior_group) + shrinkage)
+                    scores = weight * local_scores + (1.0 - weight) * global_scores
+                    scores += 20.0 * np.sum((grid - anchor) ** 2, axis=1)
+                    selected_weights = grid[np.argmin(scores)]
+                    current_group = current_group.copy()
+                    current_group["predicted_price"] = np.clip(
+                        current_group[EXPERTS].to_numpy(float) @ selected_weights,
+                        1000.0,
+                        500000.0,
+                    )
+                    current_group["weights"] = ",".join(
+                        f"{value:.2f}" for value in selected_weights
+                    )
+                    outputs.append(current_group)
+                current = pd.concat(outputs, ignore_index=True)
+            current["model"] = "CHRONOLOGICAL_COMMODITY_MARKET_GRID_BLEND"
+            rows.append(current)
+    return pd.concat(rows, ignore_index=True)
+
+
 def summarize(frame, label):
     rows = []
     for (model, horizon), group in frame.groupby(
@@ -226,6 +282,7 @@ def main():
         return
     frame = pd.read_csv(PREDICTION_PATH)
     summaries = [summarize(frame, "raw")]
+    postprocessed = []
 
     global_calibrated = sequential_bias_predictions(frame).rename(
         columns={"predicted_price": "raw_prediction"}
@@ -250,13 +307,26 @@ def main():
             chronological_group_selector(frame),
             "chronological_commodity_market_selector",
         ),
+        (
+            chronological_group_grid_blend(frame),
+            "chronological_commodity_market_grid",
+        ),
     ]
     for candidate, label in candidates:
+        candidate = candidate.copy()
+        candidate["candidate"] = label
         summaries.append(summarize(candidate, label))
+        postprocessed.append(candidate)
 
     summary = pd.concat(summaries, ignore_index=True).sort_values(
         ["horizon_days", "mae", "candidate", "model"]
     )
+    summary.to_csv(OUTPUT_DIRECTORY / "postprocessing_metrics.csv", index=False)
+    if postprocessed:
+        pd.concat(postprocessed, ignore_index=True).to_csv(
+            OUTPUT_DIRECTORY / "postprocessed_predictions.csv", index=False
+        )
+
     print("=== Leakage-safe post-processing diagnostics ===")
     print(summary.to_string(index=False))
 
@@ -279,6 +349,7 @@ def main():
     per_fold = pd.DataFrame(per_fold_rows).sort_values(
         ["horizon_days", "fold_id", "mae"]
     )
+    per_fold.to_csv(OUTPUT_DIRECTORY / "per_fold_raw_metrics.csv", index=False)
     print(per_fold.to_string(index=False))
 
 
