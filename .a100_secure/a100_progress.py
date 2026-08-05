@@ -87,5 +87,31 @@ if [ -f proposed_gpu_v2/results/pooled_metrics.csv ]; then
   echo '=== GPU V2 final pooled table ==='
   cat proposed_gpu_v2/results/pooled_metrics.csv
 fi
+if [ -f proposed_gpu_v2/DONE ]; then
+  echo '=== Packaging completed GPU V2 benchmark ==='
+  python TEMP_analyze_gpu_partial.py > proposed_gpu_v2/results/leakage_safe_diagnostics.txt 2>&1 || true
+  rm -f a100_pasarpulse_gpu_v2_results.zip
+  zip -9 -j a100_pasarpulse_gpu_v2_results.zip \
+    proposed_gpu_v2/results/pooled_metrics.csv \
+    proposed_gpu_v2/results/fold_metrics.csv \
+    proposed_gpu_v2/results/oof_predictions.csv \
+    proposed_gpu_v2/results/adaptive_weights.csv \
+    proposed_gpu_v2/results/feature_importance.csv \
+    proposed_gpu_v2/results/runtime_seconds.txt \
+    proposed_gpu_v2/results/leakage_safe_diagnostics.txt \
+    proposed_gpu_v2/a100_gpu_v2.log
+fi
 """
-raise SystemExit(client.execute_bash(command))
+return_code = client.execute_bash(command)
+if return_code != 0:
+    raise SystemExit(return_code)
+
+try:
+    client.download_file(
+        f"{module.REMOTE_REL}/a100_pasarpulse_gpu_v2_results.zip",
+        Path("/tmp/a100_pasarpulse_gpu_v2_results.zip"),
+    )
+except RuntimeError as exc:
+    if "404" not in str(exc) and "not found" not in str(exc).lower():
+        raise
+    print("GPU V2 final bundle is not ready yet.", flush=True)
