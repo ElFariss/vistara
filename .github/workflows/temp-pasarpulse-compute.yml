@@ -49,3 +49,11 @@ jobs:
 
       - name: Check live A100 optimizer progress
         run: python .a100_secure/a100_progress.py
+
+      - name: Upload completed GPU V2 bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: a100-pasarpulse-gpu-v2-results
+          path: /tmp/a100_pasarpulse_gpu_v2_results.zip
+          if-no-files-found: ignore
+          retention-days: 30
