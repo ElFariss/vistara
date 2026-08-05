@@ -58,7 +58,7 @@ jobs:
         run: git diff --check
 
   a100-sweep:
-    if: github.event_name == 'push'
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
