@@ -1,6 +1,6 @@
 Uploaded pasarpulse_sweep50.py -> adit/datathon-semi/pasarpulse_data_pipeline_v6/TEMP_pasarpulse_sweep50.py
 === sweep environment ===
-2026-08-05T09:44:26+00:00
+2026-08-05T09:45:50+00:00
 NVIDIA A100-SXM4-80GB, 81251 MiB, 4042 MiB, 77209 MiB, 0 %
 catboost 1.2.8
 xgboost MISSING ModuleNotFoundError("No module named 'xgboost'")
@@ -10,7 +10,6 @@ pyarrow 20.0.0
 catalog_size 120
 === launching detached 120-architecture sweep ===
 === active sweep process ===
- 826316       00:08 97.2  0.0 python TEMP_pasarpulse_sweep50.py --core TEMP_pasarpulse_optimizer.py --panel proposed_model_run/panel_features.parquet --root /home/nafisnaufal1426/adit/datathon-semi/pasarpulse_data_pipeline_v6 --outdir architecture_sweep_50/results
 === checkpoint inventory ===
 variant_catalog.csv missing
 evaluations.csv missing
