@@ -1,2 +1,3 @@
 Temporary main-branch trigger for the patched A100 architecture sweep.
-Run: 2026-08-05T16:49+07:00
+Run: 2026-08-05T16:52+07:00
+Probe: dependency-safe-v2
