@@ -1,2 +1,2 @@
 Secure bootstrap trigger for the temporary A100 PasarPulse experiment. Do not merge.
-Synchronize attempt 21: inspect 14-day GPU progress and CPU completion.
+Synchronize attempt 22: run registered-CI prior-fold meta optimizer.
