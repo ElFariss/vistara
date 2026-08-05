@@ -15,6 +15,10 @@ client.upload_file(
     Path(".a100_secure/pasarpulse_cat_gpu_v2.py"),
     f"{module.REMOTE_REL}/TEMP_pasarpulse_cat_gpu_v2.py",
 )
+client.upload_file(
+    Path(".a100_secure/analyze_gpu_partial.py"),
+    f"{module.REMOTE_REL}/TEMP_analyze_gpu_partial.py",
+)
 
 command = f"""set -u
 cd {module.REMOTE_ROOT}
@@ -76,6 +80,8 @@ find proposed_gpu_v2/results -maxdepth 1 -type f -printf '%f %s bytes\n' 2>/dev/
 if [ -f proposed_gpu_v2/results/pooled_metrics_partial.csv ]; then
   echo '=== GPU V2 partial pooled table ==='
   cat proposed_gpu_v2/results/pooled_metrics_partial.csv
+  echo '=== GPU V2 leakage-safe calibration diagnostics ==='
+  python TEMP_analyze_gpu_partial.py || true
 fi
 if [ -f proposed_gpu_v2/results/pooled_metrics.csv ]; then
   echo '=== GPU V2 final pooled table ==='
