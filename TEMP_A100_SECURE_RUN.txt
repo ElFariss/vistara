@@ -1,2 +1,2 @@
 Secure bootstrap trigger for the temporary A100 PasarPulse experiment. Do not merge.
-Synchronize attempt 12: launch GPU-native CatBoost benchmark.
+Synchronize attempt 13: inspect CPU fold 5 and checkpointed GPU V2.
