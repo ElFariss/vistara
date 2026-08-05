@@ -1,2 +1,2 @@
 Secure bootstrap trigger for the temporary A100 PasarPulse experiment. Do not merge.
-Synchronize attempt 19: inspect completed 7-day GPU fold sequence.
+Synchronize attempt 20: inspect final 7-day metrics and 14-day start.
