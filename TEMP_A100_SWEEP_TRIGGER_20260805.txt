@@ -1,0 +1,1 @@
+Temporary trigger placeholder; this file will be moved to an isolated branch.
