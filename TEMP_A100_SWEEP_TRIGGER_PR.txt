@@ -1,1 +1,2 @@
-Temporary sweep trigger seed.
+Temporary trigger for the registered CI A100 architecture sweep.
+Run: 2026-08-05T16:37+07:00
