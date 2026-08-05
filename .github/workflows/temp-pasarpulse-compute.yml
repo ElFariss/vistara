@@ -14,7 +14,7 @@ permissions:
 jobs:
   secure-a100:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -49,6 +49,9 @@ jobs:
 
       - name: Check live A100 optimizer progress
         run: python .a100_secure/a100_progress.py
+
+      - name: Run prior-fold-only meta optimization
+        run: python .a100_secure/a100_meta_probe.py
 
       - name: Upload completed GPU V2 bundle
         uses: actions/upload-artifact@v4
