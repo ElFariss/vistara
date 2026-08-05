@@ -1,4 +1,4 @@
-name: Temporary A100 Progress Probe
+name: Temporary A100 PasarPulse Architecture Sweep
 
 on:
   pull_request:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  secure-a100:
+  sweep-probe:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -47,16 +47,13 @@ jobs:
       - name: Install bridge dependency
         run: python -m pip install --quiet websocket-client
 
-      - name: Check live A100 optimizer progress
-        run: python .a100_secure/a100_progress.py
+      - name: Launch or inspect 120-architecture A100 sweep
+        run: python .a100_secure/a100_sweep50_probe.py
 
-      - name: Run prior-fold-only meta optimization
-        run: python .a100_secure/a100_meta_probe.py
-
-      - name: Upload completed GPU V2 bundle
+      - name: Upload completed sweep bundle
         uses: actions/upload-artifact@v4
         with:
-          name: a100-pasarpulse-gpu-v2-results
-          path: /tmp/a100_pasarpulse_gpu_v2_results.zip
+          name: pasarpulse-sweep50-results
+          path: /tmp/pasarpulse_sweep50_results.zip
           if-no-files-found: ignore
           retention-days: 30
