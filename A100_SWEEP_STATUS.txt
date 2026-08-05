@@ -1,0 +1,29 @@
+Uploaded pasarpulse_sweep50.py -> adit/datathon-semi/pasarpulse_data_pipeline_v6/TEMP_pasarpulse_sweep50.py
+=== sweep environment ===
+2026-08-05T06:19:28+00:00
+NVIDIA A100-SXM4-80GB, 81251 MiB, 4042 MiB, 77209 MiB, 0 %
+catboost 1.2.8
+xgboost MISSING ModuleNotFoundError("No module named 'xgboost'")
+lightgbm 4.6.0
+pandas 1.5.3
+pyarrow 20.0.0
+catalog_size 120
+=== active sweep process ===
+ 807027       00:10 68.3  0.0 python TEMP_pasarpulse_sweep50.py --core TEMP_pasarpulse_optimizer.py --panel proposed_model_run/panel_features.parquet --root /home/nafisnaufal1426/adit/datathon-semi/pasarpulse_data_pipeline_v6 --outdir architecture_sweep_50/results
+=== checkpoint inventory ===
+variant_catalog.csv missing
+evaluations.csv missing
+predictions.csv missing
+phase1_ranking.csv missing
+phase2_dev_ranking.csv missing
+phase3_holdout_ranking.csv missing
+final_variant_metrics.csv missing
+ensemble_holdout_metrics.csv missing
+best_model_summary.json missing
+=== latest sweep log ===
+Production source: /home/nafisnaufal1426/adit/datathon-semi/pasarpulse_data_pipeline_v6/data/processed/production_annual.csv; columns=['year', 'province_code', 'province_name', 'commodity_code', 'commodity_name', 'production_quintal', 'source_column_production', 'source_url_production', 'extracted_at_utc_production', 'province_mapping_status', 'production_kg', 'harvested_area_ha', 'source_column_area', 'source_url_area', 'extracted_at_utc_area', 'productivity_kg_per_ha', 'production_available', 'harvested_area_available', 'quality_flag']
+Geo centroids loaded from /home/nafisnaufal1426/adit/datathon-semi/pasarpulse_data_pipeline_v6/data/reference/indonesia_provinces.geojson: 34 provinces
+
+[remote exit code: 0]
+Sweep result archive is not ready yet.
+probe_exit_code=0
