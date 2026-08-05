@@ -103,7 +103,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          python .a100_secure/a100_sweep50_probe.py 2>&1 | tee /tmp/A100_SWEEP_STATUS.txt
+          python .a100_secure/a100_sweep50_probe_v2.py 2>&1 | tee /tmp/A100_SWEEP_STATUS.txt
           code=${PIPESTATUS[0]}
           echo "probe_exit_code=$code" | tee -a /tmp/A100_SWEEP_STATUS.txt
           exit 0
