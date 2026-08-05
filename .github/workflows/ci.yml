@@ -58,14 +58,16 @@ jobs:
         run: git diff --check
 
   a100-sweep:
-    if: github.event_name == 'pull_request' && github.event.pull_request.number == 16
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: read
+      contents: write
     steps:
-      - name: Checkout
+      - name: Checkout isolated sweep branch
         uses: actions/checkout@v4
+        with:
+          ref: temp-a100-secure-20260805
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -98,7 +100,59 @@ jobs:
         run: python -m pip install --quiet websocket-client
 
       - name: Launch or inspect 120-architecture A100 sweep
-        run: python .a100_secure/a100_sweep50_probe.py
+        shell: bash
+        run: |
+          set +e
+          python .a100_secure/a100_sweep50_probe.py 2>&1 | tee /tmp/A100_SWEEP_STATUS.txt
+          code=${PIPESTATUS[0]}
+          echo "probe_exit_code=$code" | tee -a /tmp/A100_SWEEP_STATUS.txt
+          exit 0
+
+      - name: Publish sweep status snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          repo = os.environ['GITHUB_REPOSITORY']
+          branch = 'temp-a100-secure-20260805'
+          path = 'A100_SWEEP_STATUS.txt'
+          api = f'https://api.github.com/repos/{repo}/contents/{path}'
+          headers = {
+              'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+              'Accept': 'application/vnd.github+json',
+              'Content-Type': 'application/json',
+          }
+          sha = None
+          try:
+              request = urllib.request.Request(f'{api}?ref={branch}', headers=headers)
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  sha = json.loads(response.read())['sha']
+          except urllib.error.HTTPError as exc:
+              if exc.code != 404:
+                  raise
+          payload = {
+              'message': 'Update A100 architecture sweep status',
+              'branch': branch,
+              'content': base64.b64encode(Path('/tmp/A100_SWEEP_STATUS.txt').read_bytes()).decode(),
+          }
+          if sha:
+              payload['sha'] = sha
+          request = urllib.request.Request(
+              api,
+              data=json.dumps(payload).encode(),
+              headers=headers,
+              method='PUT',
+          )
+          urllib.request.urlopen(request, timeout=30).read()
+          PY
 
       - name: Upload completed sweep bundle
         uses: actions/upload-artifact@v4
