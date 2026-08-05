@@ -114,7 +114,7 @@ sktime 0.34.0 requires numpy<2.2,>=1.21, but you have numpy 2.2.6 which is incom
 [1m[[0m[34;49mnotice[0m[1;39;49m][0m[39;49m A new release of pip is available: [0m[31;49m26.1.1[0m[39;49m -> [0m[32;49m26.2.1[0m
 [1m[[0m[34;49mnotice[0m[1;39;49m][0m[39;49m To update, run: [0m[32;49mpip install --upgrade pip[0m
 === sweep environment ===
-2026-08-05T09:53:51+00:00
+2026-08-05T09:55:48+00:00
 NVIDIA A100-SXM4-80GB, 81251 MiB, 4042 MiB, 77209 MiB, 0 %
 catboost MISSING ValueError('numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, got 88 from PyObject')
 xgboost MISSING ValueError('numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, got 88 from PyObject')
