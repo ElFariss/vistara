@@ -1,1 +1,2 @@
-Temporary trigger placeholder; this file will be moved to an isolated branch.
+Temporary main-branch trigger for the patched A100 architecture sweep.
+Run: 2026-08-05T16:49+07:00
